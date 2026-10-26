@@ -1,0 +1,99 @@
+// Dibuat oleh ipad_build.py (jangan diedit tangan). Menyimpan semua berkas supaya app jalan tanpa internet; versi baru menunggu sampai pengguna menekan Muat ulang.
+const VERSION = "9bb69fa618"
+const CACHE = "ymd-ipad-" + VERSION
+const FILES = [
+ "./",
+ "assets/flowd_10_cloud.svg",
+ "assets/flowd_10_cloud_en.svg",
+ "assets/flowd_10_dark.svg",
+ "assets/flowd_10_dark_en.svg",
+ "assets/flowd_11_cloud.svg",
+ "assets/flowd_11_cloud_en.svg",
+ "assets/flowd_11_dark.svg",
+ "assets/flowd_11_dark_en.svg",
+ "assets/flowd_12_cloud.svg",
+ "assets/flowd_12_cloud_en.svg",
+ "assets/flowd_12_dark.svg",
+ "assets/flowd_12_dark_en.svg",
+ "assets/flowd_1_cloud.svg",
+ "assets/flowd_1_cloud_en.svg",
+ "assets/flowd_1_dark.svg",
+ "assets/flowd_1_dark_en.svg",
+ "assets/flowd_2_cloud.svg",
+ "assets/flowd_2_cloud_en.svg",
+ "assets/flowd_2_dark.svg",
+ "assets/flowd_2_dark_en.svg",
+ "assets/flowd_3_cloud.svg",
+ "assets/flowd_3_cloud_en.svg",
+ "assets/flowd_3_dark.svg",
+ "assets/flowd_3_dark_en.svg",
+ "assets/flowd_4_cloud.svg",
+ "assets/flowd_4_cloud_en.svg",
+ "assets/flowd_4_dark.svg",
+ "assets/flowd_4_dark_en.svg",
+ "assets/flowd_5_cloud.svg",
+ "assets/flowd_5_cloud_en.svg",
+ "assets/flowd_5_dark.svg",
+ "assets/flowd_5_dark_en.svg",
+ "assets/flowd_6_cloud.svg",
+ "assets/flowd_6_cloud_en.svg",
+ "assets/flowd_6_dark.svg",
+ "assets/flowd_6_dark_en.svg",
+ "assets/flowd_7_cloud.svg",
+ "assets/flowd_7_cloud_en.svg",
+ "assets/flowd_7_dark.svg",
+ "assets/flowd_7_dark_en.svg",
+ "assets/flowd_8_cloud.svg",
+ "assets/flowd_8_cloud_en.svg",
+ "assets/flowd_8_dark.svg",
+ "assets/flowd_8_dark_en.svg",
+ "assets/flowd_9_cloud.svg",
+ "assets/flowd_9_cloud_en.svg",
+ "assets/flowd_9_dark.svg",
+ "assets/flowd_9_dark_en.svg",
+ "assets/hero_cloud.svg",
+ "assets/hero_cloud_en.svg",
+ "assets/hero_dark.svg",
+ "assets/hero_dark_en.svg",
+ "assets/pfd_cloud.svg",
+ "assets/pfd_cloud_en.svg",
+ "assets/pfd_dark.svg",
+ "assets/pfd_dark_en.svg",
+ "assets/pid1_cloud.svg",
+ "assets/pid1_cloud_en.svg",
+ "assets/pid1_dark.svg",
+ "assets/pid1_dark_en.svg",
+ "assets/pid2_cloud.svg",
+ "assets/pid2_cloud_en.svg",
+ "assets/pid2_dark.svg",
+ "assets/pid2_dark_en.svg",
+ "css/app.css",
+ "css/flow.css",
+ "data/en_penurunan.json",
+ "data/flow_en_cloud.json",
+ "data/flow_en_dark.json",
+ "data/flow_id_cloud.json",
+ "data/flow_id_dark.json",
+ "icons/apple-touch-icon.png",
+ "icons/icon-192.png",
+ "icons/icon-512.png",
+ "index.html",
+ "js/app.js",
+ "js/flow.js",
+ "js/penurunan.js",
+ "js/penurunan_ui.js",
+ "manifest.webmanifest"
+]
+
+self.addEventListener("install", (e) => {
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)))
+})
+self.addEventListener("message", (e) => { if (e.data && e.data.type === "skip") self.skipWaiting() })
+self.addEventListener("activate", (e) => {
+  e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k.startsWith("ymd-ipad-") && k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()))
+})
+self.addEventListener("fetch", (e) => {
+  const req = e.request
+  if (req.method !== "GET") return
+  e.respondWith(caches.match(req, { ignoreSearch: true }).then((hit) => hit || fetch(req).catch(() => (req.mode === "navigate" ? caches.match("./index.html") : Response.error()))))
+})
