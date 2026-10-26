@@ -1,5 +1,5 @@
 // Dibuat oleh ipad_build.py (jangan diedit tangan). Menyimpan semua berkas supaya app jalan tanpa internet; versi baru menunggu sampai pengguna menekan Muat ulang.
-const VERSION = "9bb69fa618"
+const VERSION = "5daac74c00"
 const CACHE = "ymd-ipad-" + VERSION
 const FILES = [
  "./",
@@ -69,6 +69,7 @@ const FILES = [
  "assets/pid2_dark_en.svg",
  "css/app.css",
  "css/flow.css",
+ "data/en_fondasi.json",
  "data/en_penurunan.json",
  "data/flow_en_cloud.json",
  "data/flow_en_dark.json",
@@ -80,6 +81,10 @@ const FILES = [
  "index.html",
  "js/app.js",
  "js/flow.js",
+ "js/fmt.js",
+ "js/fondasi.js",
+ "js/fondasi_ui.js",
+ "js/kit.js",
  "js/penurunan.js",
  "js/penurunan_ui.js",
  "manifest.webmanifest"

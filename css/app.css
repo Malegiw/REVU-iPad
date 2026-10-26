@@ -92,6 +92,7 @@ th { background: var(--field); font-size: .82rem; white-space: nowrap; }
 .ch-tx { fill: var(--ink); font-size: 11px; } .ch-lb { fill: var(--ink); font-size: 12px; font-weight: 600; }
 .err { background: rgba(180,35,24,.12); border: 1px solid var(--bad); color: var(--ink); border-radius: 14px; padding: 12px 16px; margin: 12px 0; }
 .warn { background: var(--warnbg); color: var(--warnink); border-radius: 14px; padding: 12px 16px; margin: 10px 0; }
+.note { background: var(--field); border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px; margin: 10px 0; }
 .info p, .info li { max-width: 78ch; } .intro { max-width: 80ch; }
 .toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #27323F; color: #fff; padding: 12px 18px; border-radius: 14px; z-index: 50; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
 .toast button { margin-left: 12px; min-height: 36px; background: var(--gold); color: #1F2430; border: 0; padding: 0 12px; }

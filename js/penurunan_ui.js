@@ -72,14 +72,15 @@ export function mountPenurunan(root, ctx) {
     const inp = el("input"); inp.type = "text"; inp.inputMode = "decimal"; inp.autocomplete = "off"; inp.disabled = !!o.disabled
     const [get, set] = getSet
     inp.value = String(get())
+    let committed = get()                              // nilai saat terakhir selesai mengetik: pembanding untuk o.struct
     const rng = el("span", "rg", `${fmtG(o.lo)} – ${fmtG(o.hi)}`)
-    inp.addEventListener("input", () => { const v = parseNum(inp.value); const okv = !isNaN(v) && v >= o.lo && v <= o.hi; inp.classList.toggle("bad", !okv); if (okv) { set(v); after(o.struct) } })
+    inp.addEventListener("input", () => { const v = parseNum(inp.value); const okv = !isNaN(v) && v >= o.lo && v <= o.hi; inp.classList.toggle("bad", !okv); if (okv) { set(v); after(false) } })       // bentuk formulir baru digambar ulang saat selesai mengetik (change), supaya kursor tidak hilang
     inp.addEventListener("change", () => {
       let v = parseNum(inp.value)
       if (isNaN(v)) v = get()
       v = Math.min(o.hi, Math.max(o.lo, v)); inp.value = String(v); inp.classList.remove("bad")
-      const was = get(); set(v)
-      after(o.struct && (o.struct === true || o.struct(was, v)))
+      const was = committed; set(v); committed = v
+      after(!!o.struct && (o.struct === true || o.struct(was, v)))
     })
     w.append(inp)
     if (o.help) { w.title = t(o.help); w.append(el("span", "hp", t(o.help))) } else w.append(rng)

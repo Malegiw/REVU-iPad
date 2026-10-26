@@ -11,8 +11,8 @@ let lang = store.get("ymd.lang", (navigator.language || "id").startsWith("en") ?
 const EN = {}                                   // terjemahan antarmuka alat, dimuat dari data/en_<alat>.json
 const SHELL = {
   sub: { id: "Kalkulator & referensi · offline", en: "Calculators & reference · offline" },
-  home: { id: "Beranda", en: "Home" }, penurunan: { id: "Penurunan Pondasi", en: "Foundation Settlement" }, alur: { id: "Alur Produksi Migas", en: "Oil & Gas Production Flow" },
-  nHome: { id: "Beranda", en: "Home" }, nPenurunan: { id: "Penurunan", en: "Settlement" }, nAlur: { id: "Alur Migas", en: "Oil & Gas Flow" },
+  home: { id: "Beranda", en: "Home" }, penurunan: { id: "Penurunan Pondasi", en: "Foundation Settlement" }, fondasi: { id: "Pondasi Tangki & Peralatan", en: "Tank & Equipment Foundations" }, alur: { id: "Alur Produksi Migas", en: "Oil & Gas Production Flow" },
+  nHome: { id: "Beranda", en: "Home" }, nPenurunan: { id: "Penurunan", en: "Settlement" }, nFondasi: { id: "Pondasi", en: "Foundations" }, nAlur: { id: "Alur Migas", en: "Oil & Gas Flow" },
   open: { id: "Buka", en: "Open" }, soon: { id: "Segera", en: "Soon" },
   homeTitle: { id: "Kalkulator dan referensi untuk reviewer teknik sipil", en: "Calculators and reference for civil engineering reviewers" },
   homeLead: {
@@ -20,9 +20,10 @@ const SHELL = {
     en: "Independent cross-checks that run entirely on this iPad, with no internet and no Mac. Use them to check calculations under review; they do not replace geotechnical or structural design. Default values are examples only.",
   },
   penDesc: { id: "Penurunan segera, konsolidasi primer dan sekunder, serta kecepatan penurunan pondasi dangkal.", en: "Immediate settlement, primary and secondary consolidation, and rate of settlement of shallow foundations." },
+  fondasiDesc: { id: "Pondasi dangkal peralatan (tekanan dasar, guling, geser, daya dukung), pondasi mesin berputar, dan pondasi tangki (ringwall, penurunan, angin).", en: "Shallow equipment foundations (base pressure, overturning, sliding, bearing), rotating-machine foundations and tank foundations (ringwall, settlement, wind)." },
   alurDesc: { id: "Alur minyak dan gas dari sumur sampai gathering station, lengkap dengan PFD, P&ID, dan animasi cara kerja tiap alat.", en: "Oil and gas flow from the well to the gathering station, with PFD, P&IDs and animations of how each item works." },
   moreTitle: { id: "Kalkulator lain menyusul", en: "More calculators coming" },
-  moreText: { id: "Pondasi tangki & peralatan, saluran & gorong-gorong, stabilitas lereng, dan dinding penahan tanah sedang disiapkan untuk versi offline ini.", en: "Tank & equipment foundations, channels & culverts, slope stability and retaining walls are being prepared for this offline version." },
+  moreText: { id: "Saluran & gorong-gorong, stabilitas lereng, dan dinding penahan tanah sedang disiapkan untuk versi offline ini.", en: "Channels & culverts, slope stability and retaining walls are being prepared for this offline version." },
   installTitle: { id: "Pasang sebagai app di iPad", en: "Install as an app on your iPad" },
   install: {
     id: ["Buka alamat ini di Safari (sekali, dengan internet).", "Ketuk tombol Bagikan, lalu Tambah ke Layar Utama.", "Sejak itu app terbuka dari ikon di layar utama, layar penuh, dan jalan tanpa internet."],
@@ -48,7 +49,7 @@ function applyTheme() {
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (theme === "auto") { applyTheme(); route() } })
 
 // ---------------------------------------------------------------- rute
-const ROUTES = ["home", "penurunan", "alur"]
+const ROUTES = ["home", "penurunan", "fondasi", "alur"]
 const current = () => { const r = (location.hash.replace(/^#\/?/, "") || "home"); return ROUTES.includes(r) ? r : "home" }
 let token = 0
 
@@ -81,6 +82,14 @@ async function route() {
       const h = el("h1", null, S("penurunan")); const box = el("div")
       app.append(h, box, el("p", "cap", S("disc")))
       mod.mountPenurunan(box, { t, lang })
+    } else if (r === "fondasi") {
+      await loadEN("fondasi")
+      const mod = await import("./fondasi_ui.js")
+      if (my !== token) return
+      app.textContent = ""
+      const h = el("h1", null, S("fondasi")); const box = el("div")
+      app.append(h, box, el("p", "cap", S("disc")))
+      mod.mountFondasi(box, { t, lang })
     } else if (r === "alur") {
       const data = await (await fetch(`data/flow_${lang}_${dark() ? "dark" : "cloud"}.json`)).json()
       const mod = await import("./flow.js")
@@ -100,7 +109,7 @@ function home(app) {
   c.append(el("h1", null, S("homeTitle")), el("p", null, S("homeLead")))
   const cards = el("div", "cards")
   const tool = (r, desc) => { const a = el("a", "card tool"); a.href = "#/" + r; a.append(el("b", null, S(r)), el("span", "hint", desc), el("span", "btn go", S("open"))); return a }
-  cards.append(tool("penurunan", S("penDesc")), tool("alur", S("alurDesc")))
+  cards.append(tool("penurunan", S("penDesc")), tool("fondasi", S("fondasiDesc")), tool("alur", S("alurDesc")))
   const more = el("div", "card tool soon"); more.append(el("b", null, S("moreTitle")), el("span", "hint", S("moreText")))
   cards.append(more)
   const ins = el("section", "card"); ins.append(el("h3", null, S("installTitle")))

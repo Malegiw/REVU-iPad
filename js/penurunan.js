@@ -3,6 +3,9 @@
 // (diuji dengan tests/run.html terhadap hasil Python). Satuan: kN, m, kPa, kN/m3, tahun (cv dalam m2/tahun); penurunan dalam meter.
 // Pembanding independen saat mereview perhitungan penurunan; bukan pengganti perhitungan geoteknik.
 
+import { fixed, fmtG } from "./fmt.js"
+export { fixed, fmtG }
+
 export const GAMMA_W = 9.81
 export const RIGIDITY = { fleksibel_tengah: 1.0, fleksibel_rata: 0.85, kaku: 0.93 }
 
@@ -138,31 +141,6 @@ export function tvOfU(u) {
 
 export const TV99 = tvOfU(0.99)
 const TV50 = tvOfU(0.5), TV90 = tvOfU(0.9)
-
-// Pemformat setara f"{x:g}" Python (6 angka penting, tanpa nol di belakang)
-export function fmtG(x) {
-  if (!isFinite(x)) return String(x)
-  if (x === 0) return "0"
-  const e = Math.floor(Math.log10(Math.abs(x)))
-  if (e < -4 || e >= 6) {
-    let s = x.toExponential(5).replace(/\.?0+e/, "e")
-    return s.replace(/e([+-])(\d)$/, "e$10$2")
-  }
-  return String(parseFloat(x.toPrecision(6)))
-}
-
-// Pembulatan seperti f"{x:.{d}f}" Python: nilai persis di tengah dibulatkan ke angka genap (toFixed JavaScript membulatkan ke atas)
-export function fixed(x, d) {
-  if (!isFinite(x)) return String(x)
-  const full = Math.abs(x).toFixed(d + 30)
-  const dot = full.indexOf(".")
-  if (/^50*$/.test(full.slice(dot + 1 + d))) {
-    const head = full.slice(0, dot + 1 + d).replace(/\.$/, "")
-    const lastDigit = Number(head.replace(".", "").slice(-1))
-    if (lastDigit % 2 === 0) return (x < 0 ? "-" : "") + head
-  }
-  return x.toFixed(d)
-}
 
 const f1 = (x) => fixed(x, 1)
 
