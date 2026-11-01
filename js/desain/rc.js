@@ -1,5 +1,7 @@
-// Beton bertulang: SNI 2847:2019 (= ACI 318M-14). Satuan: mm, MPa, N kecuali disebut lain (momen kN·m, gaya kN di antarmuka fungsi).
-import { barA, BARS } from "./core.js"
+// Beton bertulang: ACI 318-19 (default) atau SNI 2847:2019 (= ACI 318M-14) sesuai CODE.aci. Satuan: mm, MPa, N kecuali disebut lain
+// (momen kN·m, gaya kN di antarmuka fungsi). Perbedaan yang dihitung: geser satu arah (Tabel 22.5.5.1 dengan λs & ρw), faktor ukuran λs pada
+// geser dua arah (Tabel 22.6.5.2), panjang penyaluran kait (§25.4.3.1).
+import { barA, BARS, CODE } from "./core.js"
 
 export const ES = 200000
 export const beta1 = (fc) => (fc <= 28 ? 0.85 : Math.max(0.65, 0.85 - 0.05 * (fc - 28) / 7))
@@ -41,9 +43,14 @@ export function pickBars(AsReq, smax, pref = 16) {
 }
 
 // ---------------------------------------------------------------- geser
-export const vcOne = (fc, lam = 1) => 0.17 * lam * sqfc(fc)                                       // §22.5.5.1 (MPa)
-// §22.6.5.2 geser dua arah (MPa): β = sisi panjang/pendek kolom, αs = 40 dalam / 30 tepi / 20 sudut
-export const vcTwo = (fc, beta, as, b0, d, lam = 1) => Math.min(0.33, 0.17 * (1 + 2 / beta), 0.083 * (as * d / b0 + 2)) * lam * sqfc(fc)
+// faktor ukuran ACI 318-19 §22.5.5.1.3: λs = √(2/(1 + 0,004d)) ≤ 1 (d dalam mm)
+export const lamS = (d) => Math.min(1, Math.sqrt(2 / (1 + 0.004 * d)))
+// Geser satu arah vc (MPa). ACI 318-19 Tabel 22.5.5.1(c) untuk pelat/telapak tanpa Av,min: 0,66·λs·λ·ρw^(1/3)·√fc' ≤ 0,42λ√fc';
+// ACI 318-14 §22.5.5.1: 0,17λ√fc'. ρw = As tarik/(b·d), d mm (bila tidak diberi: rumus 318-14).
+export const vcOne = (fc, lam = 1, rho = null, d = null) => (CODE.aci !== "14" && rho != null && d != null
+  ? Math.min(0.66 * lamS(d) * lam * Math.cbrt(Math.max(rho, 0)) * sqfc(fc), 0.42 * lam * sqfc(fc)) : 0.17 * lam * sqfc(fc))
+// Geser dua arah vc (MPa), Tabel 22.6.5.2: β = sisi panjang/pendek kolom, αs = 40 dalam / 30 tepi / 20 sudut; ACI 318-19 dikali λs (tanpa tulangan geser)
+export const vcTwo = (fc, beta, as, b0, d, lam = 1) => Math.min(0.33, 0.17 * (1 + 2 / beta), 0.083 * (as * d / b0 + 2)) * lam * sqfc(fc) * (CODE.aci !== "14" ? lamS(d) : 1)
 // Fraksi momen tak seimbang yang dipikul geser (§8.4.4.2): γv = 1 − 1/(1 + (2/3)√(b1/b2))
 export const gammaV = (b1, b2) => 1 - 1 / (1 + 2 / 3 * Math.sqrt(b1 / b2))
 // Jc penampang kritis kolom dalam (b1 searah momen)
@@ -55,7 +62,14 @@ export function ld(db, fy, fc, o = {}) {
   const v = fy * psi / ((db <= 19 ? 2.1 : 1.7) * lam * sqfc(fc)) * db
   return Math.max(v, 300)
 }
+// Panjang penyaluran kait standar. ACI 318-14 §25.4.3.1: 0,24·fy·ψe·ψc·ψr/(λ√fc')·db (ψc = 0,7 selimut cukup).
+// ACI 318-19 §25.4.3.1: (fy·ψe·ψr·ψo·ψc/(23λ√fc'))·db^1,5 dengan ψr = 1,6 (tanpa tulangan pengekang), ψo = 1,0, ψc = fc'/105 + 0,6 (fc' < 40 MPa).
 export function ldh(db, fy, fc, o = {}) {
+  if (CODE.aci !== "14") {
+    const psiC = fc < 40 ? fc / 105 + 0.6 : 1.0
+    const v = fy * (o.psiE ?? 1) * (o.psiR19 ?? 1.6) * (o.psiO ?? 1.0) * psiC / (23 * (o.lam ?? 1) * sqfc(fc)) * Math.pow(db, 1.5)
+    return Math.max(v, 8 * db, 150)
+  }
   const v = 0.24 * fy * (o.psiE ?? 1) * (o.psiC ?? 0.7) * (o.psiR ?? 1) / ((o.lam ?? 1) * sqfc(fc)) * db
   return Math.max(v, 8 * db, 150)
 }

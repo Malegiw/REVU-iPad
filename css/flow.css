@@ -86,3 +86,29 @@
 @media (max-width:560px){.ymd-flow .dot{width:18px;height:18px;font-size:9.5px;border-width:2px}.ymd-flow .dot.on::after{inset:-5px}.ymd-flow .grp b{flex:1 1 100%}.ymd-flow .chip{width:32px;height:32px}.ymd-flow .stage{margin:4px 8px 0}}
 @media (pointer:coarse){.ymd-flow .dot::before{content:"";position:absolute;inset:-9px}.ymd-flow .chip{width:44px;height:44px}.ymd-flow .tour,.ymd-flow .nav,.ymd-flow .calc button{min-height:44px}}
 @media (prefers-reduced-motion:reduce){.ymd-flow .hl,.ymd-flow .panel,.ymd-flow .dot,.ymd-flow .chip{animation:none !important;transition:none !important}.ymd-flow .dot.on::after{display:none}}
+/* narasi suara (js/voice.js): bar pemutar & sorotan kalimat yang sedang dibacakan */
+.ymd-flow .vbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin:12px 0 4px;padding:10px 12px;border-radius:16px;background:var(--cardsolid);border:1px solid rgba(128,128,128,.3)}
+.ymd-flow .vbar.live{border-color:var(--hl);box-shadow:0 0 0 3px color-mix(in srgb,var(--hl) 25%,transparent)}
+.ymd-flow .vhead{display:flex;align-items:center;gap:8px;margin-right:auto;color:var(--ink)}
+.ymd-flow .vhead .ico{width:22px;height:22px;color:var(--hl)}
+.ymd-flow .vhead b{font-size:.95rem}.ymd-flow .vhead small{font-size:.75rem;opacity:.7}
+.ymd-flow .vplay,.ymd-flow .vstop{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 16px;border-radius:999px;font:700 .92rem "Helvetica Neue",Helvetica,Arial,sans-serif;cursor:pointer}
+.ymd-flow .vplay{border:none;color:#fff;background:linear-gradient(135deg,var(--hl),#9c6420)}
+.ymd-flow .vplay.on{background:linear-gradient(135deg,#3F5A75,#27323F)}
+.ymd-flow .vstop{border:1px solid rgba(128,128,128,.45);background:transparent;color:var(--ink)}
+.ymd-flow .vplay .ico,.ymd-flow .vstop .ico{width:18px;height:18px}
+.ymd-flow .vplay .ico path{fill:currentColor}
+.ymd-flow .veq{display:inline-flex;align-items:flex-end;gap:3px;height:18px;width:22px}
+.ymd-flow .veq i{flex:1;height:4px;border-radius:2px;background:var(--hl);opacity:.5}
+.ymd-flow .vbar.live .veq i{opacity:1;animation:veq 0.9s ease-in-out infinite}
+.ymd-flow .vbar.live .veq i:nth-child(2){animation-delay:-.3s}.ymd-flow .vbar.live .veq i:nth-child(3){animation-delay:-.6s}.ymd-flow .vbar.live .veq i:nth-child(4){animation-delay:-.15s}
+@keyframes veq{0%,100%{height:4px}50%{height:18px}}
+.ymd-flow .vauto{display:inline-flex;align-items:center;gap:6px;font-size:.82rem;color:var(--ink)}
+.ymd-flow .vauto input{width:20px;height:20px}
+.ymd-flow .vrate,.ymd-flow .vname{min-height:40px;border-radius:10px;border:1px solid rgba(128,128,128,.45);background:var(--field);color:var(--ink);font-size:.82rem;padding:0 8px;max-width:240px}
+.ymd-flow .vnote{font-size:.85rem;opacity:.75}
+.ymd-flow .say{background:color-mix(in srgb,var(--hl) 28%,transparent);border-radius:6px;box-shadow:0 0 0 3px color-mix(in srgb,var(--hl) 28%,transparent);transition:background .3s}
+.ymd-flow .gist.say{box-shadow:0 0 0 3px color-mix(in srgb,var(--hl) 40%,transparent)}
+@media (prefers-reduced-motion:reduce){.ymd-flow .vbar.live .veq i{animation:none}}
+@media (max-width:700px){.ymd-flow .vhead{flex-basis:100%}.ymd-flow .vname{max-width:100%;flex:1}}
+.ymd-flow .vrate{width:auto;max-width:96px}.ymd-flow .vname{width:auto}

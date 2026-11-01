@@ -207,7 +207,7 @@ export function piledSlab(I, Tk, combos, tot, ctx) {
   const gS = L("Pelat di atas tiang (LRFD)", "Slab on piles (LRFD)")
   out.checks.push(chk(gS, L(`Lentur negatif di atas tiang (atas, ${top.txt} dua arah)`, `Negative moment over piles (top, ${top.txt} both ways)`), L("SNI 2847 §8.10 (metode desain langsung)", "SNI 2847 §8.10 (direct design)"), Mneg, phiMn(top.As, 1000, d, I.fc, I.fy), "Mm", { note: cR, d: 1 }))
   out.checks.push(chk(gS, L(`Lentur positif lapangan (bawah, ${bot.txt} dua arah)`, `Positive span moment (bottom, ${bot.txt} both ways)`), L("SNI 2847 §8.10", "SNI 2847 §8.10"), Mpos, phiMn(bot.As, 1000, d, I.fc, I.fy), "Mm", { note: cR, d: 1 }))
-  out.checks.push(chk(gS, L("Geser satu arah pada d dari muka tiang", "One-way shear at d from pile face"), "SNI 2847 §22.5", Vu, 0.75 * vcOne(I.fc) * d, "W", { note: cR, d: 1 }))
+  out.checks.push(chk(gS, L("Geser satu arah pada d dari muka tiang", "One-way shear at d from pile face"), "SNI 2847 §22.5", Vu, 0.75 * vcOne(I.fc, 1, top.As / (1000 * d), d) * d, "W", { note: cR, d: 1 }))
   out.checks.push(chk(gS, L("Tebal pelat d ≥ 300 mm (pile cap)", "Slab depth d ≥ 300 mm (pile cap)"), "SNI 2847 §13.4.2.1", d, 300, "mm", { mode: "ge", d: 0 }))
   return { ...out, kind: "piled", m, asd, lrfd, Ds, d, top, bot, Mneg, Mpos, Vu, wu, geo: { A: Math.PI * Ds * Ds / 4 }, Wsl: Math.PI * Ds * Ds / 4 * I.sh * GAMMA_C }
 }
@@ -382,12 +382,22 @@ export function skFound(st, o = {}) {
   const dv = (x, y1, y2, t, left) => { s.append(sv("line", { x1: x, y1, x2: x, y2, stroke: P.mut, "stroke-width": 1.3 })); [y1, y2].forEach((y) => s.append(sv("line", { x1: x - 6, x2: x + 6, y1: y, y2: y, stroke: P.mut }))); T(s, x + (left ? -8 : 8), (y1 + y2) / 2 + 4, t, { c: P.acc, fs: 11.5, b: true, a: left ? "end" : "start" }) }
   dv(fx + fw + 26, gy, fy + ft, "Df")
   if (isDeep(st)) {
-    const n = 4, sp = (fw - 60) / (n - 1), py = fy + ft, ph = H - py - 34
-    for (let i = 0; i < n; i++) Rect(s, fx + 30 + i * sp - 6, py, 12, ph, st.pk === "bored" ? P.concD : P.steel, P.ink, { sw: 1 })
-    s.append(sv("line", { x1: fx + 30, x2: fx + 30 + sp, y1: H - 22, y2: H - 22, stroke: P.mut })); T(s, fx + 30 + sp / 2, H - 8, `s = ${nf(st.psx, 2)} m`, { c: P.acc, fs: 11.5, b: true, a: "middle" })
-    dv(fx - 24, py, py + ph, `Lp = ${nf(st.pL, 1)} m`, true)
-    T(s, fx + 30 + 3 * sp + 14, py + 30, `D = ${nf(st.pD, 0)} mm`, { c: P.acc, fs: 11.5, b: true })
-    s.append(sv("line", { x1: fx, x2: fx + 30, y1: fy + ft + 10, y2: fy + ft + 10, stroke: P.mut })); T(s, fx + 15, fy + ft + 24, "ce", { c: P.acc, fs: 11.5, b: true, a: "middle" })
+    const n = 4, x0 = fx + 40, sp = (fw - 80) / (n - 1), py = fy + ft, ph = H - py - 40, pw = 12
+    for (let i = 0; i < n; i++) Rect(s, x0 + i * sp - pw / 2, py, pw, ph, st.pk === "bored" ? P.concD : P.steel, P.ink, { sw: 1 })
+    const tick = (x, y) => s.append(sv("line", { x1: x, x2: x, y1: y - 5, y2: y + 5, stroke: P.mut, "stroke-width": 1.3 }))
+    // ce: tepi cap ke pusat tiang pertama (di atas cap)
+    const yc = fy - 12
+    s.append(sv("line", { x1: fx, x2: x0, y1: yc, y2: yc, stroke: P.mut, "stroke-width": 1.3 })); tick(fx, yc); tick(x0, yc)
+    s.append(sv("line", { x1: x0, x2: x0, y1: yc, y2: fy, stroke: P.mut, "stroke-width": 1, "stroke-dasharray": "3 3" }))
+    T(s, (fx + x0) / 2, yc - 7, `ce ${nf(st.pce, 2)} m`, { c: P.acc, fs: 11, b: true, a: "middle" })
+    // s: jarak antar tiang (di bawah)
+    const ys = H - 26
+    s.append(sv("line", { x1: x0, x2: x0 + sp, y1: ys, y2: ys, stroke: P.mut, "stroke-width": 1.3 })); tick(x0, ys); tick(x0 + sp, ys)
+    T(s, x0 + sp / 2, ys + 17, `s = ${nf(st.psx, 2)} m`, { c: P.acc, fs: 11.5, b: true, a: "middle" })
+    dv(fx - 22, py, py + ph, `Lp = ${nf(st.pL, 1)} m`, true)
+    const xl = x0 + 3 * sp
+    s.append(sv("line", { x1: xl - pw / 2, x2: xl + pw / 2, y1: py + ph * 0.45, y2: py + ph * 0.45, stroke: P.ink, "stroke-width": 1.2 }))
+    T(s, xl + pw / 2 + 8, py + ph * 0.45 + 4, `D = ${nf(st.pD, 0)} mm${st.pk === "pipe" ? ` · t ${nf(st.pt, 1)}` : ""}`, { c: P.acc, fs: 11.5, b: true })
     T(s, 14, 44, `${st.pk === "bored" ? L("Tiang bor beton", "Bored concrete piles") : L("Tiang pipa baja", "Steel pipe piles")} · ${AXIAL_METHOD()[st.pmeth]} · ${L("data tab Tanah", "Soil tab data")}`, { c: P.mut, fs: 11 })
   } else {
     for (let i = 0; i <= 8; i++) { const x = fx + 8 + i * (fw - 16) / 8; s.append(sv("line", { x1: x, y1: fy + ft + 34, x2: x, y2: fy + ft + 8, stroke: P.arw, "stroke-width": 2 })); s.append(sv("polygon", { points: `${x},${fy + ft + 4} ${x - 4},${fy + ft + 12} ${x + 4},${fy + ft + 12}`, fill: P.arw })) }

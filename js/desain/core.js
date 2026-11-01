@@ -46,15 +46,46 @@ export function interp(xs, ys, x) {
 export const BARS = [10, 13, 16, 19, 22, 25, 29, 32, 36]
 export const barA = (d) => Math.PI * d * d / 4
 
-// ---------------------------------------------------------------- angin: SNI 1727:2020 / ASCE 7-16
-const EXPO = { B: [7.0, 365.76], C: [9.5, 274.32], D: [11.5, 213.36] }
-// Koefisien tekanan velositas Kz (Tabel 26.10-1, rumus catatan): z < 4,6 m memakai z = 4,6 m
-export function kz(z, exp = "C") {
-  const [a, zg] = EXPO[exp] || EXPO.C
-  return 2.01 * Math.pow(clamp(Math.max(z, 4.6), 0, zg) / zg, 2 / a)
+// ---------------------------------------------------------------- edisi kode (diatur dari data proyek, lihat project.js)
+// wind: "7-22" (ASCE 7-22, terbaru) | "7-16" (SNI 1727:2020 = ASCE 7-16); aci: "19" (ACI 318-19, terbaru) | "14" (SNI 2847:2019 = ACI 318-14)
+export const CODE = { wind: "7-22", aci: "19" }
+export function setCode(c) { if (c && c.wind) CODE.wind = c.wind; if (c && c.aci) CODE.aci = c.aci }
+export const windCode = () => (CODE.wind === "7-16" ? "SNI 1727:2020 (ASCE 7-16)" : "ASCE 7-22")
+export const aciCode = () => (CODE.aci === "14" ? "SNI 2847:2019 (ACI 318-14)" : "ACI 318-19")
+// Ganti label acuan sesuai edisi aktif (dipakai pada pemeriksaan, catatan, kepala laporan)
+export function edLabel(s) {
+  if (!s || typeof s !== "string") return s
+  if (CODE.wind !== "7-16") s = s.replace(/SNI 1727:2020 \/ ASCE 7-16|SNI 1727:2020 \(ASCE 7-16\)|SNI 1727:2020|ASCE 7-16/g, "ASCE 7-22")
+  if (CODE.aci !== "14") s = s.replace(/SNI 2847:2019 \(ACI 318M-14 Bab 17\)/g, "ACI 318-19 Ch. 17").replace(/SNI 2847:2019 \/ ACI 318M?-14|SNI 2847:2019 = ACI 318M?-14|SNI 2847:2019|ACI 318M?-14/g, "ACI 318-19").replace(/SNI 2847 §/g, "ACI 318-19 §").replace(/SNI 2847/g, "ACI 318-19")
+  return s.replace(/AISC 360-16 \/ SNI 1729:2020|AISC 360-16 \(SNI 1729:2020\)|AISC 360-16 = SNI 1729:2020/g, "AISC 360-22").replace(/AISC 360-16/g, "AISC 360-22")
+    .replace(/ISO 1940-1|ISO 1940/g, "ISO 21940-11").replace(/ISO 10816/g, "ISO 20816")
 }
-// qz (kPa) = 0,613·Kz·Kzt·Kd·Ke·V² (N/m²), V = kecepatan angin dasar 3 detik (m/s)
-export const qz = (V, z, w) => 0.613 * kz(z, w.exp) * (w.Kzt ?? 1) * (w.Kd ?? 0.95) * (w.Ke ?? 1) * V * V / 1000
+
+// label seluruh keluaran modul (judul, acuan, catatan, langkah, tabel) mengikuti edisi aktif
+export function relabel(o) {
+  if (!o) return o
+  o.refs = edLabel(o.refs); o.title = edLabel(o.title); o.sub = edLabel(o.sub)
+  o.notes = (o.notes || []).map(edLabel)
+  ;(o.steps || []).forEach((st) => { st.h = edLabel(st.h); st.rows = st.rows.map((r) => r.map((c, j) => (j === 0 ? edLabel(c) : c))) })
+  ;(o.tables || []).forEach((t) => { t.title = edLabel(t.title); if (t.note) t.note = edLabel(t.note) })
+  ;(o.kv || []).forEach((b) => { b.title = edLabel(b.title) })
+  ;(o.drawings || []).forEach((d) => { d.cap = edLabel(d.cap) })
+  return o
+}
+
+// ---------------------------------------------------------------- angin: ASCE 7-22 (default) atau SNI 1727:2020 / ASCE 7-16
+// [α, zg (m)] per eksposur. ASCE 7-16 Tabel 26.11-1: Kz = 2,01(z/zg)^(2/α); ASCE 7-22 Tabel 26.11-1: Kz = 2,41(z/zg)^(2/α) dengan α & zg baru.
+const EXPO = { "7-16": { k: 2.01, B: [7.0, 365.76], C: [9.5, 274.32], D: [11.5, 213.36] }, "7-22": { k: 2.41, B: [7.5, 999.74], C: [9.8, 749.81], D: [11.5, 589.79] } }
+export const expoConst = (exp = "C", ed = CODE.wind) => { const E = EXPO[ed] || EXPO["7-22"]; return { k: E.k, a: (E[exp] || E.C)[0], zg: (E[exp] || E.C)[1] } }
+// Koefisien tekanan velositas Kz (Tabel 26.10-1, rumus catatan): z < 4,6 m memakai z = 4,6 m
+export function kz(z, exp = "C", ed = CODE.wind) {
+  const { k, a, zg } = expoConst(exp, ed)
+  return k * Math.pow(clamp(Math.max(z, 4.6), 0, zg) / zg, 2 / a)
+}
+// Tekanan velositas qz (kPa), V = kecepatan angin dasar 3 detik (m/s).
+// ASCE 7-16 (Pers. 26.10-1): qz = 0,613·Kz·Kzt·Kd·Ke·V²; ASCE 7-22: qz = 0,613·Kz·Kzt·Ke·V² (Kd dipindah ke persamaan gaya, §29.4: F = qz·Kd·G·Cf·Af)
+export const qz = (V, z, w) => 0.613 * kz(z, w.exp) * (w.Kzt ?? 1) * (CODE.wind === "7-16" ? (w.Kd ?? 0.95) : 1) * (w.Ke ?? 1) * V * V / 1000
+export const kdF = (w) => (CODE.wind === "7-16" ? 1 : (w.Kd ?? 0.95))
 // Cf (Gambar 29.4-1) penampang bulat agak halus (D√qz > 2,5) dan persegi tegak lurus muka; h/D = 1, 7, 25
 export const cfRound = (hD) => interp([1, 7, 25], [0.5, 0.6, 0.7], hD)
 export const cfRoundRough = (hD) => interp([1, 7, 25], [0.7, 0.8, 0.9], hD)
@@ -66,7 +97,7 @@ export function windOnBody(w, b, z0, H, Cf, n = 24) {
   const dz = H / n
   for (let i = 0; i < n; i++) {
     const zc = z0 + (i + 0.5) * dz
-    const f = qz(w.V, zc, w) * (w.G ?? 0.85) * Cf * b * dz
+    const f = qz(w.V, zc, w) * kdF(w) * (w.G ?? 0.85) * Cf * b * dz
     F += f; M += f * (i + 0.5) * dz
   }
   return { F, M, arm: F > 0 ? M / F : 0, qh: qz(w.V, z0 + H, w) }
@@ -208,7 +239,7 @@ export function chk(grp, item, ref, dem, cap, unit, opts = {}) {
   else if (mode === "ge") { ur = dem > 0 ? cap / dem : (cap > 0 ? Infinity : 0); ok = dem >= cap - 1e-9 }
   else { ur = cap > 0 ? Math.abs(dem) / cap : (Math.abs(dem) > 1e-9 ? Infinity : 0); ok = Math.abs(dem) <= cap + 1e-9 * Math.max(1, Math.abs(cap)) }
   if (opts.ok !== undefined) ok = opts.ok
-  return { grp, item, ref, dem, cap, unit, ur, ok, mode, note: opts.note || "", d: opts.d ?? 2, info: !!opts.info }
+  return { grp, item: edLabel(item), ref: edLabel(ref), dem, cap, unit, ur, ok, mode, note: opts.note || "", d: opts.d ?? 2, info: !!opts.info }
 }
 export const govern = (checks) => checks.filter((c) => !c.info).reduce((g, c) => (!g || (isFinite(c.ur) ? c.ur : 99) > (isFinite(g.ur) ? g.ur : 99) ? c : g), null)
 

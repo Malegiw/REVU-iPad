@@ -2,6 +2,7 @@
 // metode daya dukung, dan kriteria penurunan. Disimpan di localStorage ("ymd.project.v1"); semua tab membaca dari sini.
 import { L, AUTHOR, seismicParams, nf } from "./desain/core.js"
 import { defaultSoil, deriveSoil, siteClass, SETTLE_OPT, OVR } from "./desain/soil.js"
+import { ico } from "./icons.js"
 
 const KEY = "ymd.project.v1"
 export const RISK_IE = { I: 1.0, II: 1.0, III: 1.25, IV: 1.5 }
@@ -13,6 +14,7 @@ export function projDefaults() {
     pile: { kind: "pipe", D: 406.4, t: 12.7, method: "api", z0: 1.5, Lmax: 30 },
     seis: { Ss: 0.8, S1: 0.35, TL: 8, clsMode: "auto", cls: "SD", risk: "III" },
     settle: { ...SETTLE_OPT, manual: [], sel: "" },
+    codes: { wind: "7-22", aci: "19" },
   }
 }
 const okNum = (v) => typeof v === "number" && isFinite(v)
@@ -34,7 +36,7 @@ export function projLoad() {
   if (!Array.isArray(soil.layers) || !soil.layers.length) soil.layers = d.soil.layers
   soil.layers = soil.layers.map((l) => ({ ...d.soil.layers[0], ...Object.fromEntries(OVR.map((k) => [k, 0])), ...l }))
   return { info: { ...d.info, ...(s.info || {}) }, soil, bear: { ...d.bear, ...(s.bear || {}) }, pile: { ...d.pile, ...(s.pile || {}) }, seis: { ...d.seis, ...(s.seis || {}) },
-    settle: { ...d.settle, ...(s.settle || {}), manual: Array.isArray((s.settle || {}).manual) ? s.settle.manual : [] } }
+    settle: { ...d.settle, ...(s.settle || {}), manual: Array.isArray((s.settle || {}).manual) ? s.settle.manual : [] }, codes: { ...d.codes, ...(s.codes || {}) } }
 }
 export const projSave = (P) => { try { localStorage.setItem(KEY, JSON.stringify(P)) } catch (e) { /* tanpa penyimpanan */ } }
 
@@ -78,11 +80,11 @@ export function spectrum(sp, TL, Tmax = 4, n = 120) {
 // ---------------------------------------------------------------- alur proyek (stepper) untuk semua tab
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e }
 export const STEPS = () => [
-  { r: "tanah", ic: "🧱", t: L("Data Tanah", "Soil Data") },
-  { r: "gempa", ic: "🌐", t: L("Gempa", "Seismic") },
-  { r: "desain", ic: "🏗️", t: L("Desain", "Design") },
-  { r: "penurunan", ic: "📉", t: L("Penurunan", "Settlement") },
-  { r: "laporan", ic: "📑", t: L("Laporan", "Report") },
+  { r: "tanah", ic: "soil", t: L("Data Tanah", "Soil Data") },
+  { r: "gempa", ic: "seismic", t: L("Gempa", "Seismic") },
+  { r: "desain", ic: "design", t: L("Desain", "Design") },
+  { r: "penurunan", ic: "settle", t: L("Penurunan", "Settlement") },
+  { r: "laporan", ic: "report", t: L("Laporan", "Report") },
 ]
 export function stepSubs(P) {
   const ds = soilDS(P), ss = seisSite(P)
@@ -102,7 +104,8 @@ export function stepper(active, P) {
     const a = el("a", "pj-step" + (s.r === active ? " on" : "") + (ai >= 0 && i < ai ? " done" : ""))
     a.href = "#/" + s.r
     a.style.setProperty("--i", i)
-    a.append(el("span", "pj-n", String(i + 1)), el("span", "pj-ic", s.ic))
+    const icw = el("span", "pj-ic"); icw.append(ico(s.ic))
+    a.append(el("span", "pj-n", String(i + 1)), icw)
     const tx = el("span", "pj-tx"); tx.append(el("b", null, s.t)); if (subs[s.r]) tx.append(el("small", null, subs[s.r]))
     a.append(tx)
     nav.append(a)

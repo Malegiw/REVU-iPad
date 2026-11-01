@@ -1,3 +1,4 @@
+import { ico, MOD_ICO } from "./icons.js"
 // Beranda YMD-CAL: hero ringkas, dashboard status semua kalkulator (dihitung dari masukan tersimpan), dan kartu Alur Produksi Migas.
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e }
 const svgNS = "http://www.w3.org/2000/svg"
@@ -39,8 +40,8 @@ export function mountHome(app, ctx) {
   const fl = el("a", "hm-flow"); fl.href = "#/alur"
   const ft = el("div", "hm-flow-tx")
   ft.append(el("span", "hm-kicker", L("Referensi proses", "Process reference")), el("h2", null, L("Alur Produksi Migas", "Oil & Gas Production Flow")),
-    el("p", null, L("Dari sumur sampai gathering station: PFD, dua P&ID bergerak, 12 animasi alat, dan catatan sipil/struktur — langsung terhubung ke kalkulator desain tiap peralatan.",
-      "From the well to the gathering station: PFD, two animated P&IDs, 12 equipment animations and civil/structural notes — linked straight to each equipment's design calculator.")),
+    el("p", null, L("Dari sumur sampai gathering station: PFD, dua P&ID bergerak, 12 animasi alat dengan narasi suara (play/pause), dan catatan sipil/struktur — langsung terhubung ke kalkulator desain tiap peralatan.",
+      "From the well to the gathering station: PFD, two animated P&IDs, 12 equipment animations with voice narration (play/pause), and civil/structural notes — linked straight to each equipment's design calculator.")),
     el("span", "hm-go", L("Jelajahi alur →", "Explore the flow →")))
   const img = el("img", "hm-flow-img"); img.alt = L("Ilustrasi alur produksi migas", "Oil & gas production flow illustration"); img.loading = "lazy"
   img.src = `assets/hero_${ctx.dark ? "dark" : "cloud"}${ctx.lang === "en" ? "_en" : ""}.svg`
@@ -73,14 +74,14 @@ export function mountHome(app, ctx) {
       stat(L("Pemeriksaan", "Checks"), `${nChk - nBad} / ${nChk}`, nBad ? `${nBad} ${L("tidak OK", "not OK")}` : L("tanpa kegagalan", "no failures"), nBad ? "bad" : "ok"),
       stat(L("Penurunan terbesar", "Largest settlement"), sMax ? `${nf(sMax.settle.s, 1)} mm` : "–", sMax ? sMax.title.split(" (")[0] : "", sMax && sMax.settle.s > sMax.settle.allow ? "bad" : "ok"))
     const chips = el("div", "hm-chips")
-    ;[[L("Proyek", "Project"), D.project.name || "–"], ["Doc", D.project.doc || "–"], ["V", `${nf(D.site.V, 0)} m/s · ${D.site.exp}`], [L("Kelas situs", "Site class"), D.ss.cls], ["SDS", nf(D.sp.SDS, 3)], [L("Satuan", "Units"), D.units === "t" ? "ton · t/m²" : "kN · kPa"]]
+    ;[[L("Proyek", "Project"), D.project.name || "–"], ["Doc", D.project.doc || "–"], ["V", `${nf(D.site.V, 0)} m/s · ${D.site.exp}`], [L("Kelas situs", "Site class"), D.ss.cls], ["SDS", nf(D.sp.SDS, 3)], [L("Kode", "Codes"), D.codes], [L("Satuan", "Units"), D.units === "t" ? "ton · t/m²" : "kN · kPa"]]
       .forEach(([k, v]) => chips.append(el("span", null, `${k}: ${v}`)))
     stats.append(chips)
     grid.textContent = ""
     D.mods.forEach((m, i) => grid.append(tile(m, i, L)))
     // tile penurunan (semua pondasi dari modul Desain)
     const t = el("a", "hm-tile in"); t.href = "#/penurunan"; t.style.setProperty("--i", D.mods.length)
-    const top = el("div", "hm-tile-top"); top.append(el("span", "hm-ic", "📉"), el("b", null, L("Penurunan Pondasi", "Foundation Settlement")))
+    const top = el("div", "hm-tile-top"); const icS = el("span", "hm-ic"); icS.append(ico("settle")); top.append(icS, el("b", null, L("Penurunan Pondasi", "Foundation Settlement")))
     t.append(top)
     const st = D.mods.filter((m) => m.settle)
     if (!sMax) t.append(el("p", "hm-sub", L("Belum ada hasil penurunan.", "No settlement results yet.")))
@@ -96,7 +97,7 @@ export function mountHome(app, ctx) {
 
 function tile(m, i, L) {
   const a = el("a", "hm-tile in"); a.href = "#/desain/" + m.id; a.style.setProperty("--i", i)
-  const top = el("div", "hm-tile-top"); top.append(el("span", "hm-ic", m.icon), el("b", null, m.title))
+  const top = el("div", "hm-tile-top"); const icM = el("span", "hm-ic"); icM.append(ico(MOD_ICO[m.id])); top.append(icM, el("b", null, m.title))
   a.append(top)
   if (m.error) { a.append(el("p", "hm-sub", m.error)); return a }
   a.append(el("p", "hm-sub", m.sub))

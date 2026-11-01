@@ -1,6 +1,7 @@
 // Komponen antarmuka bersama untuk tab proyek (Tanah, Gempa, Penurunan, Laporan): kepala halaman, kartu lipat, satuan, footer.
 import { L, AUTHOR, units } from "./desain/core.js"
 import { el } from "./desain/ui.js"
+import { ico } from "./icons.js"
 
 export function initUnits() {
   try { const o = JSON.parse(localStorage.getItem("ymd.desain.v1") || "null"); units.sys = o && o.units === "t" ? "t" : "si" } catch (e) { units.sys = "si" }
@@ -20,7 +21,7 @@ export function card(id, icon, title, badge, body, open = true) {
   const d = el("details", "dz-sec dz-in")
   d.open = openState[id] ?? open
   d.addEventListener("toggle", () => { openState[id] = d.open })
-  const sm = el("summary"); sm.append(el("span", "dz-ico", icon), el("span", "dz-st", title))
+  const sm = el("summary"); const ic = el("span", "dz-ico"); ic.append(ico(icon)); sm.append(ic, el("span", "dz-st", title))
   if (badge) sm.append(el("span", "dz-badge", badge))
   d.append(sm)
   if (body) d.append(...[].concat(body))

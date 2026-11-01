@@ -1,10 +1,11 @@
 // Tab "Laporan": data proyek, status alur (Tanah → Gempa → Desain → Penurunan) dan laporan proyek gabungan PDF/Excel dengan bab:
 // A. Data tanah, B. Parameter gempa, C. Ringkasan desain, D… modul desain terpilih, terakhir Penurunan. Hak cipta & cap waktu pada tiap halaman.
-import { L, lang, nf, govern, AUTHOR } from "./desain/core.js"
+import { L, lang, nf, govern, AUTHOR, edLabel } from "./desain/core.js"
 import { el, field, exportBar, reveal, tableView, fmtCheck, urClass } from "./desain/ui.js"
 import { projLoad, projSave, soilDS, seisSite, stepper } from "./project.js"
 import { siteClass, QA_METHOD } from "./desain/soil.js"
 import { initUnits, hero, card, footer } from "./pj_ui.js"
+import { ico, MOD_ICO } from "./icons.js"
 
 const OPT = { mods: {}, detail: "full", img: true }
 export function mountLaporan(box, ctx) {
@@ -35,12 +36,12 @@ export function mountLaporan(box, ctx) {
   function drawStatus() {
     state.textContent = ""
     const { soil, seis, mods, settle } = built
-    const row = (n, ic, t, sub, ok, href) => { const a = el("a", "pj-frow dz-in " + (ok === true ? "ok" : ok === false ? "bad" : "")); a.href = href; a.append(el("span", "pj-n", n), el("span", "pj-ic", ic)); const x = el("span", "pj-tx"); x.append(el("b", null, t), el("small", null, sub)); a.append(x, el("span", "pj-st", ok === true ? "✓" : ok === false ? "!" : "•")); return a }
+    const row = (n, ic, t, sub, ok, href) => { const a = el("a", "pj-frow dz-in " + (ok === true ? "ok" : ok === false ? "bad" : "")); a.href = href; const icw = el("span", "pj-ic"); icw.append(ico(ic)); a.append(el("span", "pj-n", n), icw); const x = el("span", "pj-tx"); x.append(el("b", null, t), el("small", null, sub)); a.append(x, el("span", "pj-st", ok === true ? "✓" : ok === false ? "!" : "•")); return a }
     const sc = soil.sc
     state.append(row("1", "🧱", L("Data tanah", "Soil data"), `${P.soil.name} · ${P.soil.test === "cpt" ? "CPT" : "N-SPT"} · ${soil.ds.layers.length} ${L("lapis", "layers")} · ${L("kelas situs", "site class")} ${sc.cls} · qa: ${QA_METHOD()[P.bear.method]}`, true, "#/tanah"))
     state.append(row("2", "🌐", L("Parameter gempa", "Seismic parameters"), `SDS ${nf(seis.sp.SDS, 3)} · SD1 ${nf(seis.sp.SD1, 3)} · ${L("kelas", "class")} ${seis.cls} · KDS ${seis.SDC}`, true, "#/gempa"))
     const okN = mods.filter((m) => m.out && m.out.checks.every((c) => c.ok || c.info)).length
-    state.append(row("3", "🏗️", L("Desain pondasi", "Foundation design"), `${okN}/${mods.length} ${L("memenuhi", "passing")} · ${mods.map((m) => `${m.m.icon} ${m.out ? (m.out.fdType === "deep" ? L("tiang", "piles") : L("dangkal", "shallow")) : "–"}`).join(" · ")}`, okN === mods.length, "#/desain"))
+    state.append(row("3", "🏗️", L("Desain pondasi", "Foundation design"), `${okN}/${mods.length} ${L("memenuhi", "passing")} · ${mods.map((m) => `${short(m.m.title())}: ${m.out ? (m.out.fdType === "deep" ? L("tiang", "piles") : L("dangkal", "shallow")) : "–"}`).join(" · ")}`, okN === mods.length, "#/desain"))
     const sb = settle.results.filter((x) => !x.r.error), bad = sb.filter((x) => x.r.s > x.r.allow).length
     const worst = sb.reduce((a, b) => (!a || b.r.s / b.r.allow > a.r.s / a.r.allow ? b : a), null)
     state.append(row("4", "📉", L("Penurunan", "Settlement"), `${sb.length} ${L("pondasi", "foundations")}${worst ? ` · ${L("terbesar", "largest")} ${nf(worst.r.s, 1)} mm (${worst.c.title.split(" (")[0]})` : ""}`, !bad, "#/penurunan"))
@@ -56,7 +57,7 @@ export function mountLaporan(box, ctx) {
       const lb = el("label", "pj-chk"), c = el("input"); c.type = "checkbox"; c.checked = !!OPT.mods[m.id] && !error; c.disabled = !!error
       c.onchange = () => { OPT.mods[m.id] = c.checked }
       const ok = out && out.checks.every((k) => k.ok || k.info)
-      lb.append(c, el("span", null, `${m.icon} ${m.title()}`), el("small", ok ? "uok" : "ubad", error ? error : ok ? "OK" : "NOT OK"))
+      const icm = el("span", "pj-chk-ic"); icm.append(ico(MOD_ICO[m.id])); lb.append(c, icm, el("span", null, m.title()), el("small", ok ? "uok" : "ubad", error ? error : ok ? "OK" : "NOT OK"))
       list.append(lb)
     })
     optBox.append(card("r-opt", "🧾", L("Isi laporan", "Report content"), null, [g2, el("div", "dz-sub", L("Modul desain yang disertakan", "Design modules to include")), list]))
@@ -92,7 +93,7 @@ function compose(P, B) {
   const g = govern(allChecks)
   return {
     file: "Laporan_Proyek", suite: L("LAPORAN PROYEK", "PROJECT REPORT"), title: `${L("Laporan Proyek", "Project Report")} — ${P.info.name || "Project"}`, sub: `${L("Data tanah", "Soil")} ${P.soil.name} · ${L("kelas situs", "site class")} ${B.seis.cls} · SDS ${nf(B.seis.sp.SDS, 3)} · ${mods.length} ${L("modul desain", "design modules")} · ${L("penurunan", "settlement")} ${B.settle.results.length} ${L("pondasi", "foundations")}`,
-    refs: "SNI 8460:2017 · SNI 1726:2019 · SNI 1727:2020 · SNI 2847:2019 · SNI 1729:2020 · API 650 · API RP 2GEO · ACI 351.3R · PIP · IEEE 980",
+    refs: edLabel("SNI 8460:2017 · SNI 1726:2019 · SNI 1727:2020 · SNI 2847:2019 · AISC 360-16 · API 650 · API RP 2GEO · ACI 351.3R · PIP · IEEE 980 · IEEE 693"),
     metrics: [{ lab: L("Kelas situs / SDS", "Site class / SDS"), val: `${B.seis.cls} / ${nf(B.seis.sp.SDS, 3)}` }, { lab: L("Modul memenuhi", "Modules passing"), val: `${mods.filter(({ out }) => out.checks.every((c) => c.ok || c.info)).length} / ${mods.length}` }, { lab: L("Pemeriksaan", "Checks"), val: String(allChecks.filter((c) => !c.info).length) }, { lab: L("Penurunan terbesar", "Largest settlement"), val: (() => { const x = B.settle.results.filter((r) => !r.r.error).reduce((a, b) => (!a || b.r.s > a.r.s ? b : a), null); return x ? `${nf(x.r.s, 1)} mm` : "–" })() }],
     checks: allChecks, banner: allChecks.length ? null : undefined, govTxt: "",
     kv: [{ title: L("Proyek", "Project"), rows: [[L("Nama", "Name"), P.info.name], [L("Klien", "Client"), P.info.client || "–"], [L("Lokasi", "Location"), P.info.loc || "–"], [L("No. dokumen", "Doc no."), P.info.doc || "–"], ["Rev.", P.info.rev || "–"]] }, ...B.soil.out.kv, ...B.seis.out.kv],

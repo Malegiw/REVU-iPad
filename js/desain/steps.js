@@ -1,6 +1,10 @@
 // Lembar perhitungan langkah demi langkah (Besaran | Rumus | Substitusi | Hasil) untuk tiap modul Desain: ditampilkan di layar dan ikut ke PDF/Excel.
-import { L, nf, toDisp, uName, GAMMA_C, GAMMA_W, GAMMA_S, rad, seismicCoef, qz, kz } from "./core.js"
-import { beta1, rhoTS, sqfc } from "./rc.js"
+import { L, nf, toDisp, uName, GAMMA_C, GAMMA_W, GAMMA_S, rad, seismicCoef, qz, kz, kdF, expoConst, CODE, windCode } from "./core.js"
+import { beta1, rhoTS, sqfc, lamS } from "./rc.js"
+// baris geser satu arah sesuai edisi ACI (ρw = As/(b·d))
+const vcRow = (lab, fc, d, rho, phiVc, Vu, Wl) => (CODE.aci === "14"
+  ? [lab, "φVc = 0,75·0,17·λ·√fc'·b·d", `0,75 × 0,17 × ${nf(sqfc(fc), 3)} × 1000 × ${nf(d, 0)} / 1000`, `${Wl(phiVc)} ≥ Vu ${Wl(Vu)}`]
+  : [lab, "φVc = 0,75·0,66·λs·ρw^(1/3)·√fc'·b·d ≤ 0,75·0,42√fc'·b·d ; λs = √(2/(1 + 0,004d))", `λs ${nf(lamS(d), 3)}, ρw ${nf(rho * 100, 3)}%, d ${nf(d, 0)} mm`, `${Wl(phiVc)} ≥ Vu ${Wl(Vu)}`])
 import { deepSteps } from "./deep.js"
 
 const F = (v, d = 1) => `${nf(toDisp("F", v), d)} ${uName("F")}`
@@ -50,7 +54,7 @@ export function footingSteps(md, r, rc, prc, label = "") {
     rows.push([`As ${AX} ${L("perlu", "req.")}`, "As = 0,85fc'/fy·[1 − √(1 − 2Rn/(0,85fc'))]·b·d", `fc' ${rc.fc}, fy ${rc.fy}`, `${nf(q.fb.As || 0, 0)} mm²/m`])
     rows.push([`As,min`, "As,min = ρts·b·h", `${rhoTS(rc.fy)} × 1000 × ${nf(h, 0)}`, `${nf(rhoTS(rc.fy) * 1000 * h, 0)} mm²/m`])
     rows.push([`${L("Tulangan bawah", "Bottom bars")} ${AX}`, "φMn = φ·As·fy·(d − a/2)", `${q.bot.txt} → As = ${nf(q.bot.As, 0)} mm²/m`, Mm(q.phiMnB)])
-    rows.push([`${L("Geser satu arah", "One-way shear")} ${AX}`, "φVc = 0,75·0,17·λ·√fc'·b·d", `0,75 × 0,17 × ${nf(sqfc(rc.fc), 3)} × 1000 × ${nf(d, 0)} / 1000`, `${Wl(q.phiVc)} ≥ Vu ${Wl(q.Vu)}`])
+    rows.push(vcRow(`${L("Geser satu arah", "One-way shear")} ${AX}`, rc.fc, d, q.rhoW ?? q.bot.As / (1000 * d), q.phiVc, q.Vu, Wl))
   }
   r.punch.forEach((p, k) => {
     if (!p || p.na) { rows.push([`${L("Pons pedestal", "Pedestal punching")} ${k + 1}`, L("keliling kritis d/2 di luar telapak", "critical perimeter outside footing"), "", "–"]); return }
@@ -70,9 +74,11 @@ export function footingSteps(md, r, rc, prc, label = "") {
 // ---------------------------------------------------------------- angin & gempa umum
 function windRows(w, b, z0, H, Cf, F0, M0) {
   return [[L("Kecepatan angin dasar", "Basic wind speed"), "V (3 dtk)", "", `${nf(w.V, 1)} m/s`],
-    [L("Koef. tekanan velositas di puncak", "Velocity pressure coeff. at top"), "Kz = 2,01·(z/zg)^(2/α)", `z = ${nf(z0 + H, 2)} m, ${L("eksposur", "exposure")} ${w.exp}`, nf(kz(z0 + H, w.exp), 3)],
-    [L("Tekanan velositas di puncak", "Velocity pressure at top"), "qz = 0,613·Kz·Kzt·Kd·V²", `0,613 × ${nf(kz(z0 + H, w.exp), 3)} × ${nf(w.Kzt ?? 1, 2)} × ${nf(w.Kd ?? 0.95, 2)} × ${nf(w.V, 1)}² / 1000`, Q(qz(w.V, z0 + H, w), 3)],
-    [L("Gaya angin (integrasi per pias)", "Wind force (strip integration)"), "F = Σ qz(zi)·G·Cf·b·Δz", `G 0,85 · Cf ${nf(Cf, 2)} · b ${nf(b, 2)} m · H ${nf(H, 2)} m`, F(F0, 2)],
+    [L("Edisi kode angin", "Wind code edition"), windCode(), CODE.wind === "7-16" ? L("Kd di dalam qz", "Kd inside qz") : L("Kd di persamaan gaya §29.4", "Kd in force equation §29.4"), ""],
+    (() => { const e = expoConst(w.exp); return [L("Koef. tekanan velositas di puncak", "Velocity pressure coeff. at top"), `Kz = ${nf(e.k, 2)}·(z/zg)^(2/α)`, `z = ${nf(z0 + H, 2)} m, ${L("eksposur", "exposure")} ${w.exp}: α ${nf(e.a, 1)}, zg ${nf(e.zg, 0)} m`, nf(kz(z0 + H, w.exp), 3)] })(),
+    CODE.wind === "7-16" ? [L("Tekanan velositas di puncak", "Velocity pressure at top"), "qz = 0,613·Kz·Kzt·Kd·V²", `0,613 × ${nf(kz(z0 + H, w.exp), 3)} × ${nf(w.Kzt ?? 1, 2)} × ${nf(w.Kd ?? 0.95, 2)} × ${nf(w.V, 1)}² / 1000`, Q(qz(w.V, z0 + H, w), 3)]
+      : [L("Tekanan velositas di puncak", "Velocity pressure at top"), "qz = 0,613·Kz·Kzt·Ke·V²", `0,613 × ${nf(kz(z0 + H, w.exp), 3)} × ${nf(w.Kzt ?? 1, 2)} × ${nf(w.Ke ?? 1, 2)} × ${nf(w.V, 1)}² / 1000`, Q(qz(w.V, z0 + H, w), 3)],
+    [L("Gaya angin (integrasi per pias)", "Wind force (strip integration)"), CODE.wind === "7-16" ? "F = Σ qz(zi)·G·Cf·b·Δz" : "F = Σ qz(zi)·Kd·G·Cf·b·Δz", `${CODE.wind === "7-16" ? "" : `Kd ${nf(kdF(w), 2)} · `}G 0,85 · Cf ${nf(Cf, 2)} · b ${nf(b, 2)} m · H ${nf(H, 2)} m`, F(F0, 2)],
     [L("Momen angin di dasar benda", "Wind moment at body base"), "M = Σ Fi·zi", "", Mo(M0, 2)]]
 }
 function seisRows(seis, W, h, lab) {
@@ -211,7 +217,7 @@ export function tankSteps(I, T, out) {
     [L("Momen kantilever di luar shell", "Cantilever moment outside shell"), "Mu = (qu,tepi − wu)·a²/2", "", Mm(R.Mc)],
     [L("Momen interior (bawah/atas)", "Interior moment (bottom/top)"), "M = (3 + ν)·w·a²/16 + (5 + ν)·q1·a²·0,3849/48", "ν = 0,2", `${Mm(R.Mbi)} / ${Mm(R.Mt)}`],
     [L("Tulangan", "Reinforcement"), "As dari Mu, ≥ 0,5·ρts·b·h per muka", "", `${L("bawah", "bottom")} ${R.bot.txt} · ${L("atas", "top")} ${R.top.txt}`],
-    [L("Geser satu arah", "One-way shear"), "φVc = 0,75·0,17·√fc'·b·d", `d = ${nf(R.d, 0)} mm`, `${Wl(0.75 * 0.17 * sqfc(I.fc) * R.d)} ≥ ${Wl(Math.max(R.Vc, R.Vi))}`],
+    (() => { const rho = R.bot.As / (1000 * R.d), cap = CODE.aci === "14" ? 0.75 * 0.17 * sqfc(I.fc) * R.d : 0.75 * Math.min(0.66 * lamS(R.d) * Math.cbrt(rho) * sqfc(I.fc), 0.42 * sqfc(I.fc)) * R.d; return vcRow(L("Geser satu arah (kantilever)", "One-way shear (cantilever)"), I.fc, R.d, rho, cap, R.Vc, Wl) })(),
   ]))
   return s
 }

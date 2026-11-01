@@ -3,7 +3,7 @@
 // - Ringwall (PIP STE03020): tekanan di bawah ringwall, tarik melingkar (hoop) dan tulangannya, telapak ringwall (opsional), pad kolom atap (pons).
 // - Pelat penuh: pelat lingkaran kaku (tekanan tanpa tarik), lentur kantilever dan interior (Timoshenko: pelat lingkaran sendi), geser satu arah, pons kolom atap.
 // Gaya API 650 Annex E bertaraf ASD; kasus E disimpan sebagai E = gaya API / 0,7 supaya kombinasi 0,7E mengembalikan nilai API.
-import { L, chk, GAMMA_W, GAMMA_C, GAMMA_S, windOnBody, cfRound, qz, rad } from "./core.js"
+import { L, chk, GAMMA_W, GAMMA_C, GAMMA_S, windOnBody, cfRound, qz, kdF, rad } from "./core.js"
 import { asFlex, pickBars, phiMn, rhoTS, vcOne, vcTwo } from "./rc.js"
 import { makeGeo, planPoly, pressure, contactChecks } from "./footing.js"
 import { piledSlab } from "./deep.js"
@@ -30,7 +30,7 @@ export function tankLoads(I) {
   const Cf = cfRound(I.Hs / I.D)
   const sh = windOnBody(w, I.D, I.z0, I.Hs, Cf)
   const qTop = qz(w.V, I.z0 + I.Hs + hr, w)
-  const Fr = qTop * (w.G ?? 0.85) * Cf * I.D * hr / 2
+  const Fr = qTop * kdF(w) * (w.G ?? 0.85) * Cf * I.D * hr / 2
   const Fw = sh.F + Fr, Mw = sh.M + Fr * (I.Hs + hr / 3)
   const MDL = (Ws + I.Wacc) * I.D / 2, MDLR = Wr * (1 - cf) * I.D / 2
   const urWind = 0.6 * Mw / (MDL / 1.5 + MDLR)
@@ -146,7 +146,7 @@ function ringwall(I, T, combos) {
     const f = asFlex(Mu, 1000, d, I.fc, I.fy), bars = pickBars(Math.max(f.As || 0, rhoTS(I.fy) * 1000 * tf * 1000), Math.min(3 * tf * 1000, 450), I.db)
     foot = { d, proj, Mu, Vu, bars }
     out.push(chk("S", L(`Lentur telapak ringwall (${bars.txt})`, `Ringwall footing flexure (${bars.txt})`), "SNI 2847 §13.2.7", Mu, phiMn(bars.As, 1000, d, I.fc, I.fy), "Mm", { note: cm, d: 1 }))
-    out.push(chk("S", L("Geser satu arah telapak ringwall", "Ringwall footing one-way shear"), "SNI 2847 §22.5", Vu, 0.75 * vcOne(I.fc) * d, "W", { note: cm, d: 1 }))
+    out.push(chk("S", L("Geser satu arah telapak ringwall", "Ringwall footing one-way shear"), "SNI 2847 §22.5", Vu, 0.75 * vcOne(I.fc, 1, bars.As / (1000 * d), d) * d, "W", { note: cm, d: 1 }))
   } else out.push(chk("S", L("Geser satu arah: ringwall persegi tanpa telapak (tidak menentukan)", "One-way shear: rectangular ringwall without footing (not governing)"), "—", 0, 1, "", { info: true }))
   // tulangan vertikal/sengkang minimum
   const AsV = rhoTS(I.fy) * b * 1000 * 1000
@@ -167,7 +167,7 @@ function columnPad(I, T, combos, out) {
   const proj = (B - c) / 2, Mu = qu * proj * proj / 2 / 1, Vu = qu * Math.max(proj - d / 1000, 0)
   const bars = pickBars(Math.max(asFlex(Mu, 1000, d, I.fc, I.fy).As || 0, rhoTS(I.fy) * 1000 * t * 1000), Math.min(3 * t * 1000, 450), I.db)
   out.push(chk("S", L(`Lentur pad kolom (${bars.txt})`, `Column pad flexure (${bars.txt})`), "SNI 2847 §13.2.7", Mu, phiMn(bars.As, 1000, d, I.fc, I.fy), "Mm", { note: cp, d: 1 }))
-  out.push(chk("S", L("Geser satu arah pad kolom", "Column pad one-way shear"), "SNI 2847 §22.5", Vu, 0.75 * vcOne(I.fc) * d, "W", { note: cp, d: 1 }))
+  out.push(chk("S", L("Geser satu arah pad kolom", "Column pad one-way shear"), "SNI 2847 §22.5", Vu, 0.75 * vcOne(I.fc, 1, bars.As / (1000 * d), d) * d, "W", { note: cp, d: 1 }))
   return { B, t, d, Pu, bars }
 }
 
@@ -235,8 +235,8 @@ function slab(I, T, combos) {
   const top = pickBars(Math.max(asFlex(Mt, 1000, d, I.fc, I.fy).As || 0, half), smax, I.db)
   out.push(chk("S", L(`Lentur bawah (kantilever di luar shell & interior) (${bot.txt} dua arah)`, `Bottom flexure (cantilever outside shell & interior) (${bot.txt} both ways)`), "SNI 2847 §22.3; Timoshenko", Mb, phiMn(bot.As, 1000, d, I.fc, I.fy), "Mm", { note: cMc, d: 1 }))
   out.push(chk("S", L(`Lentur atas interior (${top.txt} dua arah)`, `Top flexure, interior (${top.txt} both ways)`), "SNI 2847 §22.3; Timoshenko", Mt, phiMn(top.As, 1000, d, I.fc, I.fy), "Mm", { note: cMt, d: 1 }))
-  out.push(chk("S", L("Geser satu arah pada d di luar shell (kantilever)", "One-way shear at d outside shell (cantilever)"), "SNI 2847 §22.5", Vc, 0.75 * vcOne(I.fc) * d, "W", { note: cVc, d: 1 }))
-  out.push(chk("S", L("Geser satu arah pada d di dalam shell", "One-way shear at d inside shell"), "SNI 2847 §22.5", Vi, 0.75 * vcOne(I.fc) * d, "W", { note: cVi, d: 1 }))
+  out.push(chk("S", L("Geser satu arah pada d di luar shell (kantilever)", "One-way shear at d outside shell (cantilever)"), "SNI 2847 §22.5", Vc, 0.75 * vcOne(I.fc, 1, bot.As / (1000 * d), d) * d, "W", { note: cVc, d: 1 }))
+  out.push(chk("S", L("Geser satu arah pada d di dalam shell", "One-way shear at d inside shell"), "SNI 2847 §22.5", Vi, 0.75 * vcOne(I.fc, 1, Math.min(bot.As, top.As) / (1000 * d), d) * d, "W", { note: cVi, d: 1 }))
   if (Pcu > 0) {
     const c = I.colB, b0 = 4 * (c * 1000 + d)
     out.push(chk("S", L("Geser dua arah (pons) kolom atap pada pelat", "Two-way (punching) shear of roof column on slab"), "SNI 2847 §22.6", Pcu * 1000 / (b0 * d), 0.75 * vcTwo(I.fc, 1, 40, b0, d), "MPa", { note: cPc, d: 3 }))

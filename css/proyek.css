@@ -88,3 +88,21 @@
 .hm-wf .pj-steps { margin: 0; }
 .hm-fd { align-self: flex-start; font-size: .64rem; font-weight: 900; letter-spacing: .06em; padding: 3px 8px; border-radius: 7px; background: var(--field); color: var(--muted); border: 1px solid var(--line); }
 .hm-fd.deep { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+
+/* ikon SVG seragam (js/icons.js) */
+.icw { display: inline-flex; align-items: center; justify-content: center; line-height: 0; }
+.ico { width: 1.15em; height: 1.15em; display: block; }
+.dz-card-ic .ico { width: 30px; height: 30px; color: var(--accent); }
+.dz-ttl-ic .ico { width: 30px; height: 30px; color: var(--accent); }
+.dz-ico .ico { width: 19px; height: 19px; color: var(--accent); }
+.dz-settle-ic .ico { width: 21px; height: 21px; color: var(--accent); }
+.hm-ic .ico { width: 23px; height: 23px; color: var(--accent); }
+.dz-sw { display: inline-flex; align-items: center; gap: 7px; }
+.dz-sw .ico { width: 17px; height: 17px; color: var(--accent); }
+.dz-sw.on .ico { color: #fff; }
+.pj-step .pj-ic .ico { width: 21px; height: 21px; color: var(--accent); }
+.pj-step.on .pj-ic .ico { color: #fff; }
+.pj-link-ic .ico, .pj-case-ic .ico, .pj-frow .pj-ic .ico, .pj-chk-ic .ico { width: 22px; height: 22px; color: var(--accent); }
+.dz-card:hover .dz-card-ic .ico { animation: ic-wobble .7s var(--dz-ease); }
+@keyframes ic-wobble { 30% { transform: rotate(-8deg) scale(1.08); } 65% { transform: rotate(5deg); } }
+@media (prefers-reduced-motion: reduce) { .dz-card:hover .dz-card-ic .ico { animation: none; } }

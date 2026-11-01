@@ -1,6 +1,6 @@
 // Halaman "Desain Pondasi": hub 5 kalkulator + halaman modul (formulir, beban, kombinasi, hasil beranimasi, ekspor Excel/PDF).
 // Rumus ada di js/desain/*.js (fungsi murni, diuji di tests/suite_desain.js). Teks dua bahasa lewat L(id, en).
-import { L, lang, units, nf, SITES, AUTHOR, govern, seismicParams, uName } from "./desain/core.js"
+import { L, lang, units, nf, AUTHOR, govern, uName, setCode, relabel, edLabel, windCode, aciCode } from "./desain/core.js"
 import { el, loadState, saveState, siteCtx, renderForm, comboEditor, checksView, metricsView, tableView, exportBar, reveal, field, fmtCheck, urClass } from "./desain/ui.js"
 import * as tiang from "./desain/m_tiang.js"
 import * as tangki from "./desain/m_tangki.js"
@@ -8,6 +8,7 @@ import * as vessel from "./desain/m_vessel.js"
 import * as dinamis from "./desain/m_dinamis.js"
 import * as trafo from "./desain/m_trafo.js"
 import { projLoad, projSave, soilDS, seisSite, stepper } from "./project.js"
+import { ico, MOD_ICO } from "./icons.js"
 import { QA_METHOD } from "./desain/soil.js"
 
 export const MODS = [tiang, tangki, vessel, dinamis, trafo]
@@ -22,6 +23,7 @@ function defaults() {
 
 // konteks hitung bersama: angin dari data lokasi Desain, gempa & tanah & kriteria penurunan dari data proyek (tab Gempa / Tanah / Penurunan)
 export function designCtx(S, P, cmb) {
+  setCode(P.codes)
   const ss = seisSite(P)
   const sc = siteCtx({ ...S.site, Ss: ss.Ss, S1: ss.S1, cls: ss.cls, TL: ss.TL })
   return { ...sc, ss, soil: soilDS(P), bear: P.bear, settle: P.settle, cmbOpts: { SDS: sc.sp.SDS, wpFrac: cmb.wp, ortho: cmb.ortho, enabled: cmb.en, factors: cmb.fx } }
@@ -47,7 +49,7 @@ export function runAll(lng, opts = {}) {
   const S = loadDesign(), P = opts.P || projLoad()
   const mods = MODS.map((m) => {
     try {
-      const out = m.run(S.m[m.id], designCtx(S, P, S.cmb[m.id]))
+      const out = relabel(m.run(S.m[m.id], designCtx(S, P, S.cmb[m.id])))
       return { m, out }
     } catch (e) { console.error(e); return { m, error: e.message } }
   })
@@ -56,7 +58,7 @@ export function runAll(lng, opts = {}) {
 export function dashboard(lng) {
   const { S, P, mods } = runAll(lng)
   const sc = designCtx(S, P, CMB0())
-  return { project: P.info, site: S.site, sp: sc.sp, ss: sc.ss, units: units.sys, mods: mods.map(({ m, out, error }) => {
+  return { project: P.info, site: S.site, sp: sc.sp, ss: sc.ss, units: units.sys, codes: `${windCode().replace("SNI 1727:2020 ", "")} · ${aciCode().replace("SNI 2847:2019 ", "")} · AISC 360-22`, mods: mods.map(({ m, out, error }) => {
     if (error) return { id: m.id, icon: m.icon, title: m.title(), error }
     const g = govern(out.checks), bad = out.checks.filter((c) => !c.ok && !c.info)
     const st = out.settle && out.settle.s != null ? { s: out.settle.s, allow: out.settle.allow, kind: out.settle.kind } : null
@@ -82,7 +84,12 @@ function unitsToggle(S, onChange) {
   g.append(el("span", "lb", L("Satuan", "Units")))
   ;[["si", "kN · kPa"], ["t", "ton · t/m²"]].forEach(([k, v]) => {
     const b = el("button", "dz-ub" + (units.sys === k ? " on" : ""), v); b.type = "button"
-    b.onclick = () => { S.units = k; units.sys = k; saveState(S); onChange() }
+    b.onclick = () => {
+      S.units = k; units.sys = k; saveState(S)
+      g.querySelectorAll(".dz-ub").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-pressed", x === b ? "true" : "false") })
+      onChange()
+    }
+    b.setAttribute("aria-pressed", units.sys === k ? "true" : "false")
     g.append(b)
   })
   return g
@@ -91,9 +98,10 @@ let projOpen = false
 function projectCard(S, onChange) {
   const d = el("details", "dz-sec dz-in on"); d.open = projOpen
   d.addEventListener("toggle", () => { projOpen = d.open })
-  const sm = el("summary"); sm.append(el("span", "dz-ico", "📁"), el("span", "dz-st", L("Data proyek, angin, gempa & tanah", "Project, wind, seismic & soil data")))
+  setCode(PJ.codes)
+  const sm = el("summary"); const icP = el("span", "dz-ico"); icP.append(ico("project")); sm.append(icP, el("span", "dz-st", L("Data proyek, edisi kode, angin, gempa & tanah", "Project, code edition, wind, seismic & soil data")))
   const ss = seisSite(PJ), sp = ss.sp
-  sm.append(el("span", "dz-badge", `V ${nf(S.site.V, 0)} m/s · SDS ${nf(sp.SDS, 3)}`))
+  sm.append(el("span", "dz-badge", `${windCode().replace("SNI 1727:2020 ", "")} · ${aciCode().replace("SNI 2847:2019 ", "")} · V ${nf(S.site.V, 0)} m/s · SDS ${nf(sp.SDS, 3)}`))
   d.append(sm)
   const P = PJ.info, g1 = el("div", "dz-grid"), savePJ = () => { projSave(PJ); onChange(false) }
   ;[["name", L("Nama proyek", "Project name")], ["client", L("Klien", "Client")], ["doc", L("No. dokumen", "Document no.")], ["rev", "Rev."], ["eng", L("Dihitung oleh", "Prepared by")], ["chk", L("Diperiksa oleh", "Checked by")]]
@@ -103,11 +111,16 @@ function projectCard(S, onChange) {
   g2.append(field({ k: "V", lab: L("Kecepatan angin dasar V (3 detik)", "Basic wind speed V (3-s gust)"), u: "m/s", lo: 10, hi: 90, obj: st, help: L("SNI 1727:2020 Gambar 26.5-1 / data meteorologi lokasi.", "SNI 1727:2020 Fig. 26.5-1 / site meteorological data.") }, S, oc))
   g2.append(field({ k: "exp", type: "seg", lab: L("Kategori eksposur", "Exposure category"), opts: { B: "B", C: "C", D: "D" }, obj: st }, S, oc))
   g2.append(field({ k: "Kzt", lab: "Kzt", u: "", lo: 1, hi: 3, obj: st }, S, oc), field({ k: "Kd", lab: "Kd", u: "", lo: 0.85, hi: 1, obj: st, help: L("0,95 tangki/silinder; 0,85 struktur lain.", "0.95 tanks/cylinders; 0.85 other structures.") }, S, oc))
-  d.append(el("div", "dz-sub", L("Angin — SNI 1727:2020 (ASCE 7-16)", "Wind — SNI 1727:2020 (ASCE 7-16)")), g2)
-  const link = (href, ic, b, t) => { const a = el("a", "pj-link"); a.href = href; a.append(el("span", "pj-link-ic", ic)); const x = el("span"); x.append(el("b", null, b), el("small", null, t)); a.append(x, el("span", "pj-go", "→")); return a }
+  const cd = PJ.codes, gC = el("div", "dz-grid"), ocC = () => { projSave(PJ); onChange(true) }
+  gC.append(field({ k: "wind", type: "seg", lab: L("Kode angin & kombinasi beban", "Wind & load combination code"), opts: { "7-22": L("ASCE 7-22 (terbaru)", "ASCE 7-22 (latest)"), "7-16": "SNI 1727:2020 / ASCE 7-16" }, obj: cd, wide: true }, cd, ocC),
+    field({ k: "aci", type: "seg", lab: L("Kode beton", "Concrete code"), opts: { "19": L("ACI 318-19 (terbaru)", "ACI 318-19 (latest)"), "14": "SNI 2847:2019 / ACI 318-14" }, obj: cd, wide: true }, cd, ocC))
+  d.append(el("div", "dz-sub", L("Edisi kode desain", "Design code edition")), gC,
+    el("p", "dz-note", L("Baja: AISC 360-22 (rumus pipa bulat sama dengan SNI 1729:2020). Gempa: SNI 1726:2019 (tab Gempa). ACI 318-19 memakai faktor ukuran λs dan ρw pada geser satu arah telapak — kapasitas geser telapak tebal bisa jauh lebih kecil dibanding ACI 318-14.", "Steel: AISC 360-22 (round HSS equations same as SNI 1729:2020). Seismic: SNI 1726:2019 (Seismic tab). ACI 318-19 applies the size factor λs and ρw to one-way shear of footings — thick footings can have much lower shear capacity than under ACI 318-14.")))
+  d.append(el("div", "dz-sub", L(`Angin — ${windCode()}`, `Wind — ${windCode()}`)), g2)
+  const link = (href, ic, b, t) => { const a = el("a", "pj-link"); a.href = href; { const w = el("span", "pj-link-ic"); w.append(ico(ic)); a.append(w) } const x = el("span"); x.append(el("b", null, b), el("small", null, t)); a.append(x, el("span", "pj-go", "→")); return a }
   const ds = soilDS(PJ), lk = el("div", "pj-links")
-  lk.append(link("#/gempa", "🌐", L("Gempa — tab Gempa (SNI 1726:2019)", "Seismic — Seismic tab (SNI 1726:2019)"), `Ss ${nf(ss.Ss, 3)} · S1 ${nf(ss.S1, 3)} · ${L("kelas", "class")} ${ss.cls}${ss.auto ? " (" + L("otomatis", "auto") + ")" : ""} · SDS ${nf(sp.SDS, 3)} · SD1 ${nf(sp.SD1, 3)} · KDS ${ss.SDC}`),
-    link("#/tanah", "🧱", L("Tanah — tab Tanah", "Soil — Soil tab"), `${PJ.soil.name} · ${PJ.soil.test === "cpt" ? "CPT" : "N-SPT"} · ${ds.layers.length} ${L("lapis", "layers")} · MAT ${nf(ds.gwt, 1)} m · qa: ${QA_METHOD()[PJ.bear.method]}`))
+  lk.append(link("#/gempa", "seismic", L("Gempa — tab Gempa (SNI 1726:2019)", "Seismic — Seismic tab (SNI 1726:2019)"), `Ss ${nf(ss.Ss, 3)} · S1 ${nf(ss.S1, 3)} · ${L("kelas", "class")} ${ss.cls}${ss.auto ? " (" + L("otomatis", "auto") + ")" : ""} · SDS ${nf(sp.SDS, 3)} · SD1 ${nf(sp.SD1, 3)} · KDS ${ss.SDC}`),
+    link("#/tanah", "soil", L("Tanah — tab Tanah", "Soil — Soil tab"), `${PJ.soil.name} · ${PJ.soil.test === "cpt" ? "CPT" : "N-SPT"} · ${ds.layers.length} ${L("lapis", "layers")} · MAT ${nf(ds.gwt, 1)} m · qa: ${QA_METHOD()[PJ.bear.method]}`))
   d.append(el("div", "dz-sub", L("Gempa & tanah (dari tab Gempa / Tanah — ubah di sana)", "Seismic & soil (from the Seismic / Soil tabs — edit there)")), lk)
   return d
 }
@@ -121,16 +134,16 @@ function hub(root, S) {
     el("p", null, L("Lima kalkulator desain. Pondasi peralatan bisa DANGKAL (telapak/mat, qa dari tab Tanah: N-SPT, CPT atau Vesic) atau DALAM (tiang pipa/bor, kapasitas dari tab Tanah). Gempa dari tab Gempa, penurunan otomatis ke tab Penurunan, kombinasi SNI 1727/ASCE 7 + PIP, pemeriksaan SNI 2847/ACI 318, AISC 360, API 650, ACI 351.3R, ekspor Excel & PDF — offline di iPad.",
       "Five design calculators. Equipment foundations can be SHALLOW (footing/mat, qa from the Soil tab: N-SPT, CPT or Vesic) or DEEP (pipe/bored piles, capacity from the Soil tab). Seismic from the Seismic tab, settlement feeds the Settlement tab, SNI 1727/ASCE 7 + PIP combinations, SNI 2847/ACI 318, AISC 360, API 650, ACI 351.3R checks, Excel & PDF export — offline on the iPad.")))
   const chips = el("div", "dz-chips")
-  ;["SNI 1726 · 1727 · 2847 · 8460", "AISC 360-16", "ACI 318M · 351.3R", "API 650 · RP 2GEO", "PIP", "Excel · PDF"].forEach((c) => chips.append(el("span", "dz-chip", c)))
+  ;[windCode(), aciCode(), "AISC 360-22", "SNI 1726:2019 · 8460:2017", "API 650 · RP 2GEO", "ACI 351.3R", "PIP", "Excel · PDF"].forEach((c) => chips.append(el("span", "dz-chip", c)))
   h.append(chips)
   hero.append(h)
   const bar = el("div", "dz-hub-bar"); bar.append(unitsToggle(S, () => { root.textContent = ""; hub(root, S); reveal(root) }))
   const grid = el("div", "dz-hub")
   MODS.forEach((m, i) => {
     const a = el("a", "dz-card dz-in"); a.href = "#/desain/" + m.id; a.style.setProperty("--i", i)
-    const ic = el("div", "dz-card-ic", m.icon)
+    const ic = el("div", "dz-card-ic"); ic.append(ico(MOD_ICO[m.id]))
     a.append(ic, el("b", null, m.title()), el("span", "dz-card-tx", m.blurb()))
-    const cc = el("div", "dz-card-codes"); m.codes.split(" · ").slice(0, 4).forEach((c) => cc.append(el("span", null, c)))
+    const cc = el("div", "dz-card-codes"); edLabel(m.codes).split(" · ").slice(0, 4).forEach((c) => cc.append(el("span", null, c)))
     a.append(cc, el("span", "dz-go", L("Buka kalkulator →", "Open calculator →")))
     grid.append(a)
   })
@@ -140,7 +153,7 @@ function hub(root, S) {
 function settleCard(sb) {
   const c = el("div", "dz-settle dz-in")
   const h = el("div", "dz-settle-h")
-  h.append(el("span", "dz-settle-ic", "📉"), el("div"))
+  { const w = el("span", "dz-settle-ic"); w.append(ico("settle")); h.append(w, el("div")) }
   h.lastChild.append(el("b", null, sb.kind === "deep" ? L("Penurunan kelompok tiang", "Pile group settlement") : L("Penurunan pondasi dangkal", "Shallow foundation settlement")), el("span", "hint", L(" · data tab Tanah, kriteria tab Penurunan", " · Soil tab data, Settlement tab criteria")))
   c.append(h)
   if (sb.error) c.append(el("p", "dz-note", sb.error))
@@ -169,16 +182,16 @@ function page(root, S, mod) {
   const head = el("div", "dz-head dz-in")
   const crumbs = el("div", "dz-crumb"); const back = el("a", null, L("← Desain", "← Design")); back.href = "#/desain"; crumbs.append(back)
   const sw = el("div", "dz-switch")
-  MODS.forEach((m) => { const a = el("a", "dz-sw" + (m === mod ? " on" : ""), `${m.icon} ${m.title().split(" (")[0].replace("Pondasi ", "").replace(" Foundation", "")}`); a.href = "#/desain/" + m.id; sw.append(a) })
+  MODS.forEach((m) => { const a = el("a", "dz-sw" + (m === mod ? " on" : "")); a.append(ico(MOD_ICO[m.id]), document.createTextNode(m.title().split(" (")[0].replace("Pondasi ", "").replace(" Foundation", ""))); a.href = "#/desain/" + m.id; sw.append(a) })
   crumbs.append(sw)
-  const ttl = el("div", "dz-ttl"); ttl.append(el("span", "dz-ttl-ic", mod.icon)); const tt = el("div"); tt.append(el("h1", null, mod.title()), el("p", "dz-codes", mod.codes)); ttl.append(tt)
+  const ttl = el("div", "dz-ttl"); { const w = el("span", "dz-ttl-ic"); w.append(ico(MOD_ICO[mod.id])); ttl.append(w) } const tt = el("div"); const codesEl = el("p", "dz-codes", edLabel(mod.codes)); tt.append(el("h1", null, mod.title()), codesEl); ttl.append(tt)
   head.append(crumbs, ttl)
   const status = el("a", "dz-status"); status.href = "#"
   status.onclick = (e) => { e.preventDefault(); resBox.scrollIntoView({ behavior: "smooth", block: "start" }) }
   const nav = el("div", "dz-jump")
   const tools = el("div", "dz-tools")
   const projBox = el("div"), formBox = el("div", "dz-form"), cmbWrap = el("details", "dz-sec dz-in"), resBox = el("div", "dz-res"), expBox = el("div", "dz-expbox dz-in")
-  const cmbSum = el("summary"); cmbSum.append(el("span", "dz-ico", "🧮"), el("span", "dz-st", L("Kombinasi beban (SNI 1727:2020 / ASCE 7-16 + PIP STC01015)", "Load combinations (SNI 1727:2020 / ASCE 7-16 + PIP STC01015)")))
+  const cmbSum = el("summary"); { const w = el("span", "dz-ico"); w.append(ico("calc")); cmbSum.append(w, el("span", "dz-st", edLabel(L("Kombinasi beban (SNI 1727:2020 / ASCE 7-16 + PIP STC01015)", "Load combinations (SNI 1727:2020 / ASCE 7-16 + PIP STC01015)")))) }
   const cmbCount = el("span", "dz-badge"); cmbSum.append(cmbCount)
   const cmbBox = el("div"); cmbWrap.append(cmbSum, cmbBox)
   ;[[L("Masukan", "Input"), formBox], [L("Kombinasi", "Combinations"), cmbWrap], [L("Hasil", "Results"), resBox], [L("Ekspor", "Export"), expBox]].forEach(([t, target]) => {
@@ -202,7 +215,7 @@ function page(root, S, mod) {
   function compute(redrawCmb) {
     if (formBox.__refresh) formBox.__refresh()
     let out
-    try { out = mod.run(st, ctx()) } catch (e) {
+    try { out = relabel(mod.run(st, ctx())); codesEl.textContent = edLabel(mod.codes) } catch (e) {
       console.error(e)
       resBox.textContent = ""; resBox.append(el("div", "err", L("Perhitungan gagal: ", "Calculation failed: ") + e.message))
       status.className = "dz-status bad"; status.textContent = "⚠️ " + e.message
@@ -267,7 +280,7 @@ function page(root, S, mod) {
     })
     if (out.steps && out.steps.length) {
       const sd = el("details", "dz-steps dz-in")
-      const ss = el("summary"); ss.append(el("span", "dz-ico", "📐"), el("span", null, L("Lembar perhitungan langkah demi langkah", "Step-by-step calculation sheet")), el("span", "dz-badge", `${out.steps.length} ${L("bagian", "parts")}`))
+      const ss = el("summary"); const icS = el("span", "dz-ico"); icS.append(ico("ruler")); ss.append(icS, el("span", null, L("Lembar perhitungan langkah demi langkah", "Step-by-step calculation sheet")), el("span", "dz-badge", `${out.steps.length} ${L("bagian", "parts")}`))
       sd.append(ss)
       out.steps.forEach((st, i) => {
         const w = el("div", "dz-step"); w.style.setProperty("--i", i)

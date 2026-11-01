@@ -8,6 +8,7 @@ import { lineChart } from "./desain/chart.js"
 import { projLoad, projSave, soilDS, stepper } from "./project.js"
 import { settleShallow, settleGroup, pileAxial, typeName, AXIAL_METHOD } from "./desain/soil.js"
 import { initUnits, hero, card, footer, nextBtn } from "./pj_ui.js"
+import { ico, MOD_ICO } from "./icons.js"
 
 const RIG = () => ({ fleksibel_tengah: L("Fleksibel, tengah", "Flexible, centre"), fleksibel_rata: L("Fleksibel, rata-rata", "Flexible, average"), kaku: L("Kaku (×0,93)", "Rigid (×0.93)") })
 const SHAPE = () => ({ persegi: L("Persegi/panjang", "Rectangular"), lingkaran: L("Lingkaran", "Circular"), lajur: L("Lajur", "Strip") })
@@ -21,10 +22,10 @@ export async function collectCases(P, lng) {
     for (const { m, out: o, error } of mods) {
       if (error || !o || !o.settle) continue
       const sb = o.settle
-      out.push({ id: "mod:" + m.id, src: "mod", icon: m.icon, title: m.title(), sub: o.sub, kind: sb.kind, foot: sb.foot, group: sb.group, allowOv: sb.allow, href: "#/desain/" + m.id })
+      out.push({ id: "mod:" + m.id, src: "mod", icon: MOD_ICO[m.id], title: m.title(), sub: o.sub, kind: sb.kind, foot: sb.foot, group: sb.group, allowOv: sb.allow, href: "#/desain/" + m.id })
     }
   } catch (e) { console.error(e) }
-  ;(P.settle.manual || []).forEach((c, i) => out.push({ id: "man:" + i, src: "man", idx: i, icon: c.kind === "deep" ? "📍" : "🧱", title: c.label || `${L("Kasus manual", "Manual case")} ${i + 1}`, sub: c.kind === "deep" ? L("tiang (manual)", "piles (manual)") : L("dangkal (manual)", "shallow (manual)"), kind: c.kind, man: c }))
+  ;(P.settle.manual || []).forEach((c, i) => out.push({ id: "man:" + i, src: "man", idx: i, icon: c.kind === "deep" ? "pile" : "found", title: c.label || `${L("Kasus manual", "Manual case")} ${i + 1}`, sub: c.kind === "deep" ? L("tiang (manual)", "piles (manual)") : L("dangkal (manual)", "shallow (manual)"), kind: c.kind, man: c }))
   return out
 }
 // hitung satu kasus memakai kriteria tab ini
@@ -118,7 +119,7 @@ export function mountPenurunan(box, ctx) {
     const grid = el("div", "pj-cases")
     results.forEach(({ c, r }, i) => {
       const a = el("button", "pj-case dz-in" + (c.id === o.sel ? " on" : "")); a.type = "button"; a.style.setProperty("--i", i)
-      const top = el("div", "pj-case-top"); top.append(el("span", "pj-case-ic", c.icon), el("b", null, c.title.split(" (")[0]), el("span", "pj-tag" + (c.kind === "deep" ? " deep" : ""), c.kind === "deep" ? L("DALAM", "DEEP") : L("DANGKAL", "SHALLOW")))
+      const top = el("div", "pj-case-top"); const icC = el("span", "pj-case-ic"); icC.append(ico(c.icon)); top.append(icC, el("b", null, c.title.split(" (")[0]), el("span", "pj-tag" + (c.kind === "deep" ? " deep" : ""), c.kind === "deep" ? L("DALAM", "DEEP") : L("DANGKAL", "SHALLOW")))
       a.append(top)
       if (r.error) a.append(el("small", "pj-err", r.error))
       else {
@@ -157,7 +158,7 @@ export function mountPenurunan(box, ctx) {
           const d = el("details", "dz-tdet"); const sm = el("summary", null, t.title); sm.append(el("span", "dz-badge", String(t.rows.length))); d.append(sm, tableView({ ...t, title: "" })); body.push(d)
         })
         last.steps.forEach((st) => { const t = tableView({ title: st.h, cols: [L("Besaran", "Quantity"), L("Rumus", "Formula"), L("Substitusi", "Substitution"), L("Hasil", "Result")], rows: st.rows, align: ["l", "l", "l", "r"] }); t.classList.add("dz-steptbl"); body.push(t) })
-        if (c.href) { const a = el("a", "pj-link"); a.href = c.href; a.append(el("span", "pj-link-ic", c.icon), (() => { const x = el("span"); x.append(el("b", null, L("Buka modul desain", "Open design module")), el("small", null, c.sub || "")); return x })(), el("span", "pj-go", "→")); body.push(a) }
+        if (c.href) { const a = el("a", "pj-link"); a.href = c.href; const icL = el("span", "pj-link-ic"); icL.append(ico(c.icon)); a.append(icL, (() => { const x = el("span"); x.append(el("b", null, L("Buka modul desain", "Open design module")), el("small", null, c.sub || "")); return x })(), el("span", "pj-go", "→")); body.push(a) }
       }
       detBox.append(card("s-det", "🔬", `${L("Rincian", "Details")} — ${c.title.split(" (")[0]}`, c.kind === "deep" ? L("TIANG", "PILES") : L("DANGKAL", "SHALLOW"), body))
     }

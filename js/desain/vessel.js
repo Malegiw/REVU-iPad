@@ -1,7 +1,7 @@
 // Pondasi vessel: vertikal (Gas Boot, Instrument Air Receiver) di atas pedestal oktagon/persegi + telapak, dan horizontal (Separator) di atas dua saddle
 // (tetap & geser) dengan telapak gabungan atau terpisah. Angin SNI 1727:2020 Bab 29 (diintegrasikan per tinggi), gempa SNI 1726:2019 §15 (Cs),
 // gesek termal saddle geser (PIP STE03350/03360), baut angkur ACI 318M-14 Bab 17. Desain telapak & pedestal memakai mesin footing.js.
-import { L, chk, windOnBody, cfRound, seismicCoef } from "./core.js"
+import { L, chk, windOnBody, cfRound, seismicCoef, CODE } from "./core.js"
 import { analyzeFooting } from "./footing.js"
 import { pileLayout } from "./deep.js"
 import { anchorCheck, ANCHOR } from "./steel.js"
@@ -75,6 +75,8 @@ export function analyzeVessel(I, combos) {
   return { res, anc, checks }
 }
 
+// nomor pasal Bab 17: ACI 318-14 (SNI 2847:2019) → ACI 318-19
+const A17 = (s14, s19) => (CODE.aci === "14" ? "SNI 2847 " + s14 : "ACI 318-19 " + s19)
 function anchors(I, combos) {
   const out = [], g = L("Baut angkur (LRFD)", "Anchor bolts (LRFD)")
   const n = I.nb, d = I.bd
@@ -92,17 +94,17 @@ function anchors(I, combos) {
   }
   if (!w) return { checks: out }
   const ac = w.ac, sfx = I.kind === "h" ? ` (${w.k === 0 ? L("saddle tetap", "fixed saddle") : L("saddle geser", "sliding saddle")})` : ""
-  out.push(chk(g, L(`Tarik baja baut ${n}×M${d} ${ANCHOR[I.bg].nm}${sfx}`, `Bolt steel tension ${n}×M${d} ${ANCHOR[I.bg].nm}${sfx}`), "SNI 2847 §17.4.1", Math.max(w.Tu, 0), ac.phiNsa, "F", { note: w.c, d: 2 }))
-  out.push(chk(g, L("Cabut (pullout) kepala/mur baut", "Head/nut pull-out"), "SNI 2847 §17.4.3", Math.max(w.Tu, 0), ac.phiNpn, "F", { note: w.c, d: 2 }))
-  out.push(chk(g, L("Geser baja baut (dengan grout, ×0,8)", "Bolt steel shear (with grout, ×0.8)"), "SNI 2847 §17.5.1", w.Vu, ac.phiVsa, "F", { note: w.c, d: 2 }))
-  out.push(chk(g, L("Interaksi tarik–geser (ζ = 5/3)", "Tension–shear interaction (ζ = 5/3)"), "SNI 2847 R17.6", ac.inter, 1, "", { note: w.c, d: 3 }))
+  out.push(chk(g, L(`Tarik baja baut ${n}×M${d} ${ANCHOR[I.bg].nm}${sfx}`, `Bolt steel tension ${n}×M${d} ${ANCHOR[I.bg].nm}${sfx}`), A17("§17.4.1", "§17.6.1"), Math.max(w.Tu, 0), ac.phiNsa, "F", { note: w.c, d: 2 }))
+  out.push(chk(g, L("Cabut (pullout) kepala/mur baut", "Head/nut pull-out"), A17("§17.4.3", "§17.6.3"), Math.max(w.Tu, 0), ac.phiNpn, "F", { note: w.c, d: 2 }))
+  out.push(chk(g, L("Geser baja baut (dengan grout, ×0,8)", "Bolt steel shear (with grout, ×0.8)"), A17("§17.5.1", "§17.7.1"), w.Vu, ac.phiVsa, "F", { note: w.c, d: 2 }))
+  out.push(chk(g, L("Interaksi tarik–geser (ζ = 5/3)", "Tension–shear interaction (ζ = 5/3)"), A17("R17.6", "R17.8"), ac.inter, 1, "", { note: w.c, d: 3 }))
   // tulangan angkur (§17.4.2.9): tulangan pedestal di sisi tarik memikul gaya tarik angkur, φ = 0,75
   const nt = I.kind === "v" ? Math.max(1, Math.floor(n / 2)) : n / 2
   const Treq = Math.max(w.Tu, 0) * nt
   const AsReq = Treq * 1000 / (0.75 * I.fy), AsTie = Math.floor(I.nBars / 2) * barA(I.dbP)
-  out.push(chk(g, L("Tulangan angkur (vertikal pedestal sisi tarik) memikul tarik baut", "Anchor reinforcement (tension-side pedestal bars) carries bolt tension"), "SNI 2847 §17.4.2.9", AsReq, AsTie, "mm²", { note: w.c, d: 0 }))
+  out.push(chk(g, L("Tulangan angkur (vertikal pedestal sisi tarik) memikul tarik baut", "Anchor reinforcement (tension-side pedestal bars) carries bolt tension"), A17("§17.4.2.9", "§17.5.2"), AsReq, AsTie, "mm²", { note: w.c, d: 0 }))
   const edge = I.kind === "v" ? (I.Dp - I.BCD) / 2 * 1000 : (I.by - I.sb) / 2 * 1000
-  out.push(chk(g, L("Jarak tepi baut ke sisi pedestal ≥ max(4d, 100 mm)", "Bolt edge distance to pedestal face ≥ max(4d, 100 mm)"), "PIP STE05121 / SNI 2847 §17.7", edge, Math.max(4 * d, 100), "mm", { mode: "ge", d: 0 }))
+  out.push(chk(g, L("Jarak tepi baut ke sisi pedestal ≥ max(4d, 100 mm)", "Bolt edge distance to pedestal face ≥ max(4d, 100 mm)"), "PIP STE05121 / " + A17("§17.7", "§17.9"), edge, Math.max(4 * d, 100), "mm", { mode: "ge", d: 0 }))
   out.push(chk(g, L("Panjang tanam hef ≥ 12d dan ≤ hp + t − 75 mm", "Embedment hef ≥ 12d and ≤ hp + t − 75 mm"), L("praktik PIP", "PIP practice"), I.hef, 12 * d, "mm", { mode: "ge", d: 0, ok: I.hef >= 12 * d && I.hef <= (I.hp + I.t) * 1000 - 75 }))
   return { checks: out, w }
 }
