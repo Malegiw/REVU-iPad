@@ -34,9 +34,23 @@ Alur ini tampil sebagai langkah 1–5 di atas setiap tab dan di Beranda.
 | ↳ Trafo (statis) | Plinth + telapak/pile cap, bak oli IEEE 980, dongkrak, stopper gempa. |
 | **Penurunan** | Dibangun ulang: **pondasi dangkal** — penurunan segera (Steinbrenner, tanah berlapis), konsolidasi primer (Terzaghi, NC/OC) + sekunder, total terhadap umur rencana, kurva waktu, Δσ vs σ'v0; **pondasi dalam** — pemendekan elastis tiang + rakit ekuivalen (2L/3, sebaran 1H:4V; di ujung untuk tiang dukung ujung), pembanding Vesic. Daftar pondasi otomatis dari semua modul Desain + kasus manual. Kriteria (umur, batas dangkal/tiang, Boussinesq/2:1, kekakuan) berlaku untuk modul Desain. |
 | **Laporan** | Data proyek (kepala laporan), status alur, pilihan isi (lengkap/ringkas, gambar, modul), lalu **laporan proyek gabungan** PDF (bab A Tanah, B Gempa, C Ringkasan desain, D… tiap modul, terakhir Penurunan) dan Excel. |
-| **Alur Migas** | Alur minyak dan gas dari sumur sampai gathering station, dengan tombol ke kalkulator desain tiap peralatan. |
+| **Alur Migas** | (Menu kedua, di samping Beranda.) Alur minyak dan gas dari sumur sampai gathering station, dengan tombol ke kalkulator desain tiap peralatan. **Narasi suara** tiap tahap: tombol Putar/Jeda/Berhenti, sorotan kalimat yang sedang dibacakan, lanjut otomatis ke tahap berikutnya, pilihan kecepatan & suara. Bahasa Indonesia memakai **suara wanita** (mis. *Damayanti* di iPad), bahasa Inggris memakai **suara pria** (mis. *Daniel*/*Aaron*/*Arthur*). Memakai suara bawaan perangkat (Web Speech API), jadi jalan offline; bila suaranya belum terpasang, tambahkan di Pengaturan → Aksesibilitas → Konten Lisan → Suara. |
 
-Dua bahasa (Indonesia dan Inggris), tema terang, gelap, atau otomatis.
+Dua bahasa (Indonesia dan Inggris), tema terang, gelap, atau otomatis. Ikon antarmuka berupa SVG garis yang seragam (`js/icons.js`).
+
+## Edisi kode desain
+
+Dipilih di Desain → *Data proyek, edisi kode…* (berlaku untuk semua kalkulator dan laporan):
+
+| Bidang | Terbaru (bawaan) | Alternatif |
+|---|---|---|
+| Angin & kombinasi beban | **ASCE 7-22**: Kz = 2,41(z/zg)^(2/α) dengan α/zg baru (B 7,5/1000 m; C 9,8/750 m; D 11,5/590 m), qz = 0,613·Kz·Kzt·Ke·V², Kd pada gaya F = qz·Kd·G·Cf·Af (§29.4) | SNI 1727:2020 / ASCE 7-16 (Kz = 2,01…, Kd di qz) |
+| Beton | **ACI 318-19**: geser satu arah telapak/pelat 0,66·λs·λ·ρw^(1/3)·√fc' (Tabel 22.5.5.1c, λs = √(2/(1+0,004d))), λs pada geser dua arah, kait ldh baru (§25.4.3.1), nomor pasal Bab 17 baru | SNI 2847:2019 / ACI 318-14 |
+| Baja | **AISC 360-22** (rumus pipa bulat sama dengan SNI 1729:2020 / AISC 360-16) | — |
+| Mesin | ISO 21940-11 (mutu balans, pengganti ISO 1940-1), ISO 20816 (getaran, pengganti ISO 10816), ACI 351.3R-18 | — |
+| Gempa | SNI 1726:2019 (edisi Indonesia terbaru; dasar ASCE 7-16) | — |
+
+Catatan: ACI 318-19 membuat kapasitas geser satu arah telapak tebal dengan tulangan sedikit jauh lebih kecil daripada ACI 318-14 — itu perilaku kode yang benar, bukan kesalahan.
 
 ## Memasang di iPad
 
@@ -51,17 +65,17 @@ Masukan tersimpan di perangkat (localStorage: `ymd.project.v1` untuk data proyek
 `tests/run.html` menjalankan tiga kelompok uji (`tests/suite_*.js`):
 
 - **penurunan**: `js/penurunan.js` dibandingkan dengan hasil versi Python di aplikasi utama (`tests/penurunan_cases.json`, toleransi relatif 1e-9), ditambah nilai acuan teori.
-- **desain**: `js/desain/*.js` terhadap 70 nilai acuan teori/rumus tertutup (Matlock–Reese, Hetenyi, Broms, API RP 2GEO, AC358, API 650 Annex E, SNI 1726/1727, ACI 318, AISC 360, Richart–Whitman, XLSX/PDF).
+- **desain**: `js/desain/*.js` terhadap 83 nilai acuan teori/rumus tertutup (Matlock–Reese, Hetenyi, Broms, API RP 2GEO, AC358, API 650 Annex E, SNI 1726/1727 & ASCE 7-22, ACI 318-14 & 318-19, AISC 360, Richart–Whitman, XLSX/PDF).
 - **tanah**: 44 uji untuk data tanah & pondasi dalam — korelasi (N60, φ, cu, e0, Cc), kelas situs SNI 1726, Nc/Nq/Nγ, Meyerhof N-SPT/CPT, Skempton, kapasitas tiang (α/β sama dengan `pile.js`, N-SPT Meyerhof, CPT LCPC), penurunan dangkal = `analyze()` langsung, rakit ekuivalen, keseimbangan reaksi tiang, momen pile cap dari reaksi titik, KDS & spektrum.
 
 ```bash
 python3 -m http.server 8610
-# lalu buka http://127.0.0.1:8610/tests/run.html  (judul tab: "LOLOS 175/175")
+# lalu buka http://127.0.0.1:8610/tests/run.html  (judul tab: "LOLOS 188/188")
 ```
 
 ## Struktur
 
-- `index.html`, `css/app.css`, `js/app.js`: kerangka (menu, bahasa, tema, offline). `js/home.js` + `css/home.css`: beranda & dashboard. `icons/logo.svg`: logo YMD-CAL.
+- `index.html`, `css/app.css`, `js/app.js`: kerangka (menu, bahasa, tema, offline). `js/home.js` + `css/home.css`: beranda & dashboard. `icons/logo.svg`: logo YMD-CAL. `js/icons.js`: set ikon SVG. `js/voice.js`: narasi suara Alur Migas.
 - `js/project.js`: data proyek bersama (info, tanah, gempa, metode daya dukung, kriteria penurunan), kelas situs → parameter gempa, KDS, spektrum, dan komponen alur proyek. `js/pj_ui.js` + `css/proyek.css`: komponen tab proyek.
 - `js/tanah_ui.js` (Tanah), `js/gempa_ui.js` (Gempa), `js/penurunan_ui.js` (Penurunan, memakai mesin `js/penurunan.js`), `js/laporan_ui.js` (Laporan gabungan).
 - `js/desain_ui.js` + `css/desain.css`: halaman Desain. Di `js/desain/`: `core.js` (satuan, angin, gempa, kombinasi beban), `soil.js` (korelasi tanah, daya dukung, kapasitas tiang, kelas situs, penurunan dangkal & kelompok), `deep.js` (pilihan dangkal/dalam: tata letak tiang, kelompok tiang di bawah cap, pelat tangki di atas tiang, kekakuan tiang, tabel & gambar), `rc.js`, `steel.js`, `footing.js` (tekanan tanah atau reaksi tiang + desain telapak/pile cap & pedestal), `pile.js`, `tank.js`, `vessel.js`, `dynamic.js`, `trafo.js`, `settle.js`, `m_*.js` (formulir & laporan tiap modul), `ui.js` (formulir, hasil, ekspor; laporan berbab), `draw.js`, `chart.js` (grafik garis), `sketch.js`, `steps.js`, `xlsx.js`, `pdf.js`.

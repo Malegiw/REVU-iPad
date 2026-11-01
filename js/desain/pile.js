@@ -357,11 +357,11 @@ function pileCap(I, piles, lrfd, Bc, Lc, D) {
   const smax = Math.min(3 * h, 450), asMin = rhoTS(I.fyc) * 1000 * h
   const fx = asFlex(Mx, 1000, d, I.fcc, I.fyc), fy = asFlex(My, 1000, d, I.fcc, I.fyc)
   const bx = pickBars(Math.max(fx.As || 0, asMin), smax, I.dbc), by = pickBars(Math.max(fy.As || 0, asMin), smax, I.dbc)
-  const phiVc = 0.75 * vcOne(I.fcc) * d                                            // kN/m
+  const phiVcX = 0.75 * vcOne(I.fcc, 1, bx.As / (1000 * d), d) * d, phiVcY = 0.75 * vcOne(I.fcc, 1, by.As / (1000 * d), d) * d   // kN/m
   out.push(chk("", L(`Lentur arah X di muka kolom (${bx.txt})`, `X-direction flexure at column face (${bx.txt})`), "SNI 2847 §13.2.7.1", Mx, phiMn(bx.As, 1000, d, I.fcc, I.fyc), "Mm", { note: cMx, d: 1 }))
   out.push(chk("", L(`Lentur arah Y di muka kolom (${by.txt})`, `Y-direction flexure at column face (${by.txt})`), "SNI 2847 §13.2.7.1", My, phiMn(by.As, 1000, d, I.fcc, I.fyc), "Mm", { note: cMy, d: 1 }))
-  out.push(chk("", L("Geser satu arah X (reaksi tiang parsial §13.4.2.5)", "One-way shear X (partial pile reactions §13.4.2.5)"), "SNI 2847 §13.4.2.5, §22.5", Vx, phiVc, "W", { note: cVx, d: 1 }))
-  out.push(chk("", L("Geser satu arah Y", "One-way shear Y"), "SNI 2847 §22.5", Vy, phiVc, "W", { note: cVy, d: 1 }))
+  out.push(chk("", L("Geser satu arah X (reaksi tiang parsial §13.4.2.5)", "One-way shear X (partial pile reactions §13.4.2.5)"), "SNI 2847 §13.4.2.5, §22.5", Vx, phiVcX, "W", { note: cVx, d: 1 }))
+  out.push(chk("", L("Geser satu arah Y", "One-way shear Y"), "SNI 2847 §22.5", Vy, phiVcY, "W", { note: cVy, d: 1 }))
   const b0 = 2 * (I.cx * 1000 + d) + 2 * (I.cy * 1000 + d)
   const beta = Math.max(I.cx, I.cy) / Math.min(I.cx, I.cy)
   if (piles.length > 1) out.push(chk("", L("Geser dua arah (pons) kolom pada pile cap", "Two-way (punching) shear of column on pile cap"), "SNI 2847 §22.6", Vp * 1000 / (b0 * d), 0.75 * vcTwo(I.fcc, beta, 40, b0, d), "MPa", { note: cVp, d: 3 }))

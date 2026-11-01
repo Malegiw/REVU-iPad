@@ -1,3 +1,6 @@
+import * as V from "./voice.js"
+import { icoHTML } from "./icons.js"
+
 export function mountFlow(parentElement, data, setTriggerValue) {
   const root = parentElement.querySelector(".ymd-flow-root")
   if (!root || !data) return
@@ -37,6 +40,52 @@ export function mountFlow(parentElement, data, setTriggerValue) {
   const dots = [], chipBtns = []
   let sel = null
   const N = data.stages.length
+  // ---- narasi suara (Indonesia: suara wanita, Inggris: suara pria)
+  const lang = data.lang === "en" ? "en" : "id"
+  const VT = lang === "en"
+    ? { listen: "Listen to the story", play: "Play", pause: "Pause", resume: "Resume", stop: "Stop", auto: "Continue to next stage", voice: "Voice", speed: "Speed", none: "Voice narration is not supported in this browser.", male: "male voice", female: "female voice", nov: "no English voice installed — use Settings → Accessibility → Spoken Content → Voices" }
+    : { listen: "Dengarkan cerita", play: "Putar", pause: "Jeda", resume: "Lanjut", stop: "Berhenti", auto: "Lanjut otomatis ke tahap berikutnya", voice: "Suara", speed: "Kecepatan", none: "Narasi suara tidak didukung peramban ini.", male: "suara pria", female: "suara wanita", nov: "suara Bahasa Indonesia belum terpasang — buka Pengaturan → Aksesibilitas → Konten Lisan → Suara" }
+  let autoNext = true, chain = false
+  const player = V.createPlayer(lang, {
+    onState: (st) => { if (vbar) paintBar(st) },
+    onEnd: () => { if (chain && autoNext && sel != null && sel < N) { const nx = sel + 1; show(nx, true); setTimeout(() => { if (sel === nx) { chain = true; player.play() } }, 650) } else chain = false },
+  })
+  let vbar = null, vbtn = null, vname = null
+  function paintBar(st) {
+    if (!vbtn) return
+    vbtn.innerHTML = icoHTML(st === "playing" ? "pause" : "play") + `<span>${st === "playing" ? VT.pause : st === "paused" ? VT.resume : VT.play}</span>`
+    vbtn.classList.toggle("on", st === "playing")
+    vbar.classList.toggle("live", st === "playing")
+  }
+  function voiceBar(segs) {
+    const bar = el("div", "vbar")
+    if (!V.supported()) { bar.append(el("span", "vnote", VT.none)); return bar }
+    vbar = bar
+    const b = el("button", "vplay"); b.type = "button"; vbtn = b
+    b.onclick = () => { if (player.state === "playing") { chain = false; player.pause() } else { chain = true; player.play() } }
+    const st = el("button", "vstop"); st.type = "button"; st.innerHTML = icoHTML("stop") + `<span>${VT.stop}</span>`; st.onclick = () => { chain = false; player.stop() }
+    const eq = el("span", "veq"); eq.innerHTML = "<i></i><i></i><i></i><i></i>"
+    const lab = el("label", "vauto"), cb = el("input"); cb.type = "checkbox"; cb.checked = autoNext; cb.onchange = () => { autoNext = cb.checked }
+    lab.append(cb, el("span", null, VT.auto))
+    const sp = el("select", "vrate"); sp.title = VT.speed
+    ;[[0.85, "0,85×"], [1, "1×"], [1.15, "1,15×"], [1.3, "1,3×"]].forEach(([r, t]) => { const o = el("option", null, lang === "en" ? t.replace(",", ".") : t); o.value = r; if (Math.abs(V.rateGet() - r) < 1e-6) o.selected = true; sp.append(o) })
+    sp.onchange = () => V.rateSet(Number(sp.value))
+    vname = el("select", "vname"); vname.title = VT.voice
+    const fill = () => {
+      vname.textContent = ""
+      const list = V.langVoices(lang), cur = V.pickVoice(lang)
+      if (!list.length) { const o = el("option", null, VT.nov); vname.append(o); vname.disabled = true; return }
+      vname.disabled = false
+      list.forEach((v) => { const o = el("option", null, `${v.name} (${v.lang})`); o.value = v.voiceURI; if (cur.v && cur.v.voiceURI === v.voiceURI) o.selected = true; vname.append(o) })
+    }
+    fill(); V.onVoices(fill)
+    vname.onchange = () => { V.setPreferred(lang, vname.value) }
+    const head = el("div", "vhead"); head.innerHTML = icoHTML("speaker"); head.append(el("b", null, VT.listen), el("small", null, lang === "en" ? VT.male : VT.female))
+    bar.append(head, b, st, eq, lab, sp, vname)
+    player.load(segs)
+    paintBar("idle")
+    return bar
+  }
 
   function list(tag, cls, items) {
     const l = el(tag, cls)
@@ -45,6 +94,7 @@ export function mountFlow(parentElement, data, setTriggerValue) {
   }
 
   function show(n, scroll) {
+    if (n !== sel || n == null) { const keep = chain; player.stop(); chain = keep && n != null }
     sel = n
     dots.forEach((b, i) => { b.classList.toggle("on", i + 1 === n); b.setAttribute("aria-pressed", String(i + 1 === n)) })
     chipBtns.forEach((b, i) => { b.classList.toggle("on", i + 1 === n); b.setAttribute("aria-pressed", String(i + 1 === n)) })
@@ -64,7 +114,8 @@ export function mountFlow(parentElement, data, setTriggerValue) {
     const next = el("button", "nav", U.next); next.type = "button"; next.disabled = n >= N; next.onclick = () => show(n + 1, true)
     const x = el("button", "x", "✕"); x.type = "button"; x.title = U.close; x.setAttribute("aria-label", U.close); x.onclick = () => show(null)
     ph.append(el("div", "num", String(n)), tt, prev, next, x)
-    panel.append(ph, el("div", "gist", s.fn))
+    const gist = el("div", "gist", s.fn)
+    panel.append(ph, gist)
 
     const cols = el("div", "cols")
     const left = el("div"), right = el("div")
@@ -81,12 +132,17 @@ export function mountFlow(parentElement, data, setTriggerValue) {
       parts.append(li)
     })
     left.append(parts)
-    right.append(el("h4", null, U.story), el("p", "story", s.story), el("h4", null, U.steps), list("ol", "steps", s.steps))
+    // cerita dipecah per kalimat (disorot saat dibacakan)
+    const story = el("p", "story"), segs = [{ text: `${s.name}. ${s.fn}`, node: gist }]
+    V.sentences(s.story).forEach((t, k) => { const sp = el("span", "sen", t + " "); story.append(sp); segs.push({ text: t, node: sp }) })
+    const stepsL = list("ol", "steps", s.steps)
+    ;[...stepsL.children].forEach((li, k) => segs.push({ text: `${k + 1}. ${li.textContent}`, node: li }))
+    right.append(el("h4", null, U.story), story, el("h4", null, U.steps), stepsL)
     const io = el("dl", "io")
     io.append(el("dt", null, U.inp), el("dd", null, s.inp), el("dt", null, U.out), el("dd", null, s.out))
     right.append(io)
     cols.append(left, right)
-    panel.append(cols)
+    panel.append(voiceBar(segs), cols)
 
     const more = el("div", "more")
     const c1 = el("div"), c2 = el("div")

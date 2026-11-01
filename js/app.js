@@ -39,7 +39,7 @@ function applyTheme() {
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (theme === "auto") { applyTheme(); route() } })
 
 // ---------------------------------------------------------------- rute
-const ROUTES = ["home", "tanah", "gempa", "desain", "penurunan", "laporan", "alur"]
+const ROUTES = ["home", "alur", "tanah", "gempa", "desain", "penurunan", "laporan"]
 const PAGES = { tanah: ["./tanah_ui.js", "mountTanah"], gempa: ["./gempa_ui.js", "mountGempa"], penurunan: ["./penurunan_ui.js", "mountPenurunan"], laporan: ["./laporan_ui.js", "mountLaporan"] }
 const rawRoute = () => (location.hash.replace(/^#\/?/, "") || "home").split("/")
 const current = () => { const r = rawRoute()[0]; return ROUTES.includes(r) ? r : "home" }
@@ -56,6 +56,7 @@ function drawNav() {
 
 async function route() {
   const my = ++token, r = current(), app = $("#app")
+  try { if (self.speechSynthesis) speechSynthesis.cancel() } catch (e) { /* abaikan */ }
   drawNav(); applyTheme()
   document.title = (r === "home" ? "YMD-CAL" : S(r) + " · YMD-CAL")
   if (r !== "home") scrollTo(0, 0)
@@ -89,6 +90,7 @@ async function route() {
         st.calc = (st.calc || []).filter((c) => c.page !== "fondasi")
         if (FLOW_CALC[i]) st.calc.unshift({ label: FLOW_LABEL[FLOW_CALC[i]][lang], page: "desain/" + FLOW_CALC[i] })
       })
+      data.lang = lang
       mod.mountFlow(wrap, data, (k, v) => { if (k === "goto" && ROUTES.includes(String(v).split("/")[0])) location.hash = "#/" + v })
     }
   } catch (e) {

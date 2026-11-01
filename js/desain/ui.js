@@ -3,6 +3,7 @@
 import { L, lang, units, UNITS, uName, uFac, nf, toDisp, COMBOS, comboName, comboFormula, LOAD_KEYS, copyright, stamp, AUTHOR, govern, seismicParams, SITES } from "./core.js"
 import { buildXlsx, ST } from "./xlsx.js"
 import { reportPdf } from "./pdf.js"
+import { ico } from "../icons.js"
 
 export const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e }
 const svgNS = "http://www.w3.org/2000/svg"
@@ -41,7 +42,7 @@ export function renderForm(box, sections, st, onChange) {
     const d = el("details", "dz-sec dz-in"); d.style.setProperty("--i", si)
     d.open = sec.open !== false && (st.__open ? st.__open[sec.id] !== false : true)
     d.addEventListener("toggle", () => { st.__open = st.__open || {}; st.__open[sec.id] = d.open })
-    const sm = el("summary"); sm.append(el("span", "dz-ico", sec.icon || "•"), el("span", "dz-st", sec.t))
+    const sm = el("summary"); const ic = el("span", "dz-ico"); ic.append(ico(sec.icon || "•")); sm.append(ic, el("span", "dz-st", sec.t))
     if (sec.badge) sm.append(el("span", "dz-badge", sec.badge))
     d.append(sm)
     if (sec.note) { const p = el("p", "dz-note"); p.innerHTML = sec.note; d.append(p) }
@@ -243,43 +244,59 @@ export function fmtCheck(c) {
   const unit = conv ? uName(c.unit) : c.unit
   return { dem: c.mode === "bool" ? (c.ok ? "✓" : "✗") : v(c.dem), cap: c.mode === "bool" ? "" : v(c.cap), unit, urTxt: c.info ? "–" : isFinite(c.ur) ? nf(c.ur, 3) : "∞" }
 }
+// Daftar pemeriksaan: satu kolom ke bawah, dikelompokkan; tiap baris = status | pemeriksaan (+ acuan, kombinasi) | demand / kapasitas | UR + batang
 export function checksView(checks, key, onlyBad) {
   const box = el("div", "dz-checks")
+  const real = checks.filter((c) => !c.info), nBad = real.filter((c) => !c.ok).length
+  const sum = el("div", "dz-csum dz-in")
+  ;[[L("Pemeriksaan", "Checks"), String(real.length), ""], [L("Memenuhi", "Passing"), String(real.length - nBad), "ok"], [L("Tidak memenuhi", "Failing"), String(nBad), nBad ? "bad" : ""], [L("Info", "Info"), String(checks.length - real.length), ""]]
+    .forEach(([k, v, c]) => { const d = el("div", "dz-csum-i " + c); d.append(el("b", null, v), el("span", null, k)); sum.append(d) })
+  box.append(sum)
   const groups = []
   for (const c of checks) { let g = groups.find((x) => x.n === c.grp); if (!g) groups.push(g = { n: c.grp, items: [] }); g.items.push(c) }
+  let no = 0
   groups.forEach((g, gi) => {
     const items = onlyBad ? g.items.filter((c) => !c.ok && !c.info) : g.items
-    if (!items.length) return
-    const card = el("div", "dz-cgrp dz-in"); card.style.setProperty("--i", gi)
+    if (!items.length) { no += g.items.length; return }
+    const sec = el("details", "dz-cgrp dz-in"); sec.open = true; sec.style.setProperty("--i", gi)
     const bad = g.items.filter((c) => !c.ok && !c.info).length
-    const h = el("div", "dz-cgh"); h.append(el("b", null, g.n), el("span", "dz-pill " + (bad ? "bad" : "ok"), bad ? `${bad} ${L("tidak OK", "not OK")}` : L("semua OK", "all OK")))
-    card.append(h)
+    const worst = g.items.filter((c) => !c.info).reduce((a, b) => (!a || (isFinite(b.ur) ? b.ur : 99) > (isFinite(a.ur) ? a.ur : 99) ? b : a), null)
+    const h = el("summary", "dz-cgh")
+    h.append(el("b", null, g.n), el("span", "dz-cgn", `${g.items.length} ${L("pemeriksaan", "checks")}`))
+    if (worst) h.append(el("span", "dz-ur " + urClass(worst.ur), `UR ${L("maks", "max")} ${fmtCheck(worst).urTxt}`))
+    h.append(el("span", "dz-pill " + (bad ? "bad" : "ok"), bad ? `${bad} ${L("tidak OK", "not OK")}` : L("semua OK", "all OK")))
+    sec.append(h)
+    const head = el("div", "dz-chk dz-chk-h")
+    ;["#", L("Pemeriksaan", "Check"), L("Demand / kapasitas", "Demand / capacity"), L("Rasio UR", "Ratio UR"), "Status"].forEach((t) => head.append(el("span", null, t)))
+    sec.append(head)
     items.forEach((c, i) => {
       const f = fmtCheck(c), id = `${key}|${c.grp}|${c.item}`
       const row = el("div", "dz-chk " + (c.info ? "info" : c.ok ? "ok" : "bad"))
-      const top = el("div", "dz-chk-top")
-      top.append(el("span", "dz-dot"), el("span", "dz-item", c.item))
-      const st = el("span", "dz-stat " + (c.info ? "info" : c.ok ? "ok" : "bad"), c.info ? "INFO" : c.ok ? "OK" : "NOT OK")
-      top.append(st)
-      const meta = el("div", "dz-chk-meta")
-      meta.append(el("span", "dz-num", c.mode === "bool" ? f.dem : `${f.dem} / ${f.cap} ${f.unit}`))
-      if (!c.info) meta.append(el("span", "dz-ur " + urClass(c.ur), `UR ${f.urTxt}`))
-      if (c.note) meta.append(el("span", "dz-tag", c.note))
-      if (c.ref) meta.append(el("span", "dz-ref", c.ref))
-      row.append(top, meta)
+      row.append(el("span", "dz-no", String(no + g.items.indexOf(c) + 1)))
+      const it = el("div", "dz-it")
+      it.append(el("span", "dz-item", c.item))
+      const sub = el("span", "dz-sub2")
+      if (c.ref) sub.append(el("span", "dz-ref", c.ref))
+      if (c.note) sub.append(el("span", "dz-tag", c.note))
+      it.append(sub)
+      row.append(it, el("span", "dz-num", c.mode === "bool" ? f.dem : `${f.dem} / ${f.cap} ${f.unit}`))
+      const urc = el("div", "dz-urc")
       if (!c.info) {
         const bar = el("div", "dz-bar"), fill = el("i", urClass(c.ur)), mark = el("b")
         const target = Math.min(isFinite(c.ur) ? c.ur : 1.2, 1.2) / 1.2
         const from = prevUR.has(id) ? prevUR.get(id) : 0
         fill.style.transform = `scaleX(${from})`; mark.style.left = `${100 / 1.2}%`
-        bar.append(fill, mark); row.append(bar)
+        bar.append(fill, mark)
+        urc.append(el("span", "dz-ur " + urClass(c.ur), f.urTxt), bar)
         requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.transform = `scaleX(${target})` }))
         prevUR.set(id, target)
-      }
+      } else urc.append(el("span", "dz-ur", "–"))
+      row.append(urc, el("span", "dz-stat " + (c.info ? "info" : c.ok ? "ok" : "bad"), c.info ? "INFO" : c.ok ? "OK" : "NOT OK"))
       row.style.setProperty("--j", i)
-      card.append(row)
+      sec.append(row)
     })
-    box.append(card)
+    no += g.items.length
+    box.append(sec)
   })
   return box
 }

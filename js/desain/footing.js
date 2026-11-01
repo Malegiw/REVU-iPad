@@ -2,7 +2,7 @@
 // oktagon, atau lingkaran (solusi elastis tertutup bila kontak penuh; Newton pada grid bila kontak sebagian), stabilitas (ASD), dan desain beton (LRFD):
 // lentur, geser satu arah, geser pons dengan transfer momen, penyaluran, serta pedestal (interaksi P–M serat, geser). SNI 2847:2019 = ACI 318M-14.
 // Konvensi: x ke kanan, y ke atas (denah). Mx menambah tekanan ke arah +y, My ke arah +x. Gaya horizontal di puncak pedestal setinggi (t + h) dari dasar.
-import { GAMMA_C, L, chk, nf } from "./core.js"
+import { GAMMA_C, L, chk, nf, CODE } from "./core.js"
 import { asFlex, pickBars, phiMn, rhoTS, vcOne, vcTwo, gammaV, Jc, ld, ldh, pmCapacity, rectPoly, octPoly, circlePoly, polyArea, barsOnCircle, barsRect, sqfc } from "./rc.js"
 import { barA } from "./core.js"
 
@@ -269,7 +269,7 @@ export function analyzeFooting(m, combos, soil, crit, rc, prc) {
     const bot = pickBars(Math.max(fb.As || 0, asMin), smax, rc.db)
     const top = Mneg < -1e-6 ? pickBars(Math.max(ft.As || 0, asMin * 0.5), smax, rc.dbTop || rc.db) : null
     reinf[ax] = { Mpos, Mneg, posAt: e.pos, negAt: e.neg, fb, ft, bot, top, phiMnB: phiMn(bot.As, 1000, d, rc.fc, rc.fy), phiMnT: top ? phiMn(top.As, 1000, d, rc.fc, rc.fy) : 0, Vu: e.v ? e.v.val : 0, vAt: e.v,
-      phiVc: 0.75 * vcOne(rc.fc) * 1000 * d / 1000 }
+      phiVc: 0.75 * vcOne(rc.fc, 1, bot.As / (1000 * d), d) * d, rhoW: bot.As / (1000 * d) }
   }
   // panjang penyaluran: jarak muka pedestal ke tepi footing dikurangi selimut 75 mm
   const ldv = ld(rc.db, rc.fy, rc.fc)
@@ -300,7 +300,9 @@ export function analyzeFooting(m, combos, soil, crit, rc, prc) {
     let vw = null
     for (const q of pedEnv[k]) {
       const Vu = Math.hypot(q.Vx, q.Vy), bw = Math.min(...pedSq(p)) * 1000, dd = 0.8 * Math.max(...pedSq(p)) * 1000
-      const phiVc = 0.75 * 0.17 * Math.max(0, 1 + Math.max(q.P, 0) * 1000 / (14 * Ag)) * sqfc(prc.fc) * bw * dd / 1000
+      const vcP = CODE.aci === "14" ? 0.17 * Math.max(0, 1 + Math.max(q.P, 0) * 1000 / (14 * Ag)) * sqfc(prc.fc)       // 318-14 §22.5.6.1
+        : Math.min(0.17 * sqfc(prc.fc) + Math.max(q.P, 0) * 1000 / (6 * Ag), 0.42 * sqfc(prc.fc))                          // 318-19 Tabel 22.5.5.1(a)
+      const phiVc = 0.75 * vcP * bw * dd / 1000
       if (!vw || Vu / phiVc > vw.ur) vw = { Vu, phiVc, ur: Vu / phiVc, combo: q.c.id }
     }
     return { poly, bars, Ag, rho, worst, vw }
@@ -338,7 +340,7 @@ export function analyzeFooting(m, combos, soil, crit, rc, prc) {
     const nm = m.peds.length > 1 ? ` ${k + 1}` : ""
     if (p.worst) checks.push(chk(gP, L(`Interaksi P–M pedestal${nm} (${prc.n} D${prc.db})`, `P–M interaction, pedestal${nm} (${prc.n} D${prc.db})`), "SNI 2847 §22.4", p.worst.ur, 1, "", { note: p.worst.combo, d: 3 }))
     if (m.pedKind !== "plinth") checks.push(chk(gP, L(`Rasio tulangan pedestal${nm} ≥ 0,005·Ag,eff (Ag,eff = Ag/2)`, `Pedestal${nm} reinforcement ≥ 0.005·Ag,eff (Ag,eff = Ag/2)`), "SNI 2847 §16.3.4.1, §10.3.1.2", p.rho * 100, 0.25, "%", { mode: "ge", d: 2 }))
-    if (p.vw) checks.push(chk(gP, L(`Geser pedestal${nm} (beton saja)`, `Pedestal${nm} shear (concrete only)`), "SNI 2847 §22.5.6", p.vw.Vu, p.vw.phiVc, "F", { note: p.vw.combo, d: 1 }))
+    if (p.vw) checks.push(chk(gP, L(`Geser pedestal${nm} (beton saja)`, `Pedestal${nm} shear (concrete only)`), CODE.aci === "14" ? "SNI 2847 §22.5.6" : "ACI 318-19 Tabel 22.5.5.1(a)", p.vw.Vu, p.vw.phiVc, "F", { note: p.vw.combo, d: 1 }))
   })
   const badL = lrfd.filter((r) => !r.valid)
   if (badL.length) checks.push(chk(gS, L("Resultan terfaktor di dalam footing (semua kombinasi LRFD)", "Factored resultant within footing (all LRFD combos)"), "SNI 2847 §13.2", false, 0, "", { mode: "bool", note: badL.map((r) => r.c.id).join(", ") }))

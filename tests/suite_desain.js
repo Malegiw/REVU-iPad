@@ -16,6 +16,7 @@ import { analyze } from "../js/penurunan.js"
 export async function run({ check }) {
   const near = (name, got, want, rel = 1e-6, abs = 1e-9) => check(name, Math.abs(got - want) <= Math.max(abs, rel * Math.abs(want)) ? [] : [`${got} ≠ ${want} (toleransi ${rel})`])
   const truthy = (name, cond, msg) => check(name, cond ? [] : [msg || "gagal"])
+  core.setCode({ wind: "7-16", aci: "14" })            // nilai acuan di bawah diverifikasi untuk SNI 1727:2020/ASCE 7-16 & SNI 2847:2019/ACI 318-14
 
   // ---- tekanan tanah
   const g6 = ft.makeGeo(ft.planPoly("rect", 6, 6))
@@ -129,4 +130,23 @@ export async function run({ check }) {
     { suite: "", project: "", client: "", doc: "", rev: "", eng: "", chk: "", date: "", units: "", codes: "", allOk: "OK", notOk: "X", param: "", value: "", check: "", ref: "", dem: "", cap: "", unit: "", status: "", combo: "", foot: "", page: "" })
   const head = String.fromCharCode(...pdf.slice(0, 8)), tail = String.fromCharCode(...pdf.slice(-6))
   truthy("PDF: kepala %PDF-1.4 dan akhir %%EOF", head === "%PDF-1.4" && tail.includes("%%EOF"))
+
+  // ---- edisi terbaru: ASCE 7-22 & ACI 318-19
+  core.setCode({ wind: "7-22", aci: "19" })
+  near("ASCE 7-22: Kz eksposur C, z 10 m = 2,41(z/zg)^(2/9,8), zg 750 m", core.kz(10, "C"), 2.41 * Math.pow(10 / 749.81, 2 / 9.8), 1e-12)
+  near("ASCE 7-22: Kz(C, 4,6 m) ≈ 0,85 (Tabel 26.10-1)", core.kz(4.6, "C"), 0.85, 5e-3)
+  near("ASCE 7-22: Kz(B, 4,6 m) = 0,57 (dibulatkan)", Math.round(core.kz(4.6, "B") * 100) / 100, 0.57, 1e-12)
+  near("ASCE 7-22: Kz(D, 4,6 m) ≈ 1,03", core.kz(4.6, "D"), 1.03, 6e-3)
+  near("ASCE 7-22: qz tanpa Kd", core.qz(40, 10, { exp: "C", Kd: 0.95 }), 0.613 * core.kz(10, "C") * 1600 / 1000, 1e-12)
+  const wf = core.windOnBody({ V: 40, exp: "C", Kd: 0.95, G: 0.85 }, 1, 0, 10, 1, 1)
+  near("ASCE 7-22: F = qz·Kd·G·Cf·Af (§29.4)", wf.F, core.qz(40, 5, { exp: "C" }) * 0.95 * 0.85 * 10, 1e-12)
+  near("ACI 318-19: λs = √(2/(1 + 0,004d))", rc.lamS(500), Math.sqrt(2 / 3), 1e-12)
+  near("ACI 318-19: vc satu arah = 0,66λsρw^(1/3)√fc'", rc.vcOne(30, 1, 0.002, 500), 0.66 * Math.sqrt(2 / 3) * Math.cbrt(0.002) * Math.sqrt(30), 1e-12)
+  near("ACI 318-19: λs ≤ 1 untuk d kecil", rc.lamS(100), 1, 1e-12)
+  near("ACI 318-19: vc dua arah dikali λs", rc.vcTwo(30, 1, 40, 4000, 500), 0.33 * Math.sqrt(30) * Math.sqrt(2 / 3), 1e-12)
+  near("ACI 318-19: ldh = fy·ψr·ψc/(23√fc')·db^1,5", rc.ldh(19, 420, 30), 420 * 1.6 * (30 / 105 + 0.6) / (23 * Math.sqrt(30)) * Math.pow(19, 1.5), 1e-12)
+  truthy("label acuan mengikuti edisi", core.edLabel("SNI 2847 §22.5 · SNI 1727:2020 · AISC 360-16") === "ACI 318-19 §22.5 · ASCE 7-22 · AISC 360-22")
+  core.setCode({ wind: "7-16", aci: "14" })
+  truthy("label lama dipertahankan bila edisi SNI", core.edLabel("SNI 2847 §22.5 · SNI 1727:2020") === "SNI 2847 §22.5 · SNI 1727:2020")
+  core.setCode({ wind: "7-22", aci: "19" })
 }
