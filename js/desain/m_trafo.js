@@ -1,12 +1,12 @@
 // Modul halaman: Pondasi trafo daya (peralatan statis) — plinth, telapak, bak oli, dongkrak, penahan gempa.
 import { L, nf, toDisp, uName, expandCombos } from "./core.js"
-import { PRESET, trafoCases, analyzeTrafo } from "./trafo.js"
+import { PRESET, trafoCases, analyzeTrafo, trafoModel } from "./trafo.js"
 import { loadsEditor, addUserLoads } from "./ui.js"
 import { palette, trafoDraw, footingPlan } from "./draw.js"
 import { skTrafo } from "./sketch.js"
 import { trafoSteps } from "./steps.js"
 import { footFrom } from "./settle.js"
-import { DEEP0, fdSection, qaFor, qaNote, isDeep, deepBundle, shallowSettle } from "./deep.js"
+import { DEEP0, fdSection, qaFor, qaNote, isDeep, deepBundle, shallowSettle, effPile, autoCap, autoFoot, singlePile, flowDeep, flowShallow, flowStep, maxLoad } from "./deep.js"
 
 export const id = "trafo"
 export const icon = "⚡"
@@ -32,7 +32,7 @@ export function form(s) {
       { k: "Df", lab: L("Kedalaman dasar Df", "Base depth Df"), u: "m", lo: 0.3, hi: 5 }, { k: "fc", lab: "fc'", u: "MPa", lo: 17, hi: 60 }, { k: "fy", lab: "fy", u: "MPa", lo: 280, hi: 550 },
       { k: "db", type: "sel", lab: L("Tulangan telapak", "Footing bars"), opts: BAR },
     ] },
-    fdSection(s),
+    fdSection(s, { autoShallow: true }),
     { id: "pit", icon: "🛢", t: L("Bak penampung oli & instalasi", "Oil pit & installation"), fields: [
       { k: "Lpit", lab: L("Bak oli dalam Lpit (X)", "Pit inside Lpit (X)"), u: "m", lo: 1, hi: 40 }, { k: "Bpit", lab: L("Bak oli dalam Bpit (Y)", "Pit inside Bpit (Y)"), u: "m", lo: 1, hi: 40 }, { k: "hpit", lab: L("Kedalaman bak hpit", "Pit depth hpit"), u: "m", lo: 0.2, hi: 3 },
       { k: "hg", lab: L("Tebal kerikil hg", "Gravel layer hg"), u: "m", lo: 0, hi: 1 }, { k: "por", lab: L("Porositas kerikil", "Gravel porosity"), u: "", lo: 0.2, hi: 0.45 },
@@ -54,14 +54,27 @@ export function form(s) {
 }
 
 export function run(s, ctx) {
-  const I = { ...s, wind: ctx.wind, seis: { ...ctx.seisBase, R: s.R, Ie: s.Ie, method: s.method }, crit: { fsOT: s.fsOT, fsSL: s.fsSL, fsOTs: 1, fsSLs: 1, tempFac: s.tempFac, minContact: s.minContact } }
+  let I = { ...s, wind: ctx.wind, seis: { ...ctx.seisBase, R: s.R, Ie: s.Ie, method: s.method }, crit: { fsOT: s.fsOT, fsSL: s.fsSL, fsOTs: 1, fsSLs: 1, tempFac: s.tempFac, minContact: s.minContact } }
   const deep = isDeep(s) && !!ctx.soil
-  const qs = deep ? null : qaFor(s, ctx, I.Lf, I.B, I.Df)
-  if (qs) I.qa = qs.qa
-  if (!deep) I.fdType = "shallow"
+  if (deep) I = effPile(I, ctx)
+  else I.fdType = "shallow"
   const { cases, meta } = trafoCases(I)
   addUserLoads(cases, s.extra, 1)
   const combos = expandCombos(cases, 5, ctx.cmbOpts)
+  // ---- alur desain: kapasitas → beban → ukuran pondasi (otomatis, ≥ bak oli & plinth) → tebal & tulangan
+  const rc = { fc: I.fc, fy: I.fy, cover: I.cover, db: I.db }, prc = { fc: I.fc, fy: I.fy, n: I.nBars, db: I.dbP, cover: 50, tie: 10 }
+  const minB = Math.max(I.Lpit + 0.4, I.Lp + 0.6), minL = Math.max(I.Bpit + 0.4, I.Bp + 0.6)
+  let auto = null, sizing = null
+  if (deep && I.pLay !== "grid") {
+    auto = autoCap({ m0: trafoModel(I), combos, I, ctx, crit: I.crit, rc, prc, minB, minL, tAuto: I.tAuto !== false })
+    I.autoModel = auto.m
+    Object.assign(I, { Lf: auto.m.B, B: auto.m.L, t: auto.m.t, Df: auto.m.Df, psx: auto.smin, pce: auto.ce })
+  } else if (!deep && I.fSize !== "manual") {
+    sizing = autoFoot({ minTxt: L("ukuran minimum bak oli & plinth", "minimum oil pit & plinth size"), m0: trafoModel(I), combos, qaFn: (B, Lx, Df) => qaFor(s, ctx, B, Lx, Df).qa, mu: I.muB, crit: I.crit, rc, prc, minB, minL, tAuto: true })
+    Object.assign(I, { Lf: sizing.B, B: sizing.L, t: sizing.t, Df: sizing.m.Df })
+  }
+  const qs = deep ? null : qaFor(s, ctx, I.Lf, I.B, I.Df)
+  if (qs) I.qa = qs.qa
   const out = analyzeTrafo(I, combos, meta)
   const r = out.r, uF = uName("F"), uQ = uName("Q")
   const gq = r.asd.reduce((a, b) => (b.pr.qmax / b.qa > a.pr.qmax / a.qa ? b : a), r.asd[0])
@@ -99,6 +112,12 @@ export function run(s, ctx) {
   const drawings = [{ make: (m) => trafoDraw(I, out, palette(m)), cap: L("Gambar 1 — Trafo, plinth, bak oli, dan telapak", "Figure 1 — Transformer, plinth, oil pit and footing") }]
   if (deep) DB.drawings.forEach((d, i) => drawings.push({ ...d, cap: `${L("Gambar", "Figure")} ${i + 2} — ${d.cap}` }))
   else drawings.push({ make: (m) => footingPlan(r, out.m, palette(m)), cap: L("Gambar 2 — Denah telapak dan tekanan tanah", "Figure 2 — Footing plan and soil pressure"), maxH: 300 })
+  const ml = maxLoad(r.asd)
+  const loadSub = `${L("trafo", "transformer")} ${nf(toDisp("F", I.W), 0)} + ${L("pondasi", "foundation")} ${nf(toDisp("F", r.W.total), 0)} ${uF} · ${L("angin", "wind")} ${nf(toDisp("F", Math.max(meta.fx.F, meta.fy.F)), 1)} · ${L("gempa", "seismic")} ${nf(toDisp("F", meta.Vs), 1)} ${uF}`
+  const sp1 = deep ? (auto ? auto.sp1 : singlePile(I, ctx.soil, I.Df)) : null
+  const flow = deep ? flowDeep({ sp1, I, P: ml.P, M: ml.M, cP: ml.cP, loadSub, n: DB.g0.n, nAx: ml.P / sp1.Qad, layout: `${auto ? auto.nx : DB.g0.nx} × ${auto ? auto.ny : DB.g0.ny} ${L("tiang", "piles")}`, auto: !!auto, gov: auto ? auto.gov : "",
+      cap: `${nf(I.Lf, 2)} × ${nf(I.B, 2)} × ${nf(I.t, 2)} m`, capSub: `s = ${nf(I.psx, 2)} m · ce = ${nf(I.pce, 2)} m · ${L("≥ bak oli", "≥ oil pit")} ${nf(I.Lpit, 1)} × ${nf(I.Bpit, 1)} m`, rebar: `X ${r.reinf.x.bot.txt} · Y ${r.reinf.y.bot.txt}`, rebarSub: L("tulangan bawah pile cap", "pile cap bottom bars"), checks: out.checks, settle })
+    : flowShallow({ q: qs, P: ml.P, M: ml.M, cP: ml.cP, loadSub, A: r.geo.A, size: `${nf(I.Lf, 2)} × ${nf(I.B, 2)} × ${nf(I.t, 2)} m`, auto: !!sizing, gov: sizing ? sizing.gov : "", rebar: `X ${r.reinf.x.bot.txt} · Y ${r.reinf.y.bot.txt}`, rebarSub: `d = ${nf(r.d, 0)} mm`, checks: out.checks, settle })
   return { file: "Pondasi_Trafo", title: L("Desain Pondasi Trafo Daya", "Power Transformer Foundation Design"), sub: `${deep ? L("Pondasi tiang · ", "Piled · ") : ""}${nf(I.mva, 0)} MVA · ${nf(toDisp("F", I.W), 0)} ${uF} · plinth ${nf(I.Lp, 2)} × ${nf(I.Bp, 2)} m · ${L("telapak", "footing")} ${nf(I.Lf, 2)} × ${nf(I.B, 2)} m`, refs: codes, metrics, checks: out.checks, kv, tables: tables.filter(Boolean), notes,
-    drawings, cases, combos, out, settle, fdType: deep ? "deep" : "shallow", steps: [...trafoSteps(I, meta, out), ...(deep ? DB.steps : qs && qs.r ? [{ h: L("Daya dukung izin dari data tanah", "Allowable bearing from soil data"), rows: qs.r.rows }] : [])] }
+    drawings, cases, combos, out, settle, fdType: deep ? "deep" : "shallow", flow, steps: [flowStep(flow), ...(!deep && qs && qs.r ? [{ h: L("Daya dukung izin dari data tanah", "Allowable bearing from soil data"), rows: qs.r.rows }] : []), ...trafoSteps(I, meta, out), ...(deep ? DB.steps : [])] }
 }

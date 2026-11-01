@@ -173,12 +173,17 @@ function columnPad(I, T, combos, out) {
 
 // ---------------------------------------------------------------- pelat penuh di atas tiang (pondasi dalam)
 function piledTank(I, T, combos) {
-  const Ds = I.D + 2 * I.proj, h = I.sh, Wsl = Math.PI * Ds * Ds / 4 * h * GAMMA_C
-  const tot = (c) => {
-    const [w, , Ms, V, p, Pc] = c.vec
-    return { P: w * Math.PI * I.D + p * T.A + c.fD * (Wsl + T.Wb) + Pc * (I.nCol || 0), M: Ms + V * h, V }
+  const Ds = I.D + 2 * I.proj
+  const run = (J) => piledSlab(J, T, combos, (c) => { const [w, , Ms, V, p, Pc] = c.vec; const Ws = Math.PI * Ds * Ds / 4 * J.sh * GAMMA_C; return { P: w * Math.PI * I.D + p * T.A + c.fD * (Ws + T.Wb) + Pc * (I.nCol || 0), M: Ms + V * J.sh, V } }, { soil: I.soilDS, settle: I.settleOpt, pile: I.pileCtx })
+  // tebal pelat otomatis: naik 50 mm sampai lentur, geser & pons (pelat dan tiang) memenuhi
+  let sh = I.tAuto !== false ? Math.max(0.4, Math.round((I.pD / 1000 + 0.15) * 20) / 20) : I.sh, R = null
+  for (let k = 0; k < 50; k++) {
+    R = run({ ...I, sh })
+    const conc = R.checks.filter((c) => /Pelat di atas tiang|Slab on piles|pons|punching/i.test(c.grp + c.item))
+    if (I.tAuto === false || conc.every((c) => c.ok || c.info)) break
+    sh = Math.round((sh + 0.05) * 100) / 100
   }
-  const R = piledSlab(I, T, combos, tot, { soil: I.soilDS, settle: I.settleOpt })
+  R.sh = sh
   R.checks = R.checks.map((c) => ({ ...c, grp: /LRFD/.test(c.grp) && !/Tiang|Piles/.test(c.grp) ? "S" : c.grp }))
   R.wq = null
   return R

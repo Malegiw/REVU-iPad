@@ -1,0 +1,63 @@
+# Membuat rekaman narasi alami Alur Migas dengan ElevenLabs lalu meng-commit-nya ke branch yang dipilih.
+# Persiapan sekali: Settings → Secrets and variables → Actions →
+#   Secret   ELEVENLABS_API_KEY       (kunci API ElevenLabs)
+#   Variable ELEVENLABS_VOICE_ID_ID   (opsional, voice ID wanita Bahasa Indonesia)
+#   Variable ELEVENLABS_VOICE_ID_EN   (opsional, voice ID pria English)
+# Jalankan: tab Actions → "Suara alami (ElevenLabs)" → Run workflow (bisa dari iPad lewat github.com).
+name: Suara alami (ElevenLabs)
+on:
+  workflow_dispatch:
+    inputs:
+      lang:
+        description: "Bahasa (id, en, atau semua)"
+        type: choice
+        options: [semua, id, en]
+        default: semua
+      force:
+        description: "Buat ulang semua rekaman (mis. setelah ganti suara)"
+        type: boolean
+        default: false
+permissions:
+  contents: write
+  pages: write
+concurrency:
+  group: voice-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  tts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Buat rekaman
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID_ID: ${{ vars.ELEVENLABS_VOICE_ID_ID }}
+          ELEVENLABS_VOICE_ID_EN: ${{ vars.ELEVENLABS_VOICE_ID_EN }}
+          ELEVENLABS_MODEL: ${{ vars.ELEVENLABS_MODEL }}
+          IN_LANG: ${{ inputs.lang }}
+          IN_FORCE: ${{ inputs.force }}
+        run: |
+          if [ -z "$ELEVENLABS_API_KEY" ]; then echo "::error::Secret ELEVENLABS_API_KEY belum diatur"; exit 1; fi
+          set -- --prune
+          if [ "$IN_LANG" != "semua" ]; then set -- "$@" --lang "$IN_LANG"; fi
+          if [ "$IN_FORCE" = "true" ]; then set -- "$@" --force; fi
+          node tools/tts_elevenlabs.mjs "$@"
+      - name: Perbarui sw.js
+        run: python3 tools/build_sw.py
+      - name: Commit & push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/voice sw.js
+          if git diff --cached --quiet; then echo "Tidak ada perubahan"; exit 0; fi
+          git commit -m "Suara alami Alur Migas (ElevenLabs)"
+          git push
+      - name: Minta GitHub Pages membangun ulang
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/$GITHUB_REPOSITORY/pages/builds" >/dev/null 2>&1 || echo "Pages build tidak diminta (Pages memakai workflow lain atau tidak aktif)"

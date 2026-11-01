@@ -81,6 +81,7 @@ export function dynCases(I, Dy) {
   }
 }
 
+export const dynModel = (I) => ({ shape: "rect", B: I.Bx, L: I.By, t: I.H, Df: I.emb, gs: I.gs, peds: [{ x: I.exm, y: I.eym, shape: "rect", bx: I.Lb, by: I.Bb, h: 0 }] })
 export function analyzeDynamic(I, combos) {
   const Dy = dynamics(I)
   const checks = []
@@ -104,8 +105,8 @@ export function analyzeDynamic(I, combos) {
   checks.push(chk(gR, L("Pusat massa gabungan di bawah muka atas blok", "Combined CG below top of block"), "ACI 351.3R §4.1", Dy.zc, I.H, "m", { d: 2 }))
   // statik
   const qfac = I.type === "rec" ? I.qRec : I.qRot
-  const m = { shape: "rect", B: I.Bx, L: I.By, t: I.H, Df: I.emb, gs: I.gs, peds: [{ x: I.exm, y: I.eym, shape: "rect", bx: I.Lb, by: I.Bb, h: 0 }] }
-  if (I.fdType === "deep") { m.piles = pileLayout("rect", m.B, m.L, I.psx, I.pce); m.pileD = I.pD / 1000 }
+  const m = I.autoModel ? { ...I.autoModel, grid: undefined } : dynModel(I)
+  if (I.fdType === "deep" && !I.autoModel) { m.piles = pileLayout("rect", m.B, m.L, I.psx, I.pce); m.pileD = I.pD / 1000 }
   const r = analyzeFooting(m, combos, { qa: I.qa * qfac, mu: I.muB }, I.crit, { fc: I.fc, fy: I.fy, cover: I.cover, db: I.db }, { fc: I.fc, fy: I.fy, n: 8, db: 16, cover: 50 })
   r.checks.filter((c) => !/pedestal/i.test(c.item) || /pons|punching/i.test(c.item)).forEach((c) => checks.push(c))
   return { Dy, r, checks, qfac, m }

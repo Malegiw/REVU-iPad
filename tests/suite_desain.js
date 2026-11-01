@@ -10,8 +10,16 @@ import * as dy from "../js/desain/dynamic.js"
 import { crc32, buildXlsx } from "../js/desain/xlsx.js"
 import { winAnsi, textWidth, reportPdf } from "../js/desain/pdf.js"
 import { footFrom } from "../js/desain/settle.js"
-import { settleShallow, deriveSoil, defaultSoil } from "../js/desain/soil.js"
+import { settleShallow, deriveSoil, defaultSoil, SETTLE_OPT } from "../js/desain/soil.js"
 import { analyze } from "../js/penurunan.js"
+import * as dp from "../js/desain/deep.js"
+import * as dui from "../js/desain/ui.js"
+import { projDefaults } from "../js/project.js"
+import * as mVessel from "../js/desain/m_vessel.js"
+import * as mTrafo from "../js/desain/m_trafo.js"
+import * as mTangki from "../js/desain/m_tangki.js"
+import * as mDinamis from "../js/desain/m_dinamis.js"
+import { hashText, sentences, stageTexts } from "../js/voice.js"
 
 export async function run({ check }) {
   const near = (name, got, want, rel = 1e-6, abs = 1e-9) => check(name, Math.abs(got - want) <= Math.max(abs, rel * Math.abs(want)) ? [] : [`${got} ≠ ${want} (toleransi ${rel})`])
@@ -149,4 +157,45 @@ export async function run({ check }) {
   core.setCode({ wind: "7-16", aci: "14" })
   truthy("label lama dipertahankan bila edisi SNI", core.edLabel("SNI 2847 §22.5 · SNI 1727:2020") === "SNI 2847 §22.5 · SNI 1727:2020")
   core.setCode({ wind: "7-22", aci: "19" })
+
+  // ---- alur desain: kapasitas tiang tunggal (tab Tanah) → beban → jumlah tiang → ukuran & tebal cap → tulangan → cek
+  const g32 = dp.gridLayout(3, 2, 5, 3, 0.5)
+  truthy("grid 3 × 2 pada 5 × 3 m, ce 0,5: sx = sy = 2 m, pusat di titik berat", g32.sx === 2 && g32.sy === 2 && Math.abs(g32.piles.reduce((a, q) => a + q.x + q.y, 0)) < 1e-12 && g32.piles.length === 6)
+  const spc = dp.spacing({ pD: 406.4, psD: 3, pceD: 1 })
+  near("jarak tiang s = 3D", spc.s, 3 * 0.4064, 1e-12); near("tepi ce = maks(1·D; D/2 + 0,15)", spc.ce, 0.4064, 1e-12)
+  near("tepi ce minimum D/2 + 150 mm", dp.spacing({ pD: 406.4, psD: 3, pceD: 0.75 }).ce, 0.2032 + 0.15, 1e-12)
+  const rl = dp.ringLayout(11.2, 0.41, 2.1)
+  let dmin = Infinity
+  rl.piles.forEach((a, i) => rl.piles.slice(i + 1).forEach((b) => { dmin = Math.min(dmin, Math.hypot(a.x - b.x, a.y - b.y)) }))
+  truthy("tangki: susunan radial (cincin konsentris + pusat), bukan grid", rl.rings.length >= 2 && rl.rings[0].R === 11.2 / 2 - 0.41 && rl.rings[rl.rings.length - 1].n === 1 && rl.piles.length === rl.rings.reduce((a, g) => a + g.n, 0))
+  truthy("tangki: jarak antar tiang radial ≥ s", dmin >= 2.1 - 1e-9, `jarak min ${dmin}`)
+  truthy("tangki: n tiap cincin = ⌊2πR/s⌋", rl.rings.slice(0, -1).every((g) => g.n === Math.max(3, Math.floor(2 * Math.PI * g.R / 2.1))))
+  const dsx = deriveSoil(defaultSoil())
+  const pPipe = dp.singlePile(dp.effPile({ pSrc: "proj" }, { pile: projDefaults().pile }), dsx, 1.5)
+  near("tiang tunggal: Qa desain = min(Qu/FS; Pa struktur)", pPipe.Qad, Math.min(pPipe.Qac, pPipe.Pstr), 1e-12)
+  near("tiang tunggal: Qa geoteknik = Qu/FS tekan", pPipe.Qac, pPipe.ax.Qc / projDefaults().pile.fsC, 1e-12)
+  near("tiang tunggal: Ha = min(Hu Broms/FS; H defleksi izin)", pPipe.Ha, Math.min(pPipe.Hal, pPipe.Hd), 1e-12)
+  truthy("tiang modul = tiang rencana tab Tanah bila pSrc = proj", dp.effPile({ pSrc: "proj", pD: 999 }, { pile: { ...projDefaults().pile, D: 600 } }).pD === 600 && dp.effPile({ pSrc: "own", pD: 999 }, { pile: projDefaults().pile }).pD === 999)
+  const sc = dui.siteCtx({ V: 32, exp: "C", Kzt: 1, Kd: 0.95, Ss: 0.8, S1: 0.35, cls: "SD", TL: 8 })
+  const mctx = { ...sc, cmbOpts: { SDS: sc.sp.SDS, wpFrac: 0.5, ortho: false, enabled: {}, factors: {} }, soil: dsx, bear: { method: "spt", FS: 3 }, settle: { ...SETTLE_OPT }, pile: projDefaults().pile }
+  const runM = (M, o) => { const st = { ...M.defaults(), ...o }; if (M.form) M.form(st, () => {}); return M.run(st, mctx) }
+  for (const [nm, M] of [["vessel", mVessel], ["trafo", mTrafo], ["tangki", mTangki], ["dinamis", mDinamis]]) {
+    for (const fd of ["shallow", "deep"]) {
+      const o = runM(M, { fdType: fd }), bad = o.checks.filter((c) => !c.ok && !c.info)
+      truthy(`${nm} ${fd === "deep" ? "dalam" : "dangkal"} otomatis: semua pemeriksaan OK`, !bad.length, bad.map((c) => c.item).join("; "))
+      truthy(`${nm} ${fd === "deep" ? "dalam" : "dangkal"}: alur perhitungan ${fd === "deep" ? 7 : 6} langkah, diawali ${fd === "deep" ? "kapasitas tiang tunggal" : "daya dukung qa"}`, o.flow && o.flow.length === (fd === "deep" ? 7 : 6) && o.flow[0].ic === (fd === "deep" ? "pile" : o.flow[0].ic) && o.flow[o.flow.length - 2].ok === true)
+    }
+  }
+  const vd = runM(mVessel, { fdType: "deep" }), vf = vd.flow
+  truthy("vessel dalam: n ≥ P/Qa dan minimal 2 × 2", Number(String(vf[2].v).replace(/\D/g, "")) >= Math.max(4, Math.ceil(Number(String(vf[2].sub).match(/= ([\d.,]+)/)[1].replace(",", ".")))))
+  const nOf = (o) => Number(String(o.flow[2].v).replace(/\D/g, ""))
+  truthy("trafo dalam: jarak maks tiang lebih besar → tiang tidak bertambah", nOf(runM(mTrafo, { fdType: "deep", psMax: 5 })) <= nOf(runM(mTrafo, { fdType: "deep" })))
+  truthy("tangki dalam: denah tiang radial", /radial/.test(runM(mTangki, { fdType: "deep" }).flow[2].sub))
+
+  // ---- narasi suara: nama berkas rekaman = FNV-1a 32-bit dari kalimat (sama di aplikasi & tools/tts_elevenlabs.mjs)
+  truthy("FNV-1a: '' → 811c9dc5, 'a' → e40c292c, 'foobar' → bf9cf968", hashText("") === "811c9dc5" && hashText("a") === "e40c292c" && hashText("foobar") === "bf9cf968")
+  truthy("hash mengabaikan spasi berlebih", hashText("  Rig   mengebor ") === hashText("Rig mengebor"))
+  truthy("pemecah kalimat mempertahankan angka desimal", JSON.stringify(sentences("Satu dua. Tiga 0,5 m. Empat")) === JSON.stringify(["Satu dua.", "Tiga 0,5 m.", "Empat"]))
+  const stx = stageTexts({ name: "Sumur", fn: "Fungsi.", story: "A b. C d.", steps: ["x", "y"] })
+  truthy("teks tahap: judul + kalimat cerita + langkah bernomor", JSON.stringify(stx) === JSON.stringify(["Sumur. Fungsi.", "A b.", "C d.", "1. x", "2. y"]))
 }

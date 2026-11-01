@@ -36,6 +36,7 @@ const P = {
   pause: '<path d="M8 5.5v13M16 5.5v13"/>',
   stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/>',
   speaker: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
+  download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M5 19h14"/>',
 }
 // emoji lama → nama ikon
 const E = {
