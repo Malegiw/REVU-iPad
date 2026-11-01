@@ -45,6 +45,8 @@ a { color: var(--accent); }
 .tool { display: flex; flex-direction: column; gap: 6px; text-decoration: none; color: var(--ink); }
 .tool b { font-size: 1.15rem; } .tool .go { margin-top: auto; align-self: flex-start; }
 .soon { opacity: .7; }
+.tool.feature { grid-column: 1 / -1; background: linear-gradient(135deg, #27323F, #3F5A75 60%, #1F808D); color: #fff; border-color: transparent; }
+.tool.feature .hint { color: rgba(255,255,255,.86); } .tool.feature .go { background: #E3A857; color: #1F2430; }
 .badge { display: inline-block; font-size: .72rem; padding: 2px 8px; border-radius: 999px; background: var(--field); color: var(--muted); margin-left: 6px; vertical-align: middle; }
 .tips { margin: 0; padding-left: 1.2em; } .tips li { margin: .3em 0; }
 

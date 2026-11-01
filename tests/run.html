@@ -13,14 +13,15 @@
 </head>
 <body>
 <h1>Uji rumus: JavaScript terhadap Python</h1>
-<p>Memuat berkas <code>*_cases.json</code> (masukan dan hasil dari modul Python di aplikasi Review by YMD), menjalankan modul JavaScript yang bersesuaian pada masukan yang sama, lalu membandingkan semua angka dan teks (toleransi relatif 1e-9). Tiap kelompok uji ada di <code>suite_*.js</code>.</p>
+<p>Memuat berkas <code>*_cases.json</code> (masukan dan hasil dari modul Python di aplikasi Review by YMD), menjalankan modul JavaScript yang bersesuaian pada masukan yang sama, lalu membandingkan semua angka dan teks (toleransi relatif 1e-9). Kelompok <code>desain</code> (modul Desain Pondasi) diuji terhadap nilai acuan teori/rumus tertutup: Matlock–Reese, Hetenyi, Broms, API RP 2GEO, API 650 Annex E, SNI 1726/1727, ACI 318, AISC 360, Richart–Whitman, serta penulis XLSX/PDF. Tiap kelompok uji ada di <code>suite_*.js</code>.</p>
 <p id="sum">Menjalankan…</p>
 <pre id="log"></pre>
 <script type="module">
 import * as penurunan from "./suite_penurunan.js"
 import * as fondasi from "./suite_fondasi.js"
+import * as desain from "./suite_desain.js"
 
-const SUITES = [["penurunan", penurunan], ["fondasi", fondasi]]
+const SUITES = [["penurunan", penurunan], ["fondasi", fondasi], ["desain", desain]]
 const log = []
 const per = {}
 let pass = 0, fail = 0, cur = ""
