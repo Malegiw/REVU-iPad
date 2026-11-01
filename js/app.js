@@ -12,7 +12,8 @@ const EN = {}                                   // terjemahan antarmuka alat, di
 const SHELL = {
   sub: { id: "Kalkulator & referensi · offline", en: "Calculators & reference · offline" },
   home: { id: "Beranda", en: "Home" }, penurunan: { id: "Penurunan Pondasi", en: "Foundation Settlement" }, fondasi: { id: "Pondasi Tangki & Peralatan", en: "Tank & Equipment Foundations" }, alur: { id: "Alur Produksi Migas", en: "Oil & Gas Production Flow" },
-  nHome: { id: "Beranda", en: "Home" }, nPenurunan: { id: "Penurunan", en: "Settlement" }, nFondasi: { id: "Pondasi", en: "Foundations" }, nAlur: { id: "Alur Migas", en: "Oil & Gas Flow" },
+  desain: { id: "Desain Pondasi", en: "Foundation Design" },
+  nHome: { id: "Beranda", en: "Home" }, nPenurunan: { id: "Penurunan", en: "Settlement" }, nFondasi: { id: "Pondasi", en: "Foundations" }, nAlur: { id: "Alur Migas", en: "Oil & Gas Flow" }, nDesain: { id: "Desain", en: "Design" },
   open: { id: "Buka", en: "Open" }, soon: { id: "Segera", en: "Soon" },
   homeTitle: { id: "Kalkulator dan referensi untuk reviewer teknik sipil", en: "Calculators and reference for civil engineering reviewers" },
   homeLead: {
@@ -21,6 +22,7 @@ const SHELL = {
   },
   penDesc: { id: "Penurunan segera, konsolidasi primer dan sekunder, serta kecepatan penurunan pondasi dangkal.", en: "Immediate settlement, primary and secondary consolidation, and rate of settlement of shallow foundations." },
   fondasiDesc: { id: "Pondasi dangkal peralatan (tekanan dasar, guling, geser, daya dukung), pondasi mesin berputar, dan pondasi tangki (ringwall, penurunan, angin).", en: "Shallow equipment foundations (base pressure, overturning, sliding, bearing), rotating-machine foundations and tank foundations (ringwall, settlement, wind)." },
+  desainDesc: { id: "Paket desain lengkap dengan input beban & kombinasi SNI/ASCE: tiang pipa baja & helical, pondasi Wash/Surge Tank, Gas Boot/Separator/IA Receiver, peralatan dinamis, dan trafo. Ekspor Excel & PDF.", en: "Complete design package with load input & SNI/ASCE combinations: steel pipe & helical piles, Wash/Surge Tank, Gas Boot/Separator/IA Receiver, dynamic equipment and transformer foundations. Excel & PDF export." },
   alurDesc: { id: "Alur minyak dan gas dari sumur sampai gathering station, lengkap dengan PFD, P&ID, dan animasi cara kerja tiap alat.", en: "Oil and gas flow from the well to the gathering station, with PFD, P&IDs and animations of how each item works." },
   moreTitle: { id: "Kalkulator lain menyusul", en: "More calculators coming" },
   moreText: { id: "Saluran & gorong-gorong, stabilitas lereng, dan dinding penahan tanah sedang disiapkan untuk versi offline ini.", en: "Channels & culverts, slope stability and retaining walls are being prepared for this offline version." },
@@ -49,8 +51,10 @@ function applyTheme() {
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (theme === "auto") { applyTheme(); route() } })
 
 // ---------------------------------------------------------------- rute
-const ROUTES = ["home", "penurunan", "fondasi", "alur"]
-const current = () => { const r = (location.hash.replace(/^#\/?/, "") || "home"); return ROUTES.includes(r) ? r : "home" }
+const ROUTES = ["home", "desain", "penurunan", "fondasi", "alur"]
+const rawRoute = () => (location.hash.replace(/^#\/?/, "") || "home").split("/")
+const current = () => { const r = rawRoute()[0]; return ROUTES.includes(r) ? r : "home" }
+const subRoute = () => rawRoute()[1] || ""
 let token = 0
 
 function drawNav() {
@@ -70,11 +74,19 @@ async function route() {
   const my = ++token, r = current(), app = $("#app")
   drawNav(); applyTheme()
   document.title = (r === "home" ? "Review by YMD" : S(r) + " · Review by YMD")
+  if (r !== "home") scrollTo(0, 0)
   app.textContent = ""
   if (r === "home") return home(app)
   app.append(el("p", "hint", S("load")))
   try {
-    if (r === "penurunan") {
+    if (r === "desain") {
+      const mod = await import("./desain_ui.js")
+      if (my !== token) return
+      app.textContent = ""
+      const box = el("div")
+      app.append(box)
+      mod.mountDesain(box, { t, lang }, subRoute())
+    } else if (r === "penurunan") {
       await loadEN("penurunan")
       const mod = await import("./penurunan_ui.js")
       if (my !== token) return
@@ -109,7 +121,8 @@ function home(app) {
   c.append(el("h1", null, S("homeTitle")), el("p", null, S("homeLead")))
   const cards = el("div", "cards")
   const tool = (r, desc) => { const a = el("a", "card tool"); a.href = "#/" + r; a.append(el("b", null, S(r)), el("span", "hint", desc), el("span", "btn go", S("open"))); return a }
-  cards.append(tool("penurunan", S("penDesc")), tool("fondasi", S("fondasiDesc")), tool("alur", S("alurDesc")))
+  const ds = tool("desain", S("desainDesc")); ds.classList.add("feature")
+  cards.append(ds, tool("penurunan", S("penDesc")), tool("fondasi", S("fondasiDesc")), tool("alur", S("alurDesc")))
   const more = el("div", "card tool soon"); more.append(el("b", null, S("moreTitle")), el("span", "hint", S("moreText")))
   cards.append(more)
   const ins = el("section", "card"); ins.append(el("h3", null, S("installTitle")))
