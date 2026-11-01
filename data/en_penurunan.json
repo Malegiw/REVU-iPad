@@ -88,7 +88,7 @@
 "Pengecekan": "Check",
 "Penurunan (mm)": "Settlement (mm)",
 "Penurunan diferensial perkiraan (mm), 0 = tidak dicek": "Estimated differential settlement (mm), 0 = not checked",
-"Penurunan pondasi dangkal: penurunan segera (Steinbrenner), konsolidasi primer lempung (Terzaghi, sublapis, muka air tanah), kecepatan konsolidasi, dan kompresi sekunder opsional. Perhitungan independen dengan app Review by YMD; bandingkan dengan dokumen yang direview dan konfirmasikan asumsi (modulus, parameter konsolidasi, metode tegangan).": "Shallow foundation settlement: immediate settlement (Steinbrenner), primary consolidation of clay (Terzaghi, sublayers, groundwater table), consolidation rate, and optional secondary compression. An independent calculation with the Review by YMD app; compare it with the reviewed document and confirm the assumptions (modulus, consolidation parameters, stress method).",
+"Penurunan pondasi dangkal: penurunan segera (Steinbrenner), konsolidasi primer lempung (Terzaghi, sublapis, muka air tanah), kecepatan konsolidasi, dan kompresi sekunder opsional. Perhitungan independen dengan YMD-CAL; bandingkan dengan dokumen yang direview dan konfirmasikan asumsi (modulus, parameter konsolidasi, metode tegangan).": "Shallow foundation settlement: immediate settlement (Steinbrenner), primary consolidation of clay (Terzaghi, sublayers, groundwater table), consolidation rate, and optional secondary compression. An independent calculation with YMD-CAL; compare it with the reviewed document and confirm the assumptions (modulus, consolidation parameters, stress method).",
 "Penurunan segera": "Immediate settlement",
 "Penurunan segera (mm)": "Immediate settlement (mm)",
 "Penurunan segera di dokumen (mm)": "Immediate settlement in the document (mm)",

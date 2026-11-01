@@ -1,0 +1,72 @@
+/* Beranda YMD-CAL: hero, dashboard, kartu Alur Migas. Token warna dari app.css. */
+@keyframes hm-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes hm-orb { from { transform: translate(0, 0) scale(1); } to { transform: translate(30px, 18px) scale(1.12); } }
+@keyframes hm-sk { 0% { background-position: -300px 0; } 100% { background-position: 300px 0; } }
+@keyframes hm-float { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-6px) rotate(-3deg); } }
+
+.hm-hero { position: relative; overflow: hidden; display: flex; align-items: center; gap: 22px; padding: 26px 26px; border-radius: 28px; margin: 4px 0 18px; color: #fff;
+  background: linear-gradient(135deg, #34506C 0%, #27323F 50%, #1F808D 100%); box-shadow: 0 18px 44px rgba(var(--shadow), .3); animation: hm-up .6s cubic-bezier(.2,.8,.2,1) both; }
+.hm-orbs i { position: absolute; border-radius: 50%; filter: blur(34px); opacity: .5; animation: hm-orb 12s ease-in-out infinite alternate; pointer-events: none; }
+.hm-orbs i:nth-child(1) { width: 260px; height: 260px; right: -60px; top: -100px; background: #E3A857; }
+.hm-orbs i:nth-child(2) { width: 220px; height: 220px; left: 35%; bottom: -150px; background: #8FD6DE; animation-delay: -5s; }
+.hm-logo { position: relative; width: 108px; height: 108px; flex: 0 0 108px; border-radius: 28px; overflow: hidden; box-shadow: 0 12px 30px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.25); animation: hm-float 6s ease-in-out infinite; }
+.hm-logo svg { width: 100%; height: 100%; display: block; }
+.hm-tx { position: relative; min-width: 0; }
+.hm-kicker { display: inline-block; font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.28); }
+.hm-hero h1 { font-size: 2.3rem; line-height: 1.05; margin: 8px 0 6px; letter-spacing: -.01em; } .hm-hero h1 i { font-style: normal; color: #E3A857; }
+.hm-hero p { margin: 0 0 12px; opacity: .92; line-height: 1.5; max-width: 62ch; }
+.hm-cta { display: flex; gap: 10px; flex-wrap: wrap; }
+.hm-btn { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 14px; font-weight: 700; text-decoration: none; color: #fff; border: 1px solid rgba(255,255,255,.35); background: rgba(255,255,255,.1); transition: transform .25s, background .25s; }
+.hm-btn.pri { background: #E3A857; color: #1F2430; border-color: transparent; }
+.hm-btn:hover { transform: translateY(-2px); }
+
+.hm-sech { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 4px 2px 8px; }
+.hm-sech h2 { margin: 0; font-size: 1.3rem; } .hm-meta { color: var(--muted); font-size: .84rem; }
+.hm-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.hm-stat { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 12px 16px; display: flex; flex-direction: column; box-shadow: 0 8px 22px rgba(var(--shadow), .1); animation: hm-up .5s cubic-bezier(.2,.8,.2,1) both; position: relative; overflow: hidden; min-height: 86px; }
+.hm-stat::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--line); }
+.hm-stat.ok::before { background: var(--ok); } .hm-stat.bad::before { background: var(--bad); }
+.hm-stat span { font-size: .78rem; color: var(--muted); } .hm-stat b { font-size: 1.55rem; font-variant-numeric: tabular-nums; } .hm-stat small { color: var(--muted); font-size: .78rem; }
+.hm-chips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.hm-chips span { font-size: .76rem; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--field); border: 1px solid var(--line); }
+.sk { background: linear-gradient(90deg, var(--field) 0%, var(--card) 50%, var(--field) 100%); background-size: 600px 100%; animation: hm-sk 1.2s linear infinite; min-height: 86px; }
+.hm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.hm-tile { display: flex; flex-direction: column; gap: 8px; min-height: 180px; padding: 14px 16px; border-radius: 20px; background: var(--card); border: 1px solid var(--line); text-decoration: none; color: var(--ink);
+  box-shadow: 0 8px 22px rgba(var(--shadow), .1); transition: transform .3s cubic-bezier(.2,.8,.2,1), box-shadow .3s, border-color .3s; }
+.hm-tile.in { animation: hm-up .55s cubic-bezier(.2,.8,.2,1) both; animation-delay: calc(var(--i, 0) * 70ms); }
+.hm-tile:hover { transform: translateY(-3px); box-shadow: 0 16px 34px rgba(var(--shadow), .2); border-color: var(--accent); }
+.hm-tile-top { display: flex; align-items: center; gap: 10px; }
+.hm-ic { width: 40px; height: 40px; flex: 0 0 40px; display: grid; place-items: center; font-size: 1.25rem; border-radius: 12px; background: var(--field); border: 1px solid var(--line); }
+.hm-tile b { line-height: 1.2; }
+.hm-sub { margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.hm-gauge { display: flex; align-items: center; gap: 12px; }
+.hm-ring { width: 60px; height: 60px; flex: 0 0 60px; }
+.hm-ring circle { fill: none; stroke-width: 7; stroke-linecap: round; }
+.hm-ring-bg { stroke: var(--field); }
+.hm-ring-fg { transition: stroke-dashoffset 1.2s cubic-bezier(.2,.8,.2,1); }
+.hm-ring-fg.ok { stroke: var(--ok); } .hm-ring-fg.warn { stroke: #c27803; } .hm-ring-fg.bad { stroke: var(--bad); }
+.hm-gauge-tx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hm-gauge-tx b { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.hm-gauge-tx small { color: var(--muted); font-size: .74rem; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.hm-pill { align-self: flex-start; font-size: .7rem; font-weight: 900; padding: 2px 8px; border-radius: 8px; }
+.hm-pill.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); } .hm-pill.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 14%, transparent); }
+.hm-open { margin-top: auto; font-size: .8rem; font-weight: 700; color: var(--accent); }
+
+.hm-flow { display: grid; grid-template-columns: 1fr 1.25fr; gap: 0; align-items: stretch; overflow: hidden; border-radius: 24px; background: var(--card); border: 1px solid var(--line); text-decoration: none; color: var(--ink);
+  box-shadow: 0 12px 30px rgba(var(--shadow), .14); margin-bottom: 14px; transition: transform .3s, box-shadow .3s; }
+.hm-flow:hover { transform: translateY(-3px); box-shadow: 0 18px 40px rgba(var(--shadow), .22); }
+.hm-flow-tx { padding: 20px 22px; display: flex; flex-direction: column; gap: 8px; }
+.hm-flow-tx .hm-kicker { align-self: flex-start; background: var(--field); border-color: var(--line); color: var(--muted); }
+.hm-flow-tx h2 { margin: 0; font-size: 1.35rem; } .hm-flow-tx p { margin: 0; color: var(--muted); line-height: 1.5; font-size: .92rem; }
+.hm-go { margin-top: auto; align-self: flex-start; font-weight: 800; padding: 9px 14px; border-radius: 12px; color: #fff; background: linear-gradient(135deg, var(--btn1), var(--btn2)); }
+.hm-flow-img { width: 100%; height: 100%; min-height: 220px; object-fit: cover; object-position: left center; display: block; transition: transform 6s ease; }
+.hm-flow:hover .hm-flow-img { transform: scale(1.04); }
+.hm-install { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 4px 16px; margin-bottom: 10px; }
+.hm-install summary { min-height: 46px; display: flex; align-items: center; font-weight: 700; cursor: pointer; }
+.hm-install ol { margin: 0 0 12px; padding-left: 1.2em; } .hm-install li { margin: .3em 0; }
+.hm-foot { text-align: center; color: var(--muted); font-size: .82rem; margin: 14px 0 4px; }
+
+@media (max-width: 760px) {
+  .hm-hero { flex-direction: column; align-items: flex-start; padding: 22px; } .hm-logo { width: 78px; height: 78px; flex-basis: 78px; border-radius: 22px; } .hm-hero h1 { font-size: 1.9rem; }
+  .hm-stats { grid-template-columns: 1fr; } .hm-flow { grid-template-columns: 1fr; } .hm-flow-img { min-height: 180px; }
+}

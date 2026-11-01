@@ -18,6 +18,25 @@ function defaults() {
   }
 }
 
+// Ringkasan semua modul untuk dashboard beranda: jalankan tiap modul dengan masukan tersimpan
+export function dashboard(lng) {
+  lang.cur = lng
+  const S = loadState(defaults)
+  for (const m of MODS) S.cmb[m.id] = { ...CMB0(), ...(S.cmb[m.id] || {}) }
+  units.sys = S.units === "t" ? "t" : "si"
+  const sc = siteCtx(S.site)
+  const mods = MODS.map((m) => {
+    const cmb = S.cmb[m.id]
+    try {
+      const out = m.run(S.m[m.id], { ...sc, cmbOpts: { SDS: sc.sp.SDS, wpFrac: cmb.wp, ortho: cmb.ortho, enabled: cmb.en, factors: cmb.fx } })
+      const g = govern(out.checks), bad = out.checks.filter((c) => !c.ok && !c.info)
+      const st = out.settle && out.settle.r.res ? { s: out.settle.r.res.s_life * 1000, allow: out.settle.r.allow } : null
+      return { id: m.id, icon: m.icon, title: m.title(), sub: out.sub, nChk: out.checks.filter((c) => !c.info).length, nBad: bad.length, gov: g, ok: !bad.length, settle: st, nCmb: out.combos.length }
+    } catch (e) { return { id: m.id, icon: m.icon, title: m.title(), error: e.message } }
+  })
+  return { project: S.project, site: S.site, sp: sc.sp, units: units.sys, mods }
+}
+
 export function mountDesain(root, ctx, sub) {
   lang.cur = ctx.lang
   const S = loadState(defaults)
@@ -92,7 +111,30 @@ function hub(root, S) {
   const save = (x) => { saveState(S); if (x) { root.textContent = ""; hub(root, S); reveal(root) } }
   root.append(hero, bar, grid, projectCard(S, save), footer())
 }
-const footer = () => { const f = el("p", "dz-foot"); f.innerHTML = `© ${AUTHOR} · Review by YMD · ${L("pembanding desain, ikuti Design Basis & kode yang berlaku", "design cross-check; follow the Design Basis & governing codes")}`; return f }
+function settleCard(sb) {
+  const c = el("div", "dz-settle dz-in")
+  const h = el("div", "dz-settle-h")
+  h.append(el("span", "dz-settle-ic", "📉"), el("div"))
+  h.lastChild.append(el("b", null, L("Penurunan pondasi", "Foundation settlement")), el("span", "hint", L(" · terhubung ke tab Penurunan (profil tanah, konsolidasi, batas izin)", " · linked to the Settlement tab (soil profile, consolidation, limit)")))
+  c.append(h)
+  if (sb.r.error) c.append(el("p", "dz-note", sb.r.error))
+  else {
+    const x = sb.r.res, tot = x.s_life * 1000, ur = tot / sb.r.allow
+    const g = el("div", "dz-settle-g")
+    ;[[L("Segera si", "Immediate si"), x.si * 1000], [L("Konsolidasi sc", "Consolidation sc"), x.sc * 1000], [L(`Total ${nf(sb.r.life, 0)} th`, `Total ${nf(sb.r.life, 0)} yr`), tot], [L("Izin", "Allowable"), sb.r.allow]]
+      .forEach(([k, v]) => { const m = el("div", "dz-sm"); m.append(el("span", null, k), el("b", null, `${nf(v, 1)} mm`)); g.append(m) })
+    c.append(g)
+    const bar = el("div", "dz-bar"), fill = el("i", urClass(ur)), mk = el("b"); mk.style.left = `${100 / 1.2}%`
+    fill.style.transform = "scaleX(0)"; bar.append(fill, mk); c.append(bar)
+    requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.transform = `scaleX(${Math.min(ur, 1.2) / 1.2})` }))
+  }
+  const btn = el("button", "dz-btn ghost dz-settle-go"); btn.type = "button"
+  btn.innerHTML = `<span class="ic">↗</span><span><b>${L("Buka di tab Penurunan", "Open in Settlement tab")}</b><small>${L("kirim B, L, Df, q dari desain ini", "send B, L, Df, q from this design")}</small></span>`
+  btn.onclick = () => { sb.send(); location.hash = "#/penurunan" }
+  c.append(btn)
+  return c
+}
+const footer = () => { const f = el("p", "dz-foot"); f.innerHTML = `© ${AUTHOR} · YMD-CAL · ${L("pembanding desain, ikuti Design Basis & kode yang berlaku", "design cross-check; follow the Design Basis & governing codes")}`; return f }
 
 // ---------------------------------------------------------------- halaman modul
 function page(root, S, mod) {
@@ -135,6 +177,7 @@ function page(root, S, mod) {
     reveal(root)
   }
   function compute(redrawCmb) {
+    if (formBox.__refresh) formBox.__refresh()
     let out
     try { out = mod.run(st, ctx()) } catch (e) {
       console.error(e)
@@ -179,6 +222,8 @@ function page(root, S, mod) {
     hero.append(metricsView(out.metrics, mod.id), figBox)
     resBox.append(hero)
     show(Math.min(drawIx, out.drawings.length - 1))
+    // penurunan (terhubung ke tab Penurunan)
+    if (out.settle) resBox.append(settleCard(out.settle))
     // pemeriksaan
     const ch = el("div", "dz-chkhead")
     ch.append(el("h3", null, L("Pemeriksaan desain", "Design checks")))
@@ -197,6 +242,22 @@ function page(root, S, mod) {
       d.append(tableView({ ...t, title: "" }))
       resBox.append(d)
     })
+    if (out.steps && out.steps.length) {
+      const sd = el("details", "dz-steps dz-in")
+      const ss = el("summary"); ss.append(el("span", "dz-ico", "📐"), el("span", null, L("Lembar perhitungan langkah demi langkah", "Step-by-step calculation sheet")), el("span", "dz-badge", `${out.steps.length} ${L("bagian", "parts")}`))
+      sd.append(ss)
+      out.steps.forEach((st, i) => {
+        const w = el("div", "dz-step"); w.style.setProperty("--i", i)
+        w.append(el("div", "dz-step-h", st.h))
+        const tb = el("table", "dz-res dz-steptbl"), hr = el("tr")
+        ;[L("Besaran", "Quantity"), L("Rumus", "Formula"), L("Substitusi", "Substitution"), L("Hasil", "Result")].forEach((h) => hr.append(el("th", null, h)))
+        tb.append(hr)
+        st.rows.forEach((r) => { const tr = el("tr"); r.forEach((c, j) => tr.append(el("td", j === 1 ? "f" : j === 3 ? "r" : "", c))); tb.append(tr) })
+        const tw = el("div", "dz-tw"); tw.append(tb); w.append(tw)
+        sd.append(w)
+      })
+      resBox.append(sd)
+    }
     const kvd = el("details", "dz-tdet dz-in"); kvd.append(el("summary", null, L("Ringkasan data masukan", "Input summary")))
     out.kv.forEach((b) => kvd.append(tableView({ title: b.title, cols: [L("Parameter", "Parameter"), L("Nilai", "Value"), L("Satuan", "Unit")], rows: b.rows.map(([a, v, u, d]) => [a, typeof v === "number" ? nf(v, d ?? 3) : v, u || ""]), align: ["l", "r", "l"] })))
     resBox.append(kvd)

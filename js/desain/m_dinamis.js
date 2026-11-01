@@ -2,6 +2,9 @@
 import { L, nf, toDisp, uName, expandCombos, seismicCoef } from "./core.js"
 import { PRESETS, dynamics, dynCases, analyzeDynamic } from "./dynamic.js"
 import { palette, dynDraw, footingPlan } from "./draw.js"
+import { skDyn } from "./sketch.js"
+import { dynSteps } from "./steps.js"
+import { settleBlock, footFrom } from "./settle.js"
 
 export const id = "dinamis"
 export const icon = "⚙️"
@@ -16,22 +19,22 @@ export function defaults() {
 const BAR = { 13: "D13", 16: "D16", 19: "D19", 22: "D22", 25: "D25" }
 export function form(s) {
   return [
-    { id: "mc", icon: "⚙️", t: L("Mesin", "Machine"), fields: [
+    { id: "mc", sketch: skDyn, icon: "⚙️", t: L("Mesin", "Machine"), fields: [
       { k: "preset", type: "seg", lab: L("Peralatan", "Equipment"), opts: { wip: "WIP", wtp: "WTP", comp: L("Kompresor udara", "Air compressor"), rec: L("Kompresor torak", "Recip. compressor") }, wide: true, on: (st, k) => Object.assign(st, { Fo: 0 }, PRESETS[k]) },
       { k: "type", type: "seg", lab: L("Jenis eksitasi", "Excitation type"), opts: { rot: L("Berputar (1×)", "Rotating (1×)"), rec: L("Torak (1× & 2×)", "Reciprocating (1× & 2×)") } },
       { k: "Wm", lab: L("Berat mesin + penggerak + baseplate", "Machine + driver + baseplate weight"), u: "F", lo: 1, hi: 1e5 }, { k: "Wr", lab: L("Berat rotor", "Rotor weight"), u: "F", lo: 0.1, hi: 1e4 },
       { k: "rpm", lab: L("Kecepatan operasi", "Operating speed"), u: "rpm", lo: 60, hi: 20000 }, { k: "kW", lab: L("Daya penggerak", "Driver power"), u: "kW", lo: 0, hi: 1e5 },
       { k: "Gq", lab: L("Mutu balans ISO 1940 (G)", "ISO 1940 balance grade (G)"), u: "mm/s", lo: 0.4, hi: 40, help: L("Pompa G6,3; kompresor/turbin G2,5.", "Pumps G6.3; compressors/turbines G2.5.") },
       { k: "Fo", lab: L("Gaya tak seimbang vendor (0 = dari G)", "Vendor unbalanced force (0 = from G)"), u: "F", lo: 0, hi: 1e4 },
-      { k: "hs", lab: L("Tinggi poros di atas blok", "Shaft height above block"), u: "m", lo: 0.1, hi: 4 }, { k: "hcg", lab: L("Tinggi pusat massa mesin di atas blok", "Machine CG above block"), u: "m", lo: 0.1, hi: 4 },
-      { k: "Lb", lab: L("Panjang baseplate (sumbu poros)", "Baseplate length (shaft axis)"), u: "m", lo: 0.3, hi: 20 }, { k: "Bb", lab: L("Lebar baseplate", "Baseplate width"), u: "m", lo: 0.3, hi: 10 },
-      { k: "exm", lab: L("Eksentrisitas mesin x", "Machine eccentricity x"), u: "m", lo: -3, hi: 3 }, { k: "eym", lab: L("Eksentrisitas mesin y", "Machine eccentricity y"), u: "m", lo: -3, hi: 3 },
+      { k: "hs", lab: L("Tinggi poros hs di atas blok", "Shaft height hs above block"), u: "m", lo: 0.1, hi: 4 }, { k: "hcg", lab: L("Tinggi pusat massa mesin hcg di atas blok", "Machine CG hcg above block"), u: "m", lo: 0.1, hi: 4 },
+      { k: "Lb", lab: L("Panjang baseplate Lb (sumbu poros)", "Baseplate length Lb (shaft axis)"), u: "m", lo: 0.3, hi: 20 }, { k: "Bb", lab: L("Lebar baseplate Bb", "Baseplate width Bb"), u: "m", lo: 0.3, hi: 10 },
+      { k: "exm", lab: L("Eksentrisitas mesin ex", "Machine eccentricity ex"), u: "m", lo: -3, hi: 3 }, { k: "eym", lab: L("Eksentrisitas mesin ey", "Machine eccentricity ey"), u: "m", lo: -3, hi: 3 },
       { k: "scf", lab: L("Faktor torsi hubung singkat motor", "Motor short-circuit torque factor"), u: "×Tn", lo: 0, hi: 12 },
       { k: "Vpx", lab: L("Gaya pipa Vx", "Pipe force Vx"), u: "F", lo: 0, hi: 1e4 }, { k: "Vpy", lab: L("Gaya pipa Vy", "Pipe force Vy"), u: "F", lo: 0, hi: 1e4 },
     ] },
     { id: "blk", icon: "🧊", t: L("Blok pondasi", "Foundation block"), fields: [
-      { k: "Bx", lab: L("Panjang blok (sumbu poros)", "Block length (shaft axis)"), u: "m", lo: 0.8, hi: 30 }, { k: "By", lab: L("Lebar blok", "Block width"), u: "m", lo: 0.8, hi: 20 },
-      { k: "H", lab: L("Tebal blok", "Block depth"), u: "m", lo: 0.4, hi: 5 }, { k: "emb", lab: L("Kedalaman tertanam", "Embedment depth"), u: "m", lo: 0, hi: 5 },
+      { k: "Bx", lab: L("Panjang blok Bx (sumbu poros)", "Block length Bx (shaft axis)"), u: "m", lo: 0.8, hi: 30 }, { k: "By", lab: L("Lebar blok By", "Block width By"), u: "m", lo: 0.8, hi: 20 },
+      { k: "H", lab: L("Tebal blok H", "Block depth H"), u: "m", lo: 0.4, hi: 5 }, { k: "emb", lab: L("Kedalaman tertanam De", "Embedment depth De"), u: "m", lo: 0, hi: 5 },
       { k: "fc", lab: "fc'", u: "MPa", lo: 17, hi: 50 }, { k: "fy", lab: "fy", u: "MPa", lo: 280, hi: 550 }, { k: "db", type: "sel", lab: L("Tulangan", "Bars"), opts: BAR },
     ] },
     { id: "soil", icon: "🧱", t: L("Tanah & kriteria", "Soil & criteria"), fields: [
@@ -39,7 +42,8 @@ export function form(s) {
       { k: "Vs", lab: L("Kecepatan gelombang geser Vs", "Shear-wave velocity Vs"), u: "m/s", lo: 50, hi: 1500, show: (x) => x.Gmode === "Vs" }, { k: "red", lab: L("Reduksi G (regangan)", "G reduction (strain)"), u: "", lo: 0.2, hi: 1, show: (x) => x.Gmode === "Vs" },
       { k: "Gsoil", lab: L("Modulus geser dinamis G", "Dynamic shear modulus G"), u: "Q", lo: 1000, hi: 2e6, show: (x) => x.Gmode === "G" },
       { k: "nu", lab: L("Poisson ν", "Poisson ν"), u: "", lo: 0.2, hi: 0.49 }, { k: "gs", lab: L("Berat isi tanah", "Soil unit weight"), u: "G", lo: 14, hi: 22 },
-      { k: "qa", lab: L("Daya dukung izin statik qa", "Static allowable bearing qa"), u: "Q", lo: 20, hi: 2000 }, { k: "muB", lab: L("μ dasar–tanah", "Base–soil μ"), u: "", lo: 0.2, hi: 0.8 },
+      { k: "qa", lab: L("Daya dukung izin statik qa", "Static allowable bearing qa"), u: "Q", lo: 20, hi: 2000 }, { k: "sAllow", lab: L("Batas penurunan izin (0 = ikut tab Penurunan)", "Allowable settlement (0 = use Settlement tab)"), u: "mm", lo: 0, hi: 1000 },
+      { k: "muB", lab: L("μ dasar–tanah", "Base–soil μ"), u: "", lo: 0.2, hi: 0.8 },
       { k: "sep", lab: L("Pemisahan frekuensi minimum", "Minimum frequency separation"), u: "%", lo: 5, hi: 50 }, { k: "vlim", lab: L("Batas kecepatan getar puncak", "Peak vibration velocity limit"), u: "mm/s", lo: 0.5, hi: 20 },
       { k: "mrRot", lab: L("Rasio massa min. (berputar)", "Min. mass ratio (rotating)"), u: "", lo: 1, hi: 10 }, { k: "mrRec", lab: L("Rasio massa min. (torak)", "Min. mass ratio (recip.)"), u: "", lo: 1, hi: 10 },
       { k: "qRot", lab: L("Reduksi qa (berputar)", "qa reduction (rotating)"), u: "", lo: 0.3, hi: 1 }, { k: "qRec", lab: L("Reduksi qa (torak)", "qa reduction (recip.)"), u: "", lo: 0.3, hi: 1 }, { k: "Ie", lab: L("Ie gempa", "Seismic Ie"), u: "", lo: 1, hi: 1.5 },
@@ -77,6 +81,10 @@ export function run(s, ctx) {
     { title: L("Tulangan blok (LRFD)", "Block reinforcement (LRFD)"), cols: [L("Arah", "Direction"), L("Bawah", "Bottom"), L("Atas", "Top")], rows: ["x", "y"].map((ax) => [ax.toUpperCase(), out.r.reinf[ax].bot.txt, out.r.reinf[ax].top ? out.r.reinf[ax].top.txt : out.r.reinf[ax].bot.txt]), align: ["l", "l", "l"],
       note: L("ACI 351.3R: pasang tulangan di semua muka (atas, bawah, samping) minimal ρ susut 0,0018 dan ≥ D16 @ 300 mm.", "ACI 351.3R: provide steel on all faces (top, bottom, sides) at least 0.0018 shrinkage ratio and ≥ D16 @ 300 mm.") },
   ]
+  const a1 = out.r.asd.find((a) => a.c.base === "A1") || out.r.asd[0]
+  const settle = settleBlock(footFrom("rect", I.Bx, I.By, out.r.geo.A, I.emb, a1.R.P / out.r.geo.A, "dinamis", pre), I.sAllow || 0)
+  out.checks.push(settle.check)
+  if (settle.table) tables.push(settle.table)
   const notes = [
     L("Kekakuan & redaman: Richart, Hall & Woods (1970) untuk lingkaran ekuivalen; faktor penanaman Arya/Novak pada kekakuan (redaman tanpa penambahan, konservatif). Mode sliding–rocking tergandeng dari persamaan karakteristik 2 derajat kebebasan.", "Stiffness & damping: Richart, Hall & Woods (1970) for the equivalent circle; Arya/Novak embedment factors on stiffness (damping not increased, conservative). Coupled sliding–rocking modes from the 2-DOF characteristic equation."),
     L("Gaya tak seimbang Fo = mr·(G/ω)·ω² (ISO 1940) bila data vendor tidak ada. Amplitudo memakai faktor pembesaran 1 DOF; kecepatan puncak v = ω·A dibandingkan dengan batas proyek (ISO 10816/ACI 351.3R).", "Unbalanced force Fo = mr·(G/ω)·ω² (ISO 1940) when vendor data is absent. Amplitudes use 1-DOF magnification; peak velocity v = ω·A compared with the project limit (ISO 10816/ACI 351.3R)."),
@@ -84,5 +92,5 @@ export function run(s, ctx) {
     L("Batas: tanpa analisis tergandeng 6 DOF penuh, tanpa efek tiang/kelompok dan lapisan tanah. Untuk mesin besar atau hasil mendekati batas gunakan analisis dinamis khusus dan data vendor. Kompresor torak (eksitasi 1× dan 2×) sering memerlukan blok besar/kaku atau pondasi tiang — gunakan gaya tak seimbang primer/sekunder dari vendor.", "Limits: no full 6-DOF coupled analysis, no pile/group or layering effects. For large machines or marginal results use a dedicated dynamic analysis and vendor data. Reciprocating compressors (1× and 2× excitation) often need a large/stiff block or piles — use vendor primary/secondary unbalanced forces."),
   ]
   return { file: "Pondasi_" + pre.replace(/\s+/g, ""), title: `${L("Desain Pondasi Dinamis", "Dynamic Foundation Design")} — ${pre}`, sub: `${nf(I.rpm, 0)} rpm · ${L("blok", "block")} ${nf(I.Bx, 2)} × ${nf(I.By, 2)} × ${nf(I.H, 2)} m`, refs: codes, metrics, checks: out.checks, kv, tables, notes,
-    drawings: [{ make: (m) => dynDraw(I, { ...out, Dy, pre }, palette(m)), cap: L("Gambar 1 — Blok mesin, model pegas–peredam, dan peta frekuensi", "Figure 1 — Machine block, spring–dashpot model and frequency map") }, { make: (m) => footingPlan(out.r, out.m, palette(m)), cap: L("Gambar 2 — Denah blok dan tekanan tanah", "Figure 2 — Block plan and soil pressure"), maxH: 300 }], cases, combos, out: { ...out, Dy } }
+    drawings: [{ make: (m) => dynDraw(I, { ...out, Dy, pre }, palette(m)), cap: L("Gambar 1 — Blok mesin, model pegas–peredam, dan peta frekuensi", "Figure 1 — Machine block, spring–dashpot model and frequency map") }, { make: (m) => footingPlan(out.r, out.m, palette(m)), cap: L("Gambar 2 — Denah blok dan tekanan tanah", "Figure 2 — Block plan and soil pressure"), maxH: 300 }], cases, combos, out: { ...out, Dy }, settle, steps: dynSteps(I, Dy, out) }
 }

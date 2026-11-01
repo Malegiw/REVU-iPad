@@ -6,6 +6,8 @@ import { circlePoly, barsOnCircle, pmCurve } from "./rc.js"
 import { barA } from "./core.js"
 import { layersEditor, loadsEditor, addUserLoads, LOAD_LABEL } from "./ui.js"
 import { palette, pileElevation, pileConnection, pmChart } from "./draw.js"
+import { pileSteps } from "./steps.js"
+import { skPileSection, skPileSoil, skPileGroup, skPileConn } from "./sketch.js"
 
 export const id = "tiang"
 export const icon = "📍"
@@ -30,42 +32,42 @@ export function form(s, onChange) {
   const pipe = (x) => x.type === "pipe", hel = (x) => x.type === "helical"
   const setGrade = (st, v) => { if (GRADES[v]) st.Fy = GRADES[v].fy }
   return [
-    { id: "sec", icon: "🔩", t: L("Jenis & penampang tiang", "Pile type & section"), fields: [
+    { id: "sec", sketch: skPileSection, icon: "🔩", t: L("Jenis & penampang tiang", "Pile type & section"), fields: [
       { k: "type", type: "seg", lab: L("Jenis tiang", "Pile type"), opts: { pipe: L("Pipa baja (pancang)", "Steel pipe (driven)"), helical: L("Helical (ulir)", "Helical (screw)") }, wide: true,
         on: (st, v) => { if (v === "helical") Object.assign(st, { fsC: 2, fsT: 2, nd: 4, dbd: 16, Lp: 700, conn: "pinned", sx: 1.0, sy: 1.0, ce: 0.4, hc: 0.6, cx: 0.5, cy: 0.5 }); else Object.assign(st, { fsC: 2.5, fsT: 3, Lp: 1200, dbd: 19, nd: 8, conn: "fixed", sx: 1.25, sy: 1.25, ce: 0.5, hc: 1.0, cx: 0.8, cy: 0.8 }) } },
       { k: "D", lab: L("Diameter luar D", "Outer diameter D"), u: "mm", lo: 100, hi: 2500, show: pipe },
       { k: "t", lab: L("Tebal dinding t", "Wall thickness t"), u: "mm", lo: 4, hi: 60, show: pipe },
       { k: "open", type: "seg", lab: L("Ujung tiang", "Pile tip"), opts: { true: L("Terbuka (cek plug)", "Open (plug check)"), false: L("Tertutup", "Closed") }, show: pipe, on: (st, v) => { st.open = v === "true" } },
       { k: "ds", lab: L("Diameter shaft ds", "Shaft diameter ds"), u: "mm", lo: 60, hi: 400, show: hel },
-      { k: "ts", lab: L("Tebal shaft", "Shaft wall"), u: "mm", lo: 3, hi: 25, show: hel },
+      { k: "ts", lab: L("Tebal shaft t", "Shaft wall t"), u: "mm", lo: 3, hi: 25, show: hel },
       { k: "grade", type: "sel", lab: L("Mutu baja", "Steel grade"), opts: gradeOpts(), on: setGrade },
       { k: "Fy", lab: "Fy", u: "MPa", lo: 200, hi: 700, struct: true },
       { k: "ca", lab: L("Korosi (dikurangi dari t)", "Corrosion (deducted from t)"), u: "mm", lo: 0, hi: 10, help: L("Contoh: 0,05 mm/tahun × 40 tahun = 2 mm (muka luar).", "e.g. 0.05 mm/yr × 40 yr = 2 mm (outer face).") },
-      { k: "helices", type: "list", lab: L("Diameter helix dari bawah (mm, pisah koma)", "Helix diameters from bottom (mm, comma-separated)"), show: hel, wide: true },
-      { k: "zTip", lab: L("Kedalaman helix terbawah", "Lead helix depth"), u: "m", lo: 1, hi: 40, show: hel },
-      { k: "ratio", lab: L("Jarak helix / D bawah", "Helix spacing / lower D"), u: "×D", lo: 1, hi: 6, show: hel },
+      { k: "helices", type: "list", lab: L("Diameter helix Dh1, Dh2, … dari bawah (mm, pisah koma)", "Helix diameters Dh1, Dh2, … from bottom (mm, comma-separated)"), show: hel, wide: true },
+      { k: "zTip", lab: L("Kedalaman helix terbawah zTip", "Lead helix depth zTip"), u: "m", lo: 1, hi: 40, show: hel },
+      { k: "ratio", lab: L("Jarak helix s / Dh bawah", "Helix spacing s / lower Dh"), u: "×D", lo: 1, hi: 6, show: hel },
       { k: "Kt", lab: L("Faktor torsi Kt", "Torque factor Kt"), u: "1/m", lo: 5, hi: 60, show: hel, help: L("AC358: 33 (Ø73), 30 (Ø89), 23 (Ø114) m⁻¹.", "AC358: 33 (Ø73), 30 (Ø89), 23 (Ø114) m⁻¹.") },
       { k: "T", lab: L("Torsi instalasi (0 = abaikan)", "Installation torque (0 = ignore)"), u: "M", lo: 0, hi: 500, show: hel },
       { k: "plateCap", lab: L("Kapasitas pelat helix pabrikan (0 = abaikan)", "Manufacturer helix plate capacity (0 = ignore)"), u: "F", lo: 0, hi: 5000, show: hel },
       { k: "shaft", type: "chk", lab: L("Hitung gesek shaft di atas helix teratas", "Include shaft friction above top helix"), show: hel },
     ] },
-    { id: "soil", icon: "🧱", t: L("Panjang tiang & profil tanah", "Pile length & soil profile"), note: L("Kedalaman diukur dari <b>kepala tiang (dasar pile cap)</b>. Lempung: metode α (API), Davisson k = 67cu. Pasir: metode β (API, δ = φ − 5°), nh Terzaghi otomatis bila 0.", "Depths are measured from the <b>pile head (pile-cap soffit)</b>. Clay: α-method (API), Davisson k = 67cu. Sand: β-method (API, δ = φ − 5°), Terzaghi nh automatic when 0."), fields: [
+    { id: "soil", sketch: skPileSoil, icon: "🧱", t: L("Panjang tiang & profil tanah", "Pile length & soil profile"), note: L("Kedalaman diukur dari <b>kepala tiang (dasar pile cap)</b>. Lempung: metode α (API), Davisson k = 67cu. Pasir: metode β (API, δ = φ − 5°), nh Terzaghi otomatis bila 0.", "Depths are measured from the <b>pile head (pile-cap soffit)</b>. Clay: α-method (API), Davisson k = 67cu. Sand: β-method (API, δ = φ − 5°), Terzaghi nh automatic when 0."), fields: [
       { k: "L", lab: L("Panjang tertanam L", "Embedded length L"), u: "m", lo: 3, hi: 80, show: pipe },
       { k: "e", lab: L("Panjang bebas di atas tanah e", "Free length above ground e"), u: "m", lo: 0, hi: 20, help: L("0 bila dasar pile cap di muka tanah.", "0 when the cap soffit is at ground level.") },
-      { k: "gwt", lab: L("Muka air tanah dari kepala tiang", "Groundwater depth below pile head"), u: "m", lo: 0, hi: 99 },
+      { k: "gwt", lab: L("Muka air tanah zw dari kepala tiang", "Groundwater zw below pile head"), u: "m", lo: 0, hi: 99 },
       { type: "layers", render: (st, oc) => layersEditor(st, "layers", oc) },
     ] },
-    { id: "grp", icon: "🧩", t: L("Kelompok tiang & pile cap", "Pile group & pile cap"), fields: [
+    { id: "grp", sketch: skPileGroup, icon: "🧩", t: L("Kelompok tiang & pile cap", "Pile group & pile cap"), fields: [
       { k: "nx", lab: L("Jumlah tiang arah X", "Piles in X"), u: "", lo: 1, hi: 8, struct: true }, { k: "ny", lab: L("Jumlah tiang arah Y", "Piles in Y"), u: "", lo: 1, hi: 8, struct: true },
-      { k: "sx", lab: L("Jarak tiang X", "Spacing X"), u: "m", lo: 0.3, hi: 10 }, { k: "sy", lab: L("Jarak tiang Y", "Spacing Y"), u: "m", lo: 0.3, hi: 10 },
-      { k: "ce", lab: L("Pusat tiang ke tepi cap", "Pile centre to cap edge"), u: "m", lo: 0.15, hi: 3 }, { k: "hc", lab: L("Tebal pile cap", "Cap thickness"), u: "m", lo: 0.3, hi: 4 },
+      { k: "sx", lab: L("Jarak tiang sx", "Spacing sx"), u: "m", lo: 0.3, hi: 10 }, { k: "sy", lab: L("Jarak tiang sy", "Spacing sy"), u: "m", lo: 0.3, hi: 10 },
+      { k: "ce", lab: L("Pusat tiang ke tepi cap ce", "Pile centre to cap edge ce"), u: "m", lo: 0.15, hi: 3 }, { k: "hc", lab: L("Tebal pile cap hc", "Cap thickness hc"), u: "m", lo: 0.3, hi: 4 },
       { k: "cx", lab: L("Kolom/pedestal cx", "Column/pedestal cx"), u: "m", lo: 0.2, hi: 6 }, { k: "cy", lab: L("Kolom/pedestal cy", "Column/pedestal cy"), u: "m", lo: 0.2, hi: 6 },
-      { k: "hs", lab: L("Tanah urug di atas cap", "Backfill above cap"), u: "m", lo: 0, hi: 5 }, { k: "gs", lab: L("γ tanah urug", "Backfill γ"), u: "G", lo: 10, hi: 25 },
+      { k: "hs", lab: L("Tanah urug di atas cap hs", "Backfill above cap hs"), u: "m", lo: 0, hi: 5 }, { k: "gs", lab: L("γ tanah urug", "Backfill γ"), u: "G", lo: 10, hi: 25 },
       { k: "fcc", lab: "fc' cap", u: "MPa", lo: 17, hi: 60 }, { k: "fyc", lab: "fy", u: "MPa", lo: 280, hi: 550 }, { k: "dbc", type: "sel", lab: L("Tulangan cap", "Cap bars"), opts: { 13: "D13", 16: "D16", 19: "D19", 22: "D22", 25: "D25", 29: "D29", 32: "D32" } },
     ] },
-    { id: "conn", icon: "🔗", t: L("Kepala tiang & sambungan ke pile cap", "Pile head & cap connection"), note: L("Perlakuan kepala tiang: potong rata pada elevasi cut-off, bersihkan bagian dalam, pasang penyumbat dasar, cor <b>beton isi</b> bersama dowel (rangkaian tulangan) yang diteruskan ke pile cap.", "Pile head treatment: cut square at cut-off level, clean the inside, fit a base plug, cast <b>infill concrete</b> with a dowel cage extended into the cap."), fields: [
+    { id: "conn", sketch: skPileConn, icon: "🔗", t: L("Kepala tiang & sambungan ke pile cap", "Pile head & cap connection"), note: L("Perlakuan kepala tiang: potong rata pada elevasi cut-off, bersihkan bagian dalam, pasang penyumbat dasar, cor <b>beton isi</b> bersama dowel (rangkaian tulangan) yang diteruskan ke pile cap.", "Pile head treatment: cut square at cut-off level, clean the inside, fit a base plug, cast <b>infill concrete</b> with a dowel cage extended into the cap."), fields: [
       { k: "conn", type: "seg", lab: L("Jenis sambungan", "Connection type"), opts: { fixed: L("Jepit (fixed)", "Fixed"), pinned: L("Sendi (pinned)", "Pinned") }, wide: true },
-      { k: "emb", lab: L("Penanaman tiang ke cap", "Pile embedment into cap"), u: "mm", lo: 50, hi: 3000 },
+      { k: "emb", lab: L("Penanaman tiang ke cap emb", "Pile embedment into cap emb"), u: "mm", lo: 50, hi: 3000 },
       { k: "Lp", lab: L("Panjang beton isi Lp", "Infill length Lp"), u: "mm", lo: 200, hi: 6000 },
       { k: "fcp", lab: L("fc' beton isi", "Infill fc'"), u: "MPa", lo: 17, hi: 60 },
       { k: "nd", lab: L("Jumlah dowel", "Number of dowels"), u: "", lo: 3, hi: 40 },
@@ -156,5 +158,5 @@ export function run(s, ctx) {
   ]
   return { file: R.isH ? "Tiang_Helical" : "Tiang_Pipa", title: R.isH ? L("Desain Tiang Helical & Sambungan Pile Cap", "Helical Pile & Pile-Cap Connection Design") : L("Desain Tiang Pipa Baja & Sambungan Pile Cap", "Steel Pipe Pile & Pile-Cap Connection Design"),
     sub: `${pileTxt} · ${I.nx}×${I.ny} · ${I.conn === "fixed" ? L("kepala jepit, beton isi bertulang", "fixed head, reinforced infill") : L("kepala sendi", "pinned head")}`, refs: codes + " · SNI 1727:2020 · SNI 1726:2019",
-    metrics, checks: R.checks, kv, tables, notes, drawings, cases, combos, R }
+    metrics, checks: R.checks, kv, tables, notes, drawings, cases, combos, R, steps: pileSteps(I, R) }
 }

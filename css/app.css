@@ -1,4 +1,4 @@
-/* Review by YMD · Kalkulator (iPad offline). Palet: Cloud Dancer (terang) dan Midnight Slate (gelap), sama dengan aplikasi utama. Target sentuh minimal 44 px. */
+/* YMD-CAL (iPad offline). Palet: Cloud Dancer (terang) dan Midnight Slate (gelap), sama dengan aplikasi utama. Target sentuh minimal 44 px. */
 :root {
   --bg1: #E9E6DF; --bg2: #F0EEE9; --card: rgba(255,255,255,.92); --cardsolid: #FFFFFF; --field: #ECE9E2; --ink: #1F2430; --muted: #5C6573;
   --accent: #3F5A75; --accent2: #223246; --btn1: #4A6078; --btn2: #27323F; --line: rgba(31,36,48,.14); --shadow: 70,60,45;
@@ -29,7 +29,10 @@ a { color: var(--accent); }
 .top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 14px; padding: 10px 16px; padding-top: calc(10px + env(safe-area-inset-top));
   background: linear-gradient(135deg, #3B4B5E, #27323F); color: #fff; box-shadow: 0 4px 18px rgba(var(--shadow), .25); flex-wrap: wrap; }
 .brand { display: flex; align-items: center; gap: 10px; color: #fff; text-decoration: none; min-height: 44px; }
-.mark { font: 800 1.15rem/1 "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: .5px; padding: 8px 10px; border-radius: 12px; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.3); }
+.logo { width: 42px; height: 42px; flex: 0 0 42px; display: block; border-radius: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.22); transition: transform .4s cubic-bezier(.2,.8,.2,1); }
+.logo svg { width: 100%; height: 100%; display: block; }
+.brand:hover .logo { transform: rotate(-6deg) scale(1.05); }
+.bt b { font: 800 1.12rem/1.1 "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: .02em; } .bt b i { font-style: normal; color: #E3A857; }
 .bt { display: flex; flex-direction: column; line-height: 1.15; } .bt small { opacity: .75; font-size: .75rem; }
 .nav { display: flex; gap: 6px; flex: 1; flex-wrap: wrap; }
 .nav a { color: #fff; text-decoration: none; padding: 0 14px; min-height: 44px; display: inline-flex; align-items: center; border-radius: 999px; border: 1px solid transparent; font-weight: 600; font-size: .95rem; }
@@ -108,3 +111,5 @@ th { background: var(--field); font-size: .82rem; white-space: nowrap; }
   :root { --card: #fff; --field: #f3f3f3; --ink: #000; --line: #ccc; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+.linkbar { display: flex; flex-direction: column; gap: 6px; border-left: 5px solid var(--gold); }
+.linkbar .btns { margin-top: 4px; } .linkbar .ghost { margin-top: 0; }

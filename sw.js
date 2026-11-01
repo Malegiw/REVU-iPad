@@ -1,5 +1,5 @@
-// Dibuat oleh ipad_build.py (jangan diedit tangan). Menyimpan semua berkas supaya app jalan tanpa internet; versi baru menunggu sampai pengguna menekan Muat ulang.
-const VERSION = "869fbebd72"
+// Semula dibuat oleh ipad_build.py; daftar berkas & VERSION diperbarui untuk YMD-CAL (lihat README). Menyimpan semua berkas supaya app jalan tanpa internet; versi baru menunggu sampai pengguna menekan Muat ulang.
+const VERSION = "a9abfdd2cb"
 const CACHE = "ymd-ipad-" + VERSION
 const FILES = [
  "./",
@@ -70,7 +70,7 @@ const FILES = [
  "css/app.css",
  "css/desain.css",
  "css/flow.css",
- "data/en_fondasi.json",
+ "css/home.css",
  "data/en_penurunan.json",
  "data/flow_en_cloud.json",
  "data/flow_en_dark.json",
@@ -79,6 +79,7 @@ const FILES = [
  "icons/apple-touch-icon.png",
  "icons/icon-192.png",
  "icons/icon-512.png",
+ "icons/logo.svg",
  "index.html",
  "js/app.js",
  "js/desain/core.js",
@@ -93,7 +94,10 @@ const FILES = [
  "js/desain/pdf.js",
  "js/desain/pile.js",
  "js/desain/rc.js",
+ "js/desain/settle.js",
+ "js/desain/sketch.js",
  "js/desain/steel.js",
+ "js/desain/steps.js",
  "js/desain/tank.js",
  "js/desain/trafo.js",
  "js/desain/ui.js",
@@ -102,9 +106,7 @@ const FILES = [
  "js/desain_ui.js",
  "js/flow.js",
  "js/fmt.js",
- "js/fondasi.js",
- "js/fondasi_ui.js",
- "js/kit.js",
+ "js/home.js",
  "js/penurunan.js",
  "js/penurunan_ui.js",
  "manifest.webmanifest"

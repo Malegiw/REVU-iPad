@@ -1,7 +1,7 @@
 {
-  "name": "Review by YMD · Kalkulator",
-  "short_name": "YMD Kalkulator",
-  "description": "Kalkulator dan referensi teknik sipil untuk reviewer, berjalan offline.",
+  "name": "YMD-CAL · Kalkulator Desain Pondasi & Sipil Migas",
+  "short_name": "YMD-CAL",
+  "description": "Kalkulator desain pondasi & sipil migas, berjalan offline di iPad.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -9,8 +9,29 @@
   "background_color": "#E9E6DF",
   "theme_color": "#27323F",
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
   ]
 }

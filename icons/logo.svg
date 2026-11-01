@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="YMD-CAL">
+  <defs>
+    <linearGradient id="ymdcal-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3B5874"/><stop offset=".55" stop-color="#27323F"/><stop offset="1" stop-color="#1F808D"/></linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#ymdcal-bg)"/>
+  <g>
+    <path d="M7 41.5H57" stroke="#E3A857" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M30 5.5h4v7.5h4.6L32 20.5 25.4 13H30z" fill="#E3A857"/>
+    <rect x="26.5" y="21.5" width="11" height="10" rx="1.6" fill="#fff"/>
+    <rect x="12.5" y="31.5" width="39" height="8.5" rx="2.2" fill="#fff"/>
+    <rect x="16.5" y="40" width="5.2" height="16" rx="1.6" fill="#fff" opacity=".92"/>
+    <rect x="29.4" y="40" width="5.2" height="16" rx="1.6" fill="#fff" opacity=".92"/>
+    <rect x="42.3" y="40" width="5.2" height="16" rx="1.6" fill="#fff" opacity=".92"/>
+  </g>
+</svg>

@@ -35,6 +35,8 @@ export function siteCtx(site) {
 // Field: { k, lab, u (satuan/kind), lo, hi, help, type: num|seg|sel|chk|txt|list|layers|loads, opts, show(s), struct, w }
 export function renderForm(box, sections, st, onChange) {
   box.textContent = ""
+  const refresh = []
+  box.__refresh = () => refresh.forEach((f) => f())
   sections.forEach((sec, si) => {
     const d = el("details", "dz-sec dz-in"); d.style.setProperty("--i", si)
     d.open = sec.open !== false && (st.__open ? st.__open[sec.id] !== false : true)
@@ -43,6 +45,11 @@ export function renderForm(box, sections, st, onChange) {
     if (sec.badge) sm.append(el("span", "dz-badge", sec.badge))
     d.append(sm)
     if (sec.note) { const p = el("p", "dz-note"); p.innerHTML = sec.note; d.append(p) }
+    if (sec.sketch) {
+      const sk = el("figure", "dz-sketch")
+      const draw = () => { sk.textContent = ""; try { sk.append(sec.sketch(st)) } catch (e) { console.error(e) } }
+      draw(); refresh.push(draw); d.append(sk)
+    }
     let g = el("div", "dz-grid")
     for (const f of sec.fields) {
       if (f.show && !f.show(st)) continue
@@ -337,7 +344,7 @@ const fileStamp = (d) => { const p = (x) => String(x).padStart(2, "0"); return `
 const LBL = () => ({ suite: L("DESAIN PONDASI", "FOUNDATION DESIGN"), project: L("Proyek", "Project"), client: L("Klien", "Client"), doc: L("No. dokumen", "Document no."), rev: "Rev.", eng: L("Dihitung", "Prepared"),
   chk: L("Diperiksa", "Checked"), date: L("Tanggal", "Date"), units: L("Satuan", "Units"), codes: L("Acuan", "Codes"), allOk: L("SEMUA PEMERIKSAAN OK", "ALL CHECKS OK"), notOk: L("ADA PEMERIKSAAN YANG TIDAK MEMENUHI", "SOME CHECKS NOT SATISFIED"),
   param: L("Parameter", "Parameter"), value: L("Nilai", "Value"), check: L("Pemeriksaan", "Check"), ref: L("Acuan", "Reference"), dem: "Demand", cap: L("Kapasitas", "Capacity"), unit: L("Satuan", "Unit"), status: "Status",
-  combo: L("Kombinasi", "Combination"), foot: L("Review by YMD · Kalkulator offline · pembanding desain", "Review by YMD · offline calculator · design cross-check"), page: L("Hal.", "Page") })
+  combo: L("Kombinasi", "Combination"), foot: L("YMD-CAL · kalkulator desain offline", "YMD-CAL · offline design calculator"), page: L("Hal.", "Page") })
 
 // out: hasil modul (title, sub, refs, metrics, kv, tables, checks, notes, drawings), S: state global
 export function buildReport(out, S, now) {
@@ -380,13 +387,14 @@ function pdfSections(o, imgs) {
   const H = (t) => `${n++}. ${t}`
   for (const blk of o.kv) sec.push({ h: H(blk.title), kv: kvRows(blk.rows) })
   imgs.forEach((im, i) => sec.push({ h: i === 0 ? H(L("Gambar", "Drawings")) : "", img: im }))
+  ;(o.steps || []).forEach((st, i) => sec.push({ h: i === 0 ? H(L("Lembar perhitungan", "Calculation sheet")) : "", note: st.h, table: { cols: [L("Besaran", "Quantity"), L("Rumus", "Formula"), L("Substitusi", "Substitution"), L("Hasil", "Result")], rows: st.rows, w: [24, 32, 28, 16], align: ["l", "l", "l", "r"], fs: 6.9 } }))
   for (const t of o.tables) sec.push({ h: H(t.title), note: t.note, table: { cols: t.cols, rows: t.rows.map((r) => (r.cells || r).map((c, j) => cellStr(c, t.dec && t.dec[j]))), align: t.align ? t.align.map((a) => (a === "r" ? "r" : "l")) : undefined } })
   sec.push({ h: H(L("Pemeriksaan (rasio pemanfaatan UR = demand/kapasitas)", "Checks (utilisation ratio UR = demand/capacity)")), checks: o.checks.map((c) => ({ ...c, ...fmtCheck(c), item: `${c.item}`, note: c.note, ref: c.ref })) })
   if (o.notes && o.notes.length) sec.push({ h: H(L("Catatan & batasan", "Notes & limitations")), text: o.notes })
   return sec.filter((s) => s.h !== "" || s.img)
 }
 function xlsxFrom(o, S, now) {
-  const rep = buildReport(o, S, now), head = `&L&"Calibri,Bold"Review by YMD · ${o.title}&R${S.project.doc || ""}`, foot = `&L${copyright(now)}&C${L("Hal.", "Page")} &P / &N&R${AUTHOR}`
+  const rep = buildReport(o, S, now), head = `&L&"Calibri,Bold"YMD-CAL · ${o.title}&R${S.project.doc || ""}`, foot = `&L${copyright(now)}&C${L("Hal.", "Page")} &P / &N&R${AUTHOR}`
   const cp = [{ v: copyright(now), s: ST.copy }]
   const sum = [[{ v: o.title, s: ST.title }], [{ v: o.sub, s: ST.sub }], [{ v: `${L("Acuan", "Codes")}: ${o.refs}`, s: ST.sub }], []]
   const P = S.project
@@ -417,10 +425,19 @@ function xlsxFrom(o, S, now) {
   })
   ck.push([], cp)
   if (o.notes && o.notes.length) { ck.push([], [{ v: L("Catatan & batasan", "Notes & limitations"), s: ST.sec }]); o.notes.forEach((t) => ck.push([{ v: "• " + t, s: ST.sub }])) }
+  const stS = [[{ v: L("Lembar perhitungan langkah demi langkah", "Step-by-step calculation sheet"), s: ST.title }], []]
+  for (const st of o.steps || []) {
+    stS.push([{ v: st.h, s: ST.sec }, { v: "", s: ST.sec }, { v: "", s: ST.sec }, { v: "", s: ST.sec }])
+    stS.push([L("Besaran", "Quantity"), L("Rumus", "Formula"), L("Substitusi", "Substitution"), L("Hasil", "Result")].map((v) => ({ v, s: ST.head })))
+    st.rows.forEach((r) => stS.push(r.map((v, j) => ({ v: v ?? "", s: j === 0 ? ST.lab : ST.text }))))
+    stS.push([])
+  }
+  stS.push(cp)
   const wTab = Math.max(...o.tables.map((t) => t.cols.length), 3)
   return buildXlsx([
     { name: L("Ringkasan", "Summary"), rows: sum, widths: [34, 44], merges: ["A1:B1", "A2:B2", "A3:B3"], head, foot },
     { name: L("Masukan", "Inputs"), rows: kvS, widths: [46, 18, 14], head, foot },
+    { name: L("Langkah perhitungan", "Calculation steps"), rows: stS, widths: [34, 46, 46, 22], head, foot },
     { name: L("Beban & hasil", "Loads & results"), rows: tabS, widths: Array.from({ length: wTab }, (_, i) => (i === 0 ? 16 : i === 1 ? 30 : 13)), head, foot },
     { name: L("Pemeriksaan", "Checks"), rows: ck, widths: [5, 22, 56, 22, 12, 12, 9, 9, 10, 20], head, foot },
   ], { title: o.title, author: AUTHOR, rights: copyright(now) })

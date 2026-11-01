@@ -9,7 +9,7 @@ export function palette(mode) {
     : { bg: "#FAF9F7", ink: "#1F2430", mut: "#5C6573", line: "#C3C8CF", conc: "#CFC9BE", concD: "#8F887D", concL: "#E4DFD6", steel: "#3F5A75", clay: "#C9A586", sand: "#E9D9AE", water: "#3D8FD1", liq: "#5E9BD3", liqT: "#87B6E2", acc: "#D18A2E", ok: "#1a7f37", bad: "#b42318", wind: "#2F7FA8", arw: "#C2410C", grid: "#E7E3DB", reb: "#B42318", fill: "#FFFFFF", machine: "#4A6078", machine2: "#27323F" }
 }
 const FONT = "Helvetica, Arial, sans-serif"
-function root(W, H, P, label) {
+export function root(W, H, P, label) {
   const s = sv("svg", { viewBox: `0 0 ${W} ${H}`, class: "dz-svg", role: "img", "aria-label": label, "font-family": FONT })
   s.append(sv("rect", { x: 0, y: 0, width: W, height: H, fill: P.bg, rx: 0 }))
   const defs = sv("defs")
@@ -18,15 +18,15 @@ function root(W, H, P, label) {
   defs.append(hp); s.append(defs); s.hatch = `url(#${hp.id})`
   return s
 }
-const T = (s, x, y, txt, o = {}) => { s.append(sv("text", { x, y, fill: o.c || "#000", "font-size": ((o.fs || 13) * 1.18).toFixed(1), "font-weight": o.b ? 700 : 400, "text-anchor": o.a || "start", "dominant-baseline": o.base || "auto", "font-family": FONT, ...(o.cls ? { class: o.cls } : {}) }, txt)) }
-function arrow(s, x1, y1, x2, y2, c, w = 3, cls) {
+export const T = (s, x, y, txt, o = {}) => { s.append(sv("text", { x, y, fill: o.c || "#000", "font-size": ((o.fs || 13) * 1.18).toFixed(1), "font-weight": o.b ? 700 : 400, "text-anchor": o.a || "start", "dominant-baseline": o.base || "auto", "font-family": FONT, ...(o.cls ? { class: o.cls } : {}) }, txt)) }
+export function arrow(s, x1, y1, x2, y2, c, w = 3, cls) {
   const g = sv("g", cls ? { class: cls } : {})
   const a = Math.atan2(y2 - y1, x2 - x1), h = 7 + w * 2
   g.append(sv("line", { x1, y1, x2: x2 - Math.cos(a) * h * 0.8, y2: y2 - Math.sin(a) * h * 0.8, stroke: c, "stroke-width": w, "stroke-linecap": "round" }))
   g.append(sv("polygon", { points: [[x2, y2], [x2 - h * Math.cos(a - 0.42), y2 - h * Math.sin(a - 0.42)], [x2 - h * Math.cos(a + 0.42), y2 - h * Math.sin(a + 0.42)]].map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" "), fill: c }))
   s.append(g); return g
 }
-function dim(s, x1, y1, x2, y2, txt, P, off = 0, vertical = false) {
+export function dim(s, x1, y1, x2, y2, txt, P, off = 0, vertical = false) {
   const g = sv("g")
   g.append(sv("line", { x1, y1, x2, y2, stroke: P.mut, "stroke-width": 1 }))
   const tk = (x, y) => g.append(sv("line", vertical ? { x1: x - 5, y1: y, x2: x + 5, y2: y, stroke: P.mut, "stroke-width": 1.4 } : { x1: x, y1: y - 5, x2: x, y2: y + 5, stroke: P.mut, "stroke-width": 1.4 }))
@@ -35,8 +35,8 @@ function dim(s, x1, y1, x2, y2, txt, P, off = 0, vertical = false) {
   if (vertical) T(s, x1 + 8 + off, (y1 + y2) / 2, txt, { c: P.mut, fs: 12, base: "middle" })
   else T(s, (x1 + x2) / 2, y1 - 7 + off, txt, { c: P.mut, fs: 12, a: "middle" })
 }
-const R = (s, x, y, w, h, fill, stroke, o = {}) => { const r = sv("rect", { x: Math.min(x, x + w), y: Math.min(y, y + h), width: Math.abs(w), height: Math.abs(h), fill, stroke: stroke || "none", "stroke-width": o.sw || 1.5, rx: o.rx || 0, ...(o.cls ? { class: o.cls } : {}), ...(o.op != null ? { opacity: o.op } : {}) }); s.append(r); return r }
-const path = (s, d, o) => { const p = sv("path", { d, fill: "none", ...o }); s.append(p); return p }
+export const R = (s, x, y, w, h, fill, stroke, o = {}) => { const r = sv("rect", { x: Math.min(x, x + w), y: Math.min(y, y + h), width: Math.abs(w), height: Math.abs(h), fill, stroke: stroke || "none", "stroke-width": o.sw || 1.5, rx: o.rx || 0, ...(o.cls ? { class: o.cls } : {}), ...(o.op != null ? { opacity: o.op } : {}) }); s.append(r); return r }
+export const path = (s, d, o) => { const p = sv("path", { d, fill: "none", ...o }); s.append(p); return p }
 function windArrows(s, x, y0, y1, P, n = 4, len = 52) {
   for (let i = 0; i < n; i++) {
     const y = y0 + (y1 - y0) * (i + 0.5) / n
