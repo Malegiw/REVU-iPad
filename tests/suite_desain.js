@@ -9,6 +9,9 @@ import * as tk from "../js/desain/tank.js"
 import * as dy from "../js/desain/dynamic.js"
 import { crc32, buildXlsx } from "../js/desain/xlsx.js"
 import { winAnsi, textWidth, reportPdf } from "../js/desain/pdf.js"
+import { footFrom } from "../js/desain/settle.js"
+import { settleFor } from "../js/penurunan_ui.js"
+import { analyze } from "../js/penurunan.js"
 
 export async function run({ check }) {
   const near = (name, got, want, rel = 1e-6, abs = 1e-9) => check(name, Math.abs(got - want) <= Math.max(abs, rel * Math.abs(want)) ? [] : [`${got} ≠ ${want} (toleransi ${rel})`])
@@ -106,6 +109,14 @@ export async function run({ check }) {
   near("Richart: Kz = 4Gr0/(1 − ν) (tanpa tanam)", Dd.modes[0].K, kz, 1e-12)
   near("Richart: fn = √(K/m)/2π", Dd.modes[0].f, Math.sqrt(kz / Dd.m) / (2 * Math.PI), 1e-12)
   near("ISO 1940: Fo = mr·(G/ω)·ω²", Dd.FoAuto, I.Wr / core.G * I.Gq / 1000 * 2 * Math.PI * I.rpm / 60, 1e-12)
+
+  // ---- penautan Desain ↔ Penurunan
+  const fo = footFrom("oct", 4, 4, 0.82843 * 16, 1.5, 80, "vessel", "uji")
+  near("telapak oktagon → lingkaran luas sama", Math.PI * fo.B ** 2 / 4, 0.82843 * 16, 1e-9)
+  const sf = settleFor({ shape: "persegi", B: 3, L: 4, Df: 1.0, q: 120 })
+  truthy("penurunan dari modul Desain dihitung dengan mesin tab Penurunan", sf.res && sf.res.s_life > 0 && Math.abs(sf.res.q_gross - 120) < 1e-9)
+  const sf2 = settleFor({ shape: "persegi", B: 3, L: 4, Df: 1.0, q: 240 })
+  truthy("penurunan naik bila tekanan naik", sf2.res.s_life > sf.res.s_life)
 
   // ---- penulis berkas
   near("CRC32('123456789') = 0xCBF43926", crc32(new TextEncoder().encode("123456789")), 0xCBF43926)

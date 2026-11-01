@@ -251,3 +251,28 @@ table.dz-res tr:hover td { background: color-mix(in srgb, var(--accent) 7%, tran
 }
 .dz-edit select { min-width: 132px; }
 .dz-edit td:first-child select { min-width: 220px; }
+
+/* kartu penurunan (terhubung ke tab Penurunan) */
+.dz-settle { background: var(--card); border: 1px solid var(--line); border-left: 5px solid var(--gold); border-radius: var(--dz-r); padding: 14px 16px; margin: 14px 0 4px; box-shadow: 0 8px 22px rgba(var(--shadow), .1); }
+.dz-settle-h { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+.dz-settle-ic { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 12px; background: var(--field); font-size: 1.1rem; }
+.dz-settle-g { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.dz-sm { background: var(--field); border-radius: 12px; padding: 8px 12px; display: flex; flex-direction: column; }
+.dz-sm span { font-size: .74rem; color: var(--muted); } .dz-sm b { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.dz-settle .dz-bar { margin: 10px 0 0; }
+.dz-settle-go { margin-top: 12px; width: 100%; }
+
+/* sketsa parameter */
+.dz-sketch { margin: 4px 0 10px; padding: 6px; border-radius: 16px; background: var(--field); border: 1px dashed var(--line); }
+.dz-sketch svg { width: 100%; max-width: 720px; height: auto; display: block; margin: 0 auto; border-radius: 12px; }
+
+/* lembar perhitungan */
+.dz-steps { background: var(--card); border: 1px solid var(--line); border-radius: var(--dz-r); padding: 0 14px 10px; margin: 6px 0 12px; box-shadow: 0 8px 22px rgba(var(--shadow), .1); }
+.dz-steps > summary { display: flex; align-items: center; gap: 10px; min-height: 52px; font-weight: 800; list-style: none; cursor: pointer; }
+.dz-steps > summary::-webkit-details-marker { display: none; }
+.dz-step { margin: 8px 0 12px; animation: dz-open .45s var(--dz-ease) both; animation-delay: calc(var(--i, 0) * 50ms); }
+.dz-step-h { font-weight: 800; font-size: .9rem; padding: 6px 10px; border-left: 4px solid var(--gold); background: var(--field); border-radius: 0 10px 10px 0; }
+.dz-steptbl { min-width: 720px; }
+.dz-steptbl td.f { font-family: ui-monospace, Menlo, monospace; font-size: .8rem; color: var(--accent); }
+.dz-steptbl td.r { font-weight: 800; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+.dz-steptbl td:first-child { font-weight: 600; }

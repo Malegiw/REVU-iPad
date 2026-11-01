@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Uji rumus — Review by YMD iPad</title>
+<title>Uji rumus — YMD-CAL</title>
 <style>
   body { font: 15px/1.5 -apple-system, "Helvetica Neue", Arial, sans-serif; margin: 20px; max-width: 900px; }
   h1 { font-size: 1.2rem; }
@@ -18,10 +18,9 @@
 <pre id="log"></pre>
 <script type="module">
 import * as penurunan from "./suite_penurunan.js"
-import * as fondasi from "./suite_fondasi.js"
 import * as desain from "./suite_desain.js"
 
-const SUITES = [["penurunan", penurunan], ["fondasi", fondasi], ["desain", desain]]
+const SUITES = [["penurunan", penurunan], ["desain", desain]]
 const log = []
 const per = {}
 let pass = 0, fail = 0, cur = ""

@@ -41,12 +41,49 @@ function withEmoji(node, txt) {                       // glyph emoji menjorok me
 }
 const parseNum = (s) => { const v = parseFloat(String(s).trim().replace(",", ".")); return isFinite(v) ? v : NaN }
 
+// ---------------------------------------------------------------- dipakai juga oleh modul Desain (penurunan pondasi dari hasil desain)
+export function settleLoad() {
+  let S = defaults()
+  try { const saved = JSON.parse(localStorage.getItem(KEY) || "null"); if (saved && saved.layers && saved.layers.length === 5) S = { ...S, ...saved, cmp: { ...S.cmp, ...(saved.cmp || {}) } } } catch (e) { /* tanpa penyimpanan: pakai bawaan */ }
+  return S
+}
+export const settleSave = (S) => { try { localStorage.setItem(KEY, JSON.stringify(S)) } catch (e) { /* abaikan */ } }
+function buildInputs(S, q) {
+  const layers = S.layers.slice(0, S.nl).map((ly) => {
+    const o = { name: ly.name, H: ly.H, gamma: ly.g, gsat: ly.gs, E: ly.E * 1000.0, nu: ly.nu, clay: ly.clay }
+    if (ly.clay) Object.assign(o, { e0: ly.e0, Cc: ly.cc, Cs: ly.cs, OCR: ly.ocr, cv: ly.cv, double: ly.dbl, Ca: ly.ca })
+    return o
+  })
+  return {
+    foot: { shape: S.shape, B: S.B, L: S.L }, soil: { Df: S.Df, gamma_up: S.gu, gsat_up: S.gsu, Dw: S.dwOn ? S.dw : null, layers }, q,
+    opt: { method: S.method, rigidity: S.rig, dz: S.dz, lifeYears: S.life, allowMm: S.allow, diffMm: S.diff, spanM: S.span, angLimit: S.ang },
+  }
+}
+// Penurunan untuk pondasi dari modul Desain: foot = {shape (persegi|lingkaran|lajur), B, L, Df, q (kPa bruto)}; profil tanah & kriteria dari tab Penurunan
+export function settleFor(foot) {
+  const S = settleLoad()
+  const I = buildInputs({ ...S, shape: foot.shape, B: foot.B, L: foot.L ?? foot.B, Df: foot.Df }, foot.q)
+  try { return { res: analyze(I.foot, I.soil, I.q, I.opt), allow: S.allow, life: S.life, rig: S.rig } } catch (e) { return { error: e.message, allow: S.allow, life: S.life } }
+}
+// Ringkasan tab Penurunan untuk dashboard beranda
+export function settleSummary() {
+  const S = settleLoad(), area = S.shape === "lajur" ? S.B : S.shape === "persegi" ? S.B * S.L : Math.PI * S.B * S.B / 4
+  const I = buildInputs(S, S.mode === "q" ? S.q : S.Q / area)
+  try { const r = analyze(I.foot, I.soil, I.q, I.opt); return { s: r.s_life * 1000, allow: S.allow, ok: r.checks.every((c) => c[1]), B: S.B, L: S.L, shape: S.shape, q: I.q, link: S.link || null } } catch (e) { return { error: e.message, link: S.link || null } }
+}
+// Kirim pondasi dari Desain ke tab Penurunan (ditautkan; tab Penurunan menampilkan asal datanya)
+export function settleSend(foot) {
+  const S = settleLoad()
+  Object.assign(S, { shape: foot.shape, B: +foot.B.toFixed(3), L: +(foot.L ?? foot.B).toFixed(3), Df: +foot.Df.toFixed(3), mode: "q", q: +foot.q.toFixed(2), link: { mod: foot.mod, label: foot.label, at: Date.now() } })
+  settleSave(S)
+}
+
 export function mountPenurunan(root, ctx) {
   const t = ctx.t
   const T = (s, ...a) => { let i = 0; return t(s).replace(/\{\}/g, () => (a[i] === undefined ? "{}" : a[i++])) }
-  let S = defaults()
-  try { const saved = JSON.parse(localStorage.getItem(KEY) || "null"); if (saved && saved.layers && saved.layers.length === 5) S = { ...S, ...saved, cmp: { ...S.cmp, ...(saved.cmp || {}) } } } catch (e) { /* tanpa penyimpanan: pakai bawaan */ }
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)) } catch (e) { /* abaikan */ } }
+  const LL = (id, en) => (ctx.lang === "en" ? en : id)
+  let S = settleLoad()
+  const save = () => settleSave(S)
 
   root.textContent = ""
   const intro = el("p", "intro")
@@ -58,7 +95,23 @@ export function mountPenurunan(root, ctx) {
   const paneCalc = el("div", "pane"), paneInfo = el("div", "pane info"); paneInfo.hidden = true
   bCalc.onclick = () => { bCalc.classList.add("on"); bInfo.classList.remove("on"); paneCalc.hidden = false; paneInfo.hidden = true }
   bInfo.onclick = () => { bInfo.classList.add("on"); bCalc.classList.remove("on"); paneInfo.hidden = false; paneCalc.hidden = true }
-  root.append(intro, tabs, paneCalc, paneInfo)
+  const linkBox = el("div")
+  const drawLink = () => {
+    linkBox.textContent = ""
+    if (!S.link) return
+    const b = el("div", "note linkbar")
+    const d = new Date(S.link.at || Date.now()), p2 = (x) => String(x).padStart(2, "0")
+    b.append(el("b", null, "🔗 " + LL("Terhubung ke Desain: ", "Linked to Design: ") + S.link.label),
+      el("span", null, LL(` — data pondasi dikirim ${p2(d.getDate())}/${p2(d.getMonth() + 1)} ${p2(d.getHours())}:${p2(d.getMinutes())}. Profil tanah & kriteria di halaman ini juga dipakai modul Desain untuk menghitung penurunannya.`,
+        ` — foundation data sent ${p2(d.getDate())}/${p2(d.getMonth() + 1)} ${p2(d.getHours())}:${p2(d.getMinutes())}. The soil profile & criteria on this page are also used by the Design module to compute its settlement.`)))
+    const g = el("div", "btns")
+    const back = el("a", "btn", LL("← Kembali ke Desain ", "← Back to Design ") + S.link.label); back.href = "#/desain/" + S.link.mod
+    const un = el("button", "ghost", LL("Lepas tautan", "Unlink")); un.type = "button"; un.onclick = () => { delete S.link; save(); drawLink() }
+    g.append(back, un); b.append(g)
+    linkBox.append(b)
+  }
+  drawLink()
+  root.append(linkBox, intro, tabs, paneCalc, paneInfo)
   paneInfo.append(mdToDom(t(INFO_ID)))
 
   const formBox = el("div", "form"), resBox = el("div", "res"), cmpBox = el("div", "cmpbox"), expBox = el("div", "exp")
@@ -208,17 +261,7 @@ export function mountPenurunan(root, ctx) {
     }
     return s
   }
-  function inputs() {
-    const layers = S.layers.slice(0, S.nl).map((ly) => {
-      const o = { name: ly.name, H: ly.H, gamma: ly.g, gsat: ly.gs, E: ly.E * 1000.0, nu: ly.nu, clay: ly.clay }
-      if (ly.clay) Object.assign(o, { e0: ly.e0, Cc: ly.cc, Cs: ly.cs, OCR: ly.ocr, cv: ly.cv, double: ly.dbl, Ca: ly.ca })
-      return o
-    })
-    return {
-      foot: { shape: S.shape, B: S.B, L: S.L }, soil: { Df: S.Df, gamma_up: S.gu, gsat_up: S.gsu, Dw: S.dwOn ? S.dw : null, layers }, q: qNow(),
-      opt: { method: S.method, rigidity: S.rig, dz: S.dz, lifeYears: S.life, allowMm: S.allow, diffMm: S.diff, spanM: S.span, angLimit: S.ang },
-    }
-  }
+  const inputs = () => buildInputs(S, qNow())
   const mcard = (lab, val) => { const c = el("div", "metric"); c.append(el("div", "ml", lab), el("div", "mv", val)); return c }
   function table(cols, rows) {
     const tb = el("table"), hr = el("tr")
@@ -311,7 +354,7 @@ export function mountPenurunan(root, ctx) {
     const resRows = [[t("Tekanan bersih (kPa)"), r2(res.q_net)], [t("Penurunan segera (mm)"), r2(res.si * 1000)], [t("Konsolidasi primer (mm)"), r2(res.sc * 1000)],
       [t("Kompresi sekunder pada umur rencana (mm)"), r2(res.ss_life * 1000)], [T("Total pada {} tahun (mm)", fmtG(S.life)), r2(res.s_life * 1000)],
       [t("Waktu 50 % konsolidasi (tahun)"), res.t50 == null ? "-" : Math.round(res.t50 * 1000) / 1000], [t("Waktu 90 % konsolidasi (tahun)"), res.t90 == null ? "-" : Math.round(res.t90 * 1000) / 1000]]
-    const L = [`# ${t("Cek independen penurunan pondasi dangkal")}`, "", t("Penurunan pondasi dangkal: penurunan segera (Steinbrenner), konsolidasi primer lempung (Terzaghi, sublapis, muka air tanah), kecepatan konsolidasi, dan kompresi sekunder opsional. Perhitungan independen dengan app Review by YMD; bandingkan dengan dokumen yang direview dan konfirmasikan asumsi (modulus, parameter konsolidasi, metode tegangan)."), ""]
+    const L = [`# ${t("Cek independen penurunan pondasi dangkal")}`, "", t("Penurunan pondasi dangkal: penurunan segera (Steinbrenner), konsolidasi primer lempung (Terzaghi, sublapis, muka air tanah), kecepatan konsolidasi, dan kompresi sekunder opsional. Perhitungan independen dengan YMD-CAL; bandingkan dengan dokumen yang direview dan konfirmasikan asumsi (modulus, parameter konsolidasi, metode tegangan)."), ""]
     L.push(`## ${t("Masukan")}`, "", ...inp.map(([a, b]) => `- ${a}: ${b}`), "", `## ${t("Hasil")}`, "", ...resRows.map(([a, b]) => `- ${a}: ${b}`), "", `## ${t("Pengecekan")}`, "",
       ...res.checks.map(([n, ok, d]) => `- ${ok ? "OK" : "NOT OK"} — ${t(n)}: ${tdet(d)}`), "")
     if (cmpRows.length) {

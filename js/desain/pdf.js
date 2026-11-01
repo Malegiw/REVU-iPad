@@ -71,7 +71,7 @@ export class PDF {
     const infoId = pageStart + this.pages.length * 2
     const d = new Date(), p = (x) => String(x).padStart(2, "0")
     const pd = `D:${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
-    obj(infoId, [`<< /Title (${pesc(winAnsi(this.meta.title || ""))}) /Author (${pesc(winAnsi(this.meta.author || ""))}) /Creator (Review by YMD) /Producer (Review by YMD) /Subject (${pesc(winAnsi(this.meta.rights || ""))}) /CreationDate (${pd}) >>`])
+    obj(infoId, [`<< /Title (${pesc(winAnsi(this.meta.title || ""))}) /Author (${pesc(winAnsi(this.meta.author || ""))}) /Creator (YMD-CAL) /Producer (YMD-CAL) /Subject (${pesc(winAnsi(this.meta.rights || ""))}) /CreationDate (${pd}) >>`])
     const xref = len, n = infoId + 1
     let x = `xref\n0 ${n}\n0000000000 65535 f \n`
     for (let i = 1; i < n; i++) x += String(offs[i] || 0).padStart(10, "0") + " 00000 n \n"
@@ -103,7 +103,7 @@ export function reportPdf(rep, lbl) {
   const M = 40, W = PW - 2 * M, TOP = M + 26, BOT = PH - M - 22
   let y = TOP
   const pageHead = () => {
-    doc.text(M, M + 6, "REVIEW BY YMD  ·  " + (lbl.suite || "DESAIN PONDASI"), { size: 7, bold: true, color: C.mut })
+    doc.text(M, M + 6, "YMD-CAL  ·  " + (lbl.suite || "DESAIN PONDASI"), { size: 7, bold: true, color: C.mut })
     doc.text(PW - M, M + 6, [rep.project.name, rep.project.doc].filter(Boolean).join("  ·  "), { size: 7, color: C.mut, align: "right" })
     doc.line(M, M + 12, PW - M, M + 12, C.line, 0.6)
     doc.rect(M, M + 11.4, 46, 1.4, C.acc)
