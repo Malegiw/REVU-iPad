@@ -1,5 +1,5 @@
 // Semula dibuat oleh ipad_build.py; daftar berkas & VERSION diperbarui untuk YMD-CAL (lihat README). Menyimpan semua berkas supaya app jalan tanpa internet; versi baru menunggu sampai pengguna menekan Muat ulang.
-const VERSION = "a9abfdd2cb"
+const VERSION = "0c42719ff9"
 const CACHE = "ymd-ipad-" + VERSION
 const FILES = [
  "./",
@@ -71,7 +71,7 @@ const FILES = [
  "css/desain.css",
  "css/flow.css",
  "css/home.css",
- "data/en_penurunan.json",
+ "css/proyek.css",
  "data/flow_en_cloud.json",
  "data/flow_en_dark.json",
  "data/flow_id_cloud.json",
@@ -82,7 +82,9 @@ const FILES = [
  "icons/logo.svg",
  "index.html",
  "js/app.js",
+ "js/desain/chart.js",
  "js/desain/core.js",
+ "js/desain/deep.js",
  "js/desain/draw.js",
  "js/desain/dynamic.js",
  "js/desain/footing.js",
@@ -96,6 +98,7 @@ const FILES = [
  "js/desain/rc.js",
  "js/desain/settle.js",
  "js/desain/sketch.js",
+ "js/desain/soil.js",
  "js/desain/steel.js",
  "js/desain/steps.js",
  "js/desain/tank.js",
@@ -106,10 +109,15 @@ const FILES = [
  "js/desain_ui.js",
  "js/flow.js",
  "js/fmt.js",
+ "js/gempa_ui.js",
  "js/home.js",
+ "js/laporan_ui.js",
  "js/penurunan.js",
  "js/penurunan_ui.js",
- "manifest.webmanifest"
+ "js/pj_ui.js",
+ "js/project.js",
+ "js/tanah_ui.js",
+ "manifest.webmanifest",
 ]
 
 self.addEventListener("install", (e) => {

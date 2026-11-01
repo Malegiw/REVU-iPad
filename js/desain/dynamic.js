@@ -4,6 +4,7 @@
 // Statik: mesin footing.js (blok = telapak tebal, mesin = beban di atas blok). Sumbu poros mesin = x.
 import { L, chk, G, GAMMA_C, seismicCoef, interp } from "./core.js"
 import { analyzeFooting } from "./footing.js"
+import { pileLayout } from "./deep.js"
 
 export const PRESETS = {
   wip: { nm: "Water Injection Pump", type: "rot", Wm: 120, Wr: 9, rpm: 2980, kW: 450, Gq: 2.5, hs: 0.9, hcg: 0.7, Lb: 4.2, Bb: 1.3, Bx: 5.0, By: 3.3, H: 1.2, emb: 1.0 },
@@ -26,13 +27,15 @@ export function dynamics(I) {
   const r0p = Math.pow(I.Bx * I.By ** 3 / (3 * Math.PI), 0.25)
   const r0t = Math.pow(I.Bx * I.By * (I.Bx ** 2 + I.By ** 2) / (6 * Math.PI), 0.25)
   const ez = 1 + 0.6 * (1 - nu) * h / r0, ex = 1 + 0.55 * (2 - nu) * h / r0, ep = 1 + 1.2 * (1 - nu) * h / r0p + 0.2 * (2 - nu) * (h / r0p) ** 3
-  const kz = 4 * Gs * r0 / (1 - nu) * ez
-  const kx = 32 * (1 - nu) * Gs * r0 / (7 - 8 * nu) * ex
-  const kp = 8 * Gs * r0p ** 3 / (3 * (1 - nu)) * ep
-  const kt = 16 * Gs * r0t ** 3 / 3
+  const pk = I.pkS                                                                   // kekakuan kelompok tiang (pondasi dalam), bila ada
+  const kz = pk ? pk.kz : 4 * Gs * r0 / (1 - nu) * ez
+  const kx = pk ? pk.kx : 32 * (1 - nu) * Gs * r0 / (7 - 8 * nu) * ex
+  const kp = pk ? pk.kp : 8 * Gs * r0p ** 3 / (3 * (1 - nu)) * ep
+  const kt = pk ? pk.kt : 16 * Gs * r0t ** 3 / 3
   const Bz = (1 - nu) / 4 * m / (rho * r0 ** 3), Bx = (7 - 8 * nu) / (32 * (1 - nu)) * m / (rho * r0 ** 3)
   const Bp = 3 * (1 - nu) / 8 * Ixb / (rho * r0p ** 5), np = interp(NPSI_B, NPSI, Bp), Bt = Iz / (rho * r0t ** 5)
-  const xz = 0.425 / Math.sqrt(Bz), xx = 0.2875 / Math.sqrt(Bx), xp = 0.15 / ((1 + np * Bp) * Math.sqrt(np * Bp)), xt = 0.5 / (1 + 2 * Bt)
+  const xP = pk ? (I.xiP ?? 0.05) : null
+  const xz = xP ?? 0.425 / Math.sqrt(Bz), xx = xP ?? 0.2875 / Math.sqrt(Bx), xp = xP ?? 0.15 / ((1 + np * Bp) * Math.sqrt(np * Bp)), xt = xP ?? 0.5 / (1 + 2 * Bt)
   const f = (k, M) => Math.sqrt(k / M) / (2 * Math.PI)
   const wx2 = kx / m, wp2 = kp / Ixb, gam = Io / Ixb
   const disc = Math.sqrt(Math.max(((wx2 + wp2) / gam) ** 2 - 4 * wx2 * wp2 / gam, 0))
@@ -102,6 +105,7 @@ export function analyzeDynamic(I, combos) {
   // statik
   const qfac = I.type === "rec" ? I.qRec : I.qRot
   const m = { shape: "rect", B: I.Bx, L: I.By, t: I.H, Df: I.emb, gs: I.gs, peds: [{ x: I.exm, y: I.eym, shape: "rect", bx: I.Lb, by: I.Bb, h: 0 }] }
+  if (I.fdType === "deep") { m.piles = pileLayout("rect", m.B, m.L, I.psx, I.pce); m.pileD = I.pD / 1000 }
   const r = analyzeFooting(m, combos, { qa: I.qa * qfac, mu: I.muB }, I.crit, { fc: I.fc, fy: I.fy, cover: I.cover, db: I.db }, { fc: I.fc, fy: I.fy, n: 8, db: 16, cover: 50 })
   r.checks.filter((c) => !/pedestal/i.test(c.item) || /pons|punching/i.test(c.item)).forEach((c) => checks.push(c))
   return { Dy, r, checks, qfac, m }

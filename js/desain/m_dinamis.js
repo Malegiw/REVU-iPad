@@ -4,7 +4,9 @@ import { PRESETS, dynamics, dynCases, analyzeDynamic } from "./dynamic.js"
 import { palette, dynDraw, footingPlan } from "./draw.js"
 import { skDyn } from "./sketch.js"
 import { dynSteps } from "./steps.js"
-import { settleBlock, footFrom } from "./settle.js"
+import { footFrom } from "./settle.js"
+import { DEEP0, fdSection, qaFor, qaNote, isDeep, deepBundle, shallowSettle, groupStiffness, pileLayout } from "./deep.js"
+import { avgOver } from "./soil.js"
 
 export const id = "dinamis"
 export const icon = "⚙️"
@@ -13,7 +15,7 @@ export const blurb = () => L("WIP, WTP, kompresor udara, kompresor torak: frekue
 export const codes = "ACI 351.3R-18 · PIP STC01015 / REIE 686 · ISO 1940-1 · ISO 10816 · SNI 1726:2019 · SNI 2847:2019 · SNI 8460:2017"
 
 export function defaults() {
-  return { preset: "wip", Fo: 0, ...PRESETS.wip, exm: 0, eym: 0, Gmode: "Vs", Vs: 200, red: 0.8, Gsoil: 60000, nu: 0.35, gs: 18, sep: 20, vlim: 5, mrRot: 3, mrRec: 5, qa: 150, qRot: 0.75, qRec: 0.5, muB: 0.45,
+  return { ...DEEP0, preset: "wip", Fo: 0, ...PRESETS.wip, exm: 0, eym: 0, Gmode: "soil", xiP: 0.05, Vs: 200, red: 0.75, Gsoil: 60000, nu: 0.35, gs: 18, sep: 20, vlim: 5, mrRot: 3, mrRec: 5, qa: 150, qRot: 0.75, qRec: 0.5, muB: 0.45,
     Pp: 0, Vpx: 2, Vpy: 1, Mpx: 0, Mpy: 0, scf: 5, Ie: 1.25, fc: 28, fy: 420, cover: 75, db: 16 }
 }
 const BAR = { 13: "D13", 16: "D16", 19: "D19", 22: "D22", 25: "D25" }
@@ -37,12 +39,15 @@ export function form(s) {
       { k: "H", lab: L("Tebal blok H", "Block depth H"), u: "m", lo: 0.4, hi: 5 }, { k: "emb", lab: L("Kedalaman tertanam De", "Embedment depth De"), u: "m", lo: 0, hi: 5 },
       { k: "fc", lab: "fc'", u: "MPa", lo: 17, hi: 50 }, { k: "fy", lab: "fy", u: "MPa", lo: 280, hi: 550 }, { k: "db", type: "sel", lab: L("Tulangan", "Bars"), opts: BAR },
     ] },
-    { id: "soil", icon: "🧱", t: L("Tanah & kriteria", "Soil & criteria"), fields: [
-      { k: "Gmode", type: "seg", lab: L("Kekakuan tanah dari", "Soil stiffness from"), opts: { Vs: "Vs", G: L("G langsung", "G direct") } },
-      { k: "Vs", lab: L("Kecepatan gelombang geser Vs", "Shear-wave velocity Vs"), u: "m/s", lo: 50, hi: 1500, show: (x) => x.Gmode === "Vs" }, { k: "red", lab: L("Reduksi G (regangan)", "G reduction (strain)"), u: "", lo: 0.2, hi: 1, show: (x) => x.Gmode === "Vs" },
-      { k: "Gsoil", lab: L("Modulus geser dinamis G", "Dynamic shear modulus G"), u: "Q", lo: 1000, hi: 2e6, show: (x) => x.Gmode === "G" },
+    fdSection(s),
+    { id: "soil", icon: "🧱", t: L("Tanah dinamis & kriteria", "Dynamic soil & criteria"), fields: [
+      { k: "Gmode", type: "seg", lab: L("Kekakuan tanah dari", "Soil stiffness from"), opts: { soil: L("N-SPT tab Tanah (Imai)", "Soil tab N-SPT (Imai)"), Vs: "Vs", G: L("G langsung", "G direct") }, show: (x) => !isDeep(x) },
+      { k: "xiP", lab: L("Redaman kelompok tiang ξ", "Pile group damping ξ"), u: "", lo: 0.02, hi: 0.2, show: isDeep, help: L("Konservatif 0,05 (tanpa redaman radiasi tiang).", "Conservative 0.05 (no pile radiation damping).") },
+      { k: "red", lab: L("Reduksi G (regangan)", "G reduction (strain)"), u: "", lo: 0.2, hi: 1, show: (x) => x.Gmode === "soil" && !isDeep(x) },
+      { k: "Vs", lab: L("Kecepatan gelombang geser Vs", "Shear-wave velocity Vs"), u: "m/s", lo: 50, hi: 1500, show: (x) => x.Gmode === "Vs" && !isDeep(x) }, { k: "red", lab: L("Reduksi G (regangan)", "G reduction (strain)"), u: "", lo: 0.2, hi: 1, show: (x) => x.Gmode === "Vs" && !isDeep(x) },
+      { k: "Gsoil", lab: L("Modulus geser dinamis G", "Dynamic shear modulus G"), u: "Q", lo: 1000, hi: 2e6, show: (x) => x.Gmode === "G" && !isDeep(x) },
       { k: "nu", lab: L("Poisson ν", "Poisson ν"), u: "", lo: 0.2, hi: 0.49 }, { k: "gs", lab: L("Berat isi tanah", "Soil unit weight"), u: "G", lo: 14, hi: 22 },
-      { k: "qa", lab: L("Daya dukung izin statik qa", "Static allowable bearing qa"), u: "Q", lo: 20, hi: 2000 }, { k: "sAllow", lab: L("Batas penurunan izin (0 = ikut tab Penurunan)", "Allowable settlement (0 = use Settlement tab)"), u: "mm", lo: 0, hi: 1000 },
+      { k: "sAllow", lab: L("Batas penurunan izin (0 = ikut tab Penurunan)", "Allowable settlement (0 = use Settlement tab)"), u: "mm", lo: 0, hi: 1000 },
       { k: "muB", lab: L("μ dasar–tanah", "Base–soil μ"), u: "", lo: 0.2, hi: 0.8 },
       { k: "sep", lab: L("Pemisahan frekuensi minimum", "Minimum frequency separation"), u: "%", lo: 5, hi: 50 }, { k: "vlim", lab: L("Batas kecepatan getar puncak", "Peak vibration velocity limit"), u: "mm/s", lo: 0.5, hi: 20 },
       { k: "mrRot", lab: L("Rasio massa min. (berputar)", "Min. mass ratio (rotating)"), u: "", lo: 1, hi: 10 }, { k: "mrRec", lab: L("Rasio massa min. (torak)", "Min. mass ratio (recip.)"), u: "", lo: 1, hi: 10 },
@@ -53,6 +58,25 @@ export function form(s) {
 
 export function run(s, ctx) {
   const I = { ...s, seis: { ...ctx.seisBase, R: 1, Ie: s.Ie, method: "rigid" }, crit: { fsOT: 1.5, fsSL: 1.5, fsOTs: 1, fsSLs: 1, tempFac: 1, minContact: 0.5 } }
+  const deep = isDeep(s) && !!ctx.soil
+  const qs = deep ? null : qaFor(s, ctx, I.Bx, I.By, I.emb)
+  if (qs) I.qa = qs.qa
+  if (!deep) I.fdType = "shallow"
+  let vsSoil = null
+  if (I.Gmode === "soil") {
+    if (ctx.soil) {                                                                   // Imai (1977): lempung 102·N^0,292; pasir 80,6·N^0,331
+      const z1 = I.emb + Math.min(I.Bx, I.By), N = avgOver(ctx.soil, I.emb, z1, (l) => l.N60)
+      vsSoil = { N, Vs: avgOver(ctx.soil, I.emb, z1, (l) => (l.coh ? 102 * Math.pow(Math.max(l.N60, 1), 0.292) : 80.6 * Math.pow(Math.max(l.N60, 1), 0.331))) }
+      I.Gmode = "Vs"; I.Vs = vsSoil.Vs
+    }
+    else I.Gmode = "Vs"
+  }
+  let pkS = null
+  if (deep) {
+    const mB = { shape: "rect", B: I.Bx, L: I.By, Df: I.emb, piles: pileLayout("rect", I.Bx, I.By, I.psx, I.pce) }
+    pkS = groupStiffness(I, ctx, mB, I.Wm + I.Bx * I.By * I.H * 24)
+    I.pkS = pkS
+  }
   const Dy = dynamics(I)
   const { cases } = dynCases(I, Dy)
   const combos = expandCombos(cases, 5, { ...ctx.cmbOpts, labels: { Dyn1: "v", Dyn2: "h", Ex: "x", Ey: "y" } })
@@ -76,21 +100,29 @@ export function run(s, ctx) {
       rows: Dy.modes.map((m) => ({ cells: [m.nm, m.K ? (m.k === "r" || m.k === "t" ? `${nf(m.K, 0)} kN·m/rad` : `${nf(m.K, 0)} kN/m`) : L("tergandeng", "coupled"), m.f, m.xi, ...Dy.harm.map((h) => Math.abs(m.f - h * Dy.fop) / (h * Dy.fop) * 100)], cls: Dy.harm.some((h) => Math.abs(m.f - h * Dy.fop) / (h * Dy.fop) < I.sep / 100) ? "bad" : "" })),
       dec: [null, null, 2, 3, 1, 1], align: ["l", "r", "r", "r", "r", "r"] },
     { title: L("Respons getar (tak tergandeng)", "Vibration response (uncoupled)"), cols: [L("Eksitasi", "Excitation"), "f (Hz)", "Az (μm)", "Ay (μm)", "vz (mm/s)", "vy (mm/s)"], rows: Dy.resp.map((r) => [`${r.h}×`, r.fe, r.Az, r.Ay, r.vz, r.vy]), dec: [null, 2, 2, 2, 3, 3], align: ["l", "r", "r", "r", "r", "r"] },
-    { title: L("Kombinasi ASD — tekanan statik (qa tereduksi)", "ASD combinations — static pressure (reduced qa)"), cols: [L("Kode", "Code"), L("Rumus", "Formula"), `P (${uF})`, `q ${L("maks", "max")} (${uQ})`, `qa·f (${uQ})`, L("Kontak", "Contact"), "FS OT", "FS SL", "Status"],
+    deep ? null : { title: L("Kombinasi ASD — tekanan statik (qa tereduksi)", "ASD combinations — static pressure (reduced qa)"), cols: [L("Kode", "Code"), L("Rumus", "Formula"), `P (${uF})`, `q ${L("maks", "max")} (${uQ})`, `qa·f (${uQ})`, L("Kontak", "Contact"), "FS OT", "FS SL", "Status"],
       rows: out.r.asd.map((a) => ({ cells: [a.c.id, a.c.formula, toDisp("F", a.R.P), toDisp("Q", a.pr.qmax), toDisp("Q", a.qa), `${nf(a.pr.contact * 100, 0)}%`, a.fsOT, a.fsSL, a.ok ? "OK" : "NOT OK"], cls: a.ok ? "" : "bad" })), dec: [null, null, 1, 1, 1, null, 2, 2, null], align: ["l", "l", "r", "r", "r", "r", "r", "r", "l"] },
     { title: L("Tulangan blok (LRFD)", "Block reinforcement (LRFD)"), cols: [L("Arah", "Direction"), L("Bawah", "Bottom"), L("Atas", "Top")], rows: ["x", "y"].map((ax) => [ax.toUpperCase(), out.r.reinf[ax].bot.txt, out.r.reinf[ax].top ? out.r.reinf[ax].top.txt : out.r.reinf[ax].bot.txt]), align: ["l", "l", "l"],
       note: L("ACI 351.3R: pasang tulangan di semua muka (atas, bawah, samping) minimal ρ susut 0,0018 dan ≥ D16 @ 300 mm.", "ACI 351.3R: provide steel on all faces (top, bottom, sides) at least 0.0018 shrinkage ratio and ≥ D16 @ 300 mm.") },
   ]
   const a1 = out.r.asd.find((a) => a.c.base === "A1") || out.r.asd[0]
-  const settle = settleBlock(footFrom("rect", I.Bx, I.By, out.r.geo.A, I.emb, a1.R.P / out.r.geo.A, "dinamis", pre), I.sAllow || 0)
-  out.checks.push(settle.check)
-  if (settle.table) tables.push(settle.table)
+  let DB = null, settle
+  if (deep) { DB = deepBundle(I, ctx, [{ m: out.m, r: out.r }], I.crit, "dinamis", pre, I.sAllow || 0); out.checks.push(...DB.checks); settle = DB.settle; out.deep = DB.draw; tables.push(...DB.tables) }
+  else { const sh = shallowSettle(ctx, footFrom("rect", I.Bx, I.By, out.r.geo.A, I.emb, a1.R.P / out.r.geo.A, "dinamis", pre), I.sAllow || 0); settle = sh.settle; out.checks.push(settle.check); if (sh.table) tables.push(sh.table) }
+  if (vsSoil) kv[1].rows.push([L("Vs dari N-SPT (Imai 1977)", "Vs from N-SPT (Imai 1977)"), `${nf(vsSoil.Vs, 0)} m/s (N60 ${nf(vsSoil.N, 1)})`])
+  if (qs) kv[1].rows.push(["qa", toDisp("Q", I.qa), uQ, 1], [L("Sumber qa", "qa source"), qaNote(qs)])
+  if (deep) { kv.push(DB.kv); kv[1].rows.push([L("Kekakuan tiang kz / kx", "Pile stiffness kz / kx"), `${nf(pkS.kz, 0)} / ${nf(pkS.kx, 0)} kN/m`], [L("Kekakuan rocking kφ / torsi", "Rocking kφ / torsion"), `${nf(pkS.kp, 0)} / ${nf(pkS.kt, 0)} kN·m/rad`]) }
   const notes = [
     L("Kekakuan & redaman: Richart, Hall & Woods (1970) untuk lingkaran ekuivalen; faktor penanaman Arya/Novak pada kekakuan (redaman tanpa penambahan, konservatif). Mode sliding–rocking tergandeng dari persamaan karakteristik 2 derajat kebebasan.", "Stiffness & damping: Richart, Hall & Woods (1970) for the equivalent circle; Arya/Novak embedment factors on stiffness (damping not increased, conservative). Coupled sliding–rocking modes from the 2-DOF characteristic equation."),
     L("Gaya tak seimbang Fo = mr·(G/ω)·ω² (ISO 1940) bila data vendor tidak ada. Amplitudo memakai faktor pembesaran 1 DOF; kecepatan puncak v = ω·A dibandingkan dengan batas proyek (ISO 10816/ACI 351.3R).", "Unbalanced force Fo = mr·(G/ω)·ω² (ISO 1940) when vendor data is absent. Amplitudes use 1-DOF magnification; peak velocity v = ω·A compared with the project limit (ISO 10816/ACI 351.3R)."),
     L("Statik: kombinasi D + Dyn, gempa (kaku, 0,3·SDS·Ie, termasuk massa blok), hubung singkat motor sebagai beban aksidental; daya dukung izin direduksi untuk mesin dinamis.", "Static: D + Dyn combinations, seismic (rigid, 0.3·SDS·Ie, including block mass), motor short circuit as accidental; allowable bearing reduced for dynamic machinery."),
     L("Batas: tanpa analisis tergandeng 6 DOF penuh, tanpa efek tiang/kelompok dan lapisan tanah. Untuk mesin besar atau hasil mendekati batas gunakan analisis dinamis khusus dan data vendor. Kompresor torak (eksitasi 1× dan 2×) sering memerlukan blok besar/kaku atau pondasi tiang — gunakan gaya tak seimbang primer/sekunder dari vendor.", "Limits: no full 6-DOF coupled analysis, no pile/group or layering effects. For large machines or marginal results use a dedicated dynamic analysis and vendor data. Reciprocating compressors (1× and 2× excitation) often need a large/stiff block or piles — use vendor primary/secondary unbalanced forces."),
   ]
-  return { file: "Pondasi_" + pre.replace(/\s+/g, ""), title: `${L("Desain Pondasi Dinamis", "Dynamic Foundation Design")} — ${pre}`, sub: `${nf(I.rpm, 0)} rpm · ${L("blok", "block")} ${nf(I.Bx, 2)} × ${nf(I.By, 2)} × ${nf(I.H, 2)} m`, refs: codes, metrics, checks: out.checks, kv, tables, notes,
-    drawings: [{ make: (m) => dynDraw(I, { ...out, Dy, pre }, palette(m)), cap: L("Gambar 1 — Blok mesin, model pegas–peredam, dan peta frekuensi", "Figure 1 — Machine block, spring–dashpot model and frequency map") }, { make: (m) => footingPlan(out.r, out.m, palette(m)), cap: L("Gambar 2 — Denah blok dan tekanan tanah", "Figure 2 — Block plan and soil pressure"), maxH: 300 }], cases, combos, out: { ...out, Dy }, settle, steps: dynSteps(I, Dy, out) }
+  if (deep) notes.push(L("Pondasi dalam: blok di atas kelompok tiang; kekakuan vertikal dari penurunan tiang tunggal (Vesic) dibagi rasio kelompok √(Bg/D), horizontal dari Winkler kepala jepit, rocking/torsi dijumlah per tiang, redaman ξ konservatif. Hasil indikatif — verifikasi dengan metode Novak/DYNA bila marginal.", "Deep foundation: block on a pile group; vertical stiffness from single-pile (Vesic) settlement divided by group ratio √(Bg/D), horizontal from fixed-head Winkler, rocking/torsion summed per pile, conservative damping ξ. Indicative — verify with Novak/DYNA methods when marginal."))
+  else notes.push(qaNote(qs))
+  const drawings = [{ make: (m) => dynDraw(I, { ...out, Dy, pre }, palette(m)), cap: L("Gambar 1 — Blok mesin, model pegas–peredam, dan peta frekuensi", "Figure 1 — Machine block, spring–dashpot model and frequency map") }]
+  if (deep) DB.drawings.forEach((d, i) => drawings.push({ ...d, cap: `${L("Gambar", "Figure")} ${i + 2} — ${d.cap}` }))
+  else drawings.push({ make: (m) => footingPlan(out.r, out.m, palette(m)), cap: L("Gambar 2 — Denah blok dan tekanan tanah", "Figure 2 — Block plan and soil pressure"), maxH: 300 })
+  return { file: "Pondasi_" + pre.replace(/\s+/g, ""), title: `${L("Desain Pondasi Dinamis", "Dynamic Foundation Design")} — ${pre}`, sub: `${deep ? L("Pondasi tiang · ", "Piled · ") : ""}${nf(I.rpm, 0)} rpm · ${L("blok", "block")} ${nf(I.Bx, 2)} × ${nf(I.By, 2)} × ${nf(I.H, 2)} m`, refs: codes, metrics, checks: out.checks, kv, tables: tables.filter(Boolean), notes,
+    drawings, cases, combos, out: { ...out, Dy }, settle, fdType: deep ? "deep" : "shallow", steps: [...dynSteps(I, Dy, out), ...(deep ? DB.steps : qs && qs.r ? [{ h: L("Daya dukung izin dari data tanah", "Allowable bearing from soil data"), rows: qs.r.rows }] : [])] }
 }

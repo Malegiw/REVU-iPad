@@ -127,9 +127,10 @@ export function reportPdf(rep, lbl) {
   y += 6
   // ringkasan status
   const sh = 34
-  doc.rect(M, y, W, sh, rep.ok ? C.okBg : C.badBg, rep.ok ? C.ok : C.bad, 0.8)
-  doc.rect(M, y, 5, sh, rep.ok ? C.ok : C.bad)
-  doc.text(M + 14, y + 14, rep.ok ? lbl.allOk : lbl.notOk, { size: 11, bold: true, color: rep.ok ? C.ok : C.bad })
+  const stc = rep.banner ? C.head : rep.ok ? C.ok : C.bad
+  doc.rect(M, y, W, sh, rep.banner ? C.box : rep.ok ? C.okBg : C.badBg, stc, 0.8)
+  doc.rect(M, y, 5, sh, stc)
+  doc.text(M + 14, y + 14, rep.banner || (rep.ok ? lbl.allOk : lbl.notOk), { size: 11, bold: true, color: stc })
   doc.text(M + 14, y + 27, wrap(rep.gov, W - 24, 8, false)[0], { size: 8, color: C.ink })
   y += sh + 8
   if (rep.metrics && rep.metrics.length) {

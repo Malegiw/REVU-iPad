@@ -162,8 +162,11 @@ export function analyzeFooting(m, combos, soil, crit, rc, prc) {
   const W = weights(m, geo)
   const asd = [], lrfd = [], checks = []
   // ---- ASD: tekanan dan stabilitas
+  const piled = Array.isArray(m.piles) && m.piles.length > 0
+  const pg = piled ? pileGroup(m.piles) : null
   for (const c of combos.filter((k) => k.kind === "ASD")) {
     const R = resultant(m, W, c.vec, c.fD)
+    if (piled) { asd.push({ c, R, pk: pileReact(pg, R), pr: { mode: "piled", qmax: 0, qmin: 0, q0: 0, gx: 0, gy: 0, ex: R.P ? R.My / R.P : 0, ey: R.P ? R.Mx / R.P : 0, contact: 1 }, qa: Infinity, fsOT: Infinity, fsSL: Infinity, reqOT: 1, reqSL: 1, reqC: 0, ok: true }); continue }
     const pr = pressure(geo, R.P, R.Mx, R.My)
     const qa = soil.qa * (c.temp ? (crit.tempFac ?? 1) : 1)
     const e = Math.hypot(pr.ex, pr.ey)
@@ -186,14 +189,15 @@ export function analyzeFooting(m, combos, soil, crit, rc, prc) {
   const upd = (o, key, val, info, cmp) => { if (!o[key] || cmp(val, o[key].val)) o[key] = { val, ...info } }
   for (const c of combos.filter((k) => k.kind === "LRFD")) {
     const R = resultant(m, W, c.vec, c.fD)
-    const pr = pressure(geo, R.P, R.Mx, R.My)
-    const row = { c, R, pr, valid: pr.mode === "full" || pr.mode === "partial" }
+    const pr = piled ? { mode: "piled", q0: 0, gx: 0, gy: 0 } : pressure(geo, R.P, R.Mx, R.My)
+    const pk = piled ? pileReact(pg, R) : null
+    const row = { c, R, pr, pk, valid: piled || pr.mode === "full" || pr.mode === "partial" }
     lrfd.push(row)
     const pl = m.peds.map((p, i) => { const q = pedLoad(c.vec, i); return { ...q, Pb: q.P + c.fD * W.peds[i], Mxb: q.Mx + q.Vy * p.h, Myb: q.My + q.Vx * p.h } })
     pl.forEach((q, i) => pedEnv[i].push({ c, ...q }))
     if (!row.valid) continue
     const qn = new Float64Array(N)
-    for (let i = 0; i < N; i++) qn[i] = qAt(pr, X[i], Y[i]) - c.fD * wself[i]
+    for (let i = 0; i < N; i++) qn[i] = (piled ? 0 : qAt(pr, X[i], Y[i])) - c.fD * wself[i]
     // momen & geser pada garis potong
     const cut = (axis, v0, sgn, dd) => {
       let M = 0, V = 0
@@ -208,6 +212,11 @@ export function analyzeFooting(m, combos, soil, crit, rc, prc) {
         const mom = axis === "x" ? pl[k].Myb : pl[k].Mxb
         if (dist > 0) M -= pl[k].Pb * dist + sgn * mom
         if (dist > dd) V -= pl[k].Pb
+      })
+      if (pk) m.piles.forEach((pp, j) => {                                   // reaksi tiang sebagai beban titik ke atas (§13.4.2.5 untuk geser)
+        const dist = sgn * ((axis === "x" ? pp.x : pp.y) - v0)
+        if (dist > 0) M += pk.Pi[j] * dist
+        V += pk.Pi[j] * pShare(dist - dd, m.pileD)
       })
       const w = chord(geo.poly, axis, v0), wv = chord(geo.poly, axis, v0 + sgn * dd)
       return { M: w > 0 ? M / w : 0, V: wv > 0 ? V / wv : 0, w }
@@ -239,6 +248,7 @@ export function analyzeFooting(m, combos, soil, crit, rc, prc) {
       if (!corners.every(([x, y]) => inside(geo.poly, x, y))) { if (!punch[k]) punch[k] = { na: true }; return }
       let inS = 0
       for (let i = 0; i < N; i++) if (Math.abs(X[i] - p.x) <= b1x / 2 && Math.abs(Y[i] - p.y) <= b1y / 2) inS += qn[i] * dA
+      if (pk) m.piles.forEach((pp, j) => { inS += pk.Pi[j] * (1 - pShare(Math.max(Math.abs(pp.x - p.x) - b1x / 2, Math.abs(pp.y - p.y) - b1y / 2), m.pileD)) })
       const Vu = pl[k].Pb - inS
       const b0 = 2 * (b1x + b1y) * 1000, dd = d
       const gx = gammaV(b1x, b1y), gy = gammaV(b1y, b1x)
@@ -297,9 +307,9 @@ export function analyzeFooting(m, combos, soil, crit, rc, prc) {
   })
 
   // ---- daftar pemeriksaan
-  const gA = L("Geoteknik & stabilitas (ASD)", "Geotechnical & stability (ASD)"), gS = L("Beton footing (LRFD)", "Footing concrete (LRFD)"), gP = L("Pedestal (LRFD)", "Pedestal (LRFD)")
+  const gA = L("Geoteknik & stabilitas (ASD)", "Geotechnical & stability (ASD)"), gS = piled ? L("Beton pile cap (LRFD)", "Pile cap concrete (LRFD)") : L("Beton footing (LRFD)", "Footing concrete (LRFD)"), gP = L("Pedestal (LRFD)", "Pedestal (LRFD)")
   const worstBy = (arr, f) => arr.reduce((a, b) => (f(b) > f(a) ? b : a), arr[0])
-  if (asd.length) {
+  if (asd.length && !piled) {
     const wq = worstBy(asd, (r) => r.pr.qmax / r.qa)
     checks.push(chk(gA, L("Tekanan tanah maks ≤ daya dukung izin", "Max soil pressure ≤ allowable bearing"), "SNI 8460:2017 §9", wq.pr.qmax, wq.qa, "Q", { note: wq.c.id, d: 1 }))
     checks.push(...contactChecks(asd, gA, crit))
@@ -322,7 +332,8 @@ export function analyzeFooting(m, combos, soil, crit, rc, prc) {
   const ldhv = ldh(rc.db, rc.fy, rc.fc), hookNeed = avail < ldv
   checks.push(chk(gS, hookNeed ? L("Penyaluran tulangan footing: lurus kurang → pakai kait standar 90° (ldh)", "Footing bar development: straight too short → use standard 90° hook (ldh)") : L("Panjang penyaluran tulangan footing (lurus) tersedia ≥ ld", "Available straight development length ≥ ld"),
     hookNeed ? "SNI 2847 §25.4.3" : "SNI 2847 §25.4.2", avail, hookNeed ? ldhv : ldv, "mm", { mode: "ge", d: 0 }))
-  checks.push(chk(gS, L("Tebal efektif d ≥ 150 mm (footing di atas tanah)", "Effective depth d ≥ 150 mm (footing on soil)"), "SNI 2847 §13.3.1.2", d, 150, "mm", { mode: "ge", d: 0 }))
+  if (piled) checks.push(chk(gS, L("Tebal pile cap di atas tulangan bawah d ≥ 300 mm", "Pile-cap depth above bottom bars d ≥ 300 mm"), "SNI 2847 §13.4.2.1", d, 300, "mm", { mode: "ge", d: 0 }))
+  else checks.push(chk(gS, L("Tebal efektif d ≥ 150 mm (footing di atas tanah)", "Effective depth d ≥ 150 mm (footing on soil)"), "SNI 2847 §13.3.1.2", d, 150, "mm", { mode: "ge", d: 0 }))
   pedRes.forEach((p, k) => {
     const nm = m.peds.length > 1 ? ` ${k + 1}` : ""
     if (p.worst) checks.push(chk(gP, L(`Interaksi P–M pedestal${nm} (${prc.n} D${prc.db})`, `P–M interaction, pedestal${nm} (${prc.n} D${prc.db})`), "SNI 2847 §22.4", p.worst.ur, 1, "", { note: p.worst.combo, d: 3 }))
@@ -331,5 +342,20 @@ export function analyzeFooting(m, combos, soil, crit, rc, prc) {
   })
   const badL = lrfd.filter((r) => !r.valid)
   if (badL.length) checks.push(chk(gS, L("Resultan terfaktor di dalam footing (semua kombinasi LRFD)", "Factored resultant within footing (all LRFD combos)"), "SNI 2847 §13.2", false, 0, "", { mode: "bool", note: badL.map((r) => r.c.id).join(", ") }))
-  return { geo, W, asd, lrfd, reinf, punch, pedRes, d, h, ldv, ldhv, avail, checks }
+  return { geo, W, asd, lrfd, reinf, punch, pedRes, d, h, ldv, ldhv, avail, checks, piled, pg }
 }
+
+// ---------------------------------------------------------------- kelompok tiang di bawah telapak (pile cap kaku)
+export function pileGroup(piles) {
+  const n = piles.length, xc = piles.reduce((a, p) => a + p.x, 0) / n, yc = piles.reduce((a, p) => a + p.y, 0) / n
+  const Sx2 = piles.reduce((a, p) => a + (p.x - xc) ** 2, 0), Sy2 = piles.reduce((a, p) => a + (p.y - yc) ** 2, 0)
+  return { piles, n, xc, yc, Sx2, Sy2 }
+}
+// reaksi tiang dari resultan di pusat denah (P, Mx, My, H): Pi = P/n + My'·x/Σx² + Mx'·y/Σy²
+export function pileReact(g, R) {
+  const My = R.My - R.P * g.xc, Mx = R.Mx - R.P * g.yc
+  const Pi = g.piles.map((p) => R.P / g.n + (g.Sx2 > 0 ? My * (p.x - g.xc) / g.Sx2 : 0) + (g.Sy2 > 0 ? Mx * (p.y - g.yc) / g.Sy2 : 0))
+  return { Pi, max: Math.max(...Pi), min: Math.min(...Pi), H: R.H / g.n, P: R.P }
+}
+// bagian reaksi tiang yang dihitung di luar penampang kritis (SNI 2847 §13.4.2.5): penuh bila pusat ≥ D/2 di luar, nol bila ≥ D/2 di dalam
+const pShare = (dist, D) => Math.min(1, Math.max(0, dist / (D || 0.4) + 0.5))

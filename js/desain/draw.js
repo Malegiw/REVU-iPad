@@ -37,6 +37,17 @@ export function dim(s, x1, y1, x2, y2, txt, P, off = 0, vertical = false) {
 }
 export const R = (s, x, y, w, h, fill, stroke, o = {}) => { const r = sv("rect", { x: Math.min(x, x + w), y: Math.min(y, y + h), width: Math.abs(w), height: Math.abs(h), fill, stroke: stroke || "none", "stroke-width": o.sw || 1.5, rx: o.rx || 0, ...(o.cls ? { class: o.cls } : {}), ...(o.op != null ? { opacity: o.op } : {}) }); s.append(r); return r }
 export const path = (s, d, o) => { const p = sv("path", { d, fill: "none", ...o }); s.append(p); return p }
+// tiang (pondasi dalam) di bawah telapak pada tampak: potongan pendek dengan tanda putus, dari yTop sampai yBot
+export function pileStubs(s, xs, yTop, yBot, wpx, P, deep) {
+  const g = sv("g", { class: "dz-fade" })
+  const uniq = [...new Set(xs.map((x) => Math.round(x * 10) / 10))]
+  uniq.forEach((x, i) => {
+    g.append(sv("rect", { x: (x - wpx / 2).toFixed(1), y: yTop, width: wpx.toFixed(1), height: yBot - yTop, fill: deep.pk === "bored" ? P.concD : P.steel, stroke: P.ink, "stroke-width": 1, class: "dz-grow", style: `--i:${i}` }))
+    g.append(sv("path", { d: `M${x - wpx},${yBot - 10} l${wpx * 0.7},-6 l${wpx * 0.6},12 l${wpx * 0.7},-6`, stroke: P.ink, "stroke-width": 1.5, fill: "none" }))
+  })
+  s.append(g)
+  T(s, Math.max(...uniq) + wpx + 8, (yTop + yBot) / 2 + 4, `${deep.n} × ${deep.pk === "bored" ? L("bor", "bored") : L("pipa", "pipe")} Ø${nf(deep.pD, 0)} · Lp ${nf(deep.pL, 1)} m`, { c: P.ink, fs: 11.5, b: true })
+}
 function windArrows(s, x, y0, y1, P, n = 4, len = 52) {
   for (let i = 0; i < n; i++) {
     const y = y0 + (y1 - y0) * (i + 0.5) / n
@@ -173,7 +184,8 @@ export function tankDraw(I, out, P) {
   const T0 = out.T, ring = out.type === "ring", Hs = I.Hs, hr = T0.hr
   const k = Math.min(700 / (I.D + 2.5), 360 / (Hs + hr + 2.2)), cx = 470, gy = 120 + (Hs + hr) * k + 30
   const X = (x) => cx + x * k, Y = (z) => gy - z * k
-  T(s, 30, 34, `${I.preset === "wash" ? "Wash Tank" : I.preset === "surge" ? "Surge Tank" : L("Tangki", "Tank")} Ø${nf(I.D, 2)} × ${nf(Hs, 2)} m · ${ring ? L("pondasi RINGWALL", "RINGWALL foundation") : L("pondasi PELAT PENUH", "FULL SLAB foundation")}`, { c: P.ink, fs: 15, b: true })
+  const piled = out.type === "piled"
+  T(s, 30, 34, `${I.preset === "wash" ? "Wash Tank" : I.preset === "surge" ? "Surge Tank" : L("Tangki", "Tank")} Ø${nf(I.D, 2)} × ${nf(Hs, 2)} m · ${ring ? L("pondasi RINGWALL", "RINGWALL foundation") : piled ? L("PELAT DI ATAS TIANG", "SLAB ON PILES") : L("pondasi PELAT PENUH", "FULL SLAB foundation")}`, { c: P.ink, fs: 15, b: true })
   R(s, 20, gy, W - 40, H - gy - 10, P.sand, null, { op: 0.45 })
   s.append(sv("line", { x1: 20, y1: gy, x2: W - 20, y2: gy, stroke: P.ink, "stroke-width": 2 }))
   const base = 0.25
@@ -212,6 +224,7 @@ export function tankDraw(I, out, P) {
   dim(s, X(I.D / 2) + 30, Y(base + Hs), X(I.D / 2) + 30, Y(base), `Hs = ${nf(Hs, 2)} m`, P, 0, true)
   dim(s, X(I.D / 2) + 130, Y(base + I.H), X(I.D / 2) + 130, Y(base), `H = ${nf(I.H, 2)} m`, P, 0, true)
   // tekanan tanah
+  if (piled) { pileStubs(s, out.R.m.piles.map((p) => X(p.x)), Y(base - I.sh), H - 6, Math.max(out.R.D * k, 5), P, { ...I, pk: I.pk, pD: I.pD, pL: I.pL, n: out.R.n }); return s }
   const qv = out.R.wq ? (ring ? out.R.wq.q : out.R.wq.pr.qmax) : 0
   const n = 14, x0 = ring ? -I.D / 2 - I.rb : -(I.D / 2 + I.proj), x1 = -x0
   for (let i = 0; i <= n; i++) { const x = X(x0 + (x1 - x0) * i / n); if (ring && Math.abs(x0 + (x1 - x0) * i / n) < I.D / 2 - I.rb) continue; arrow(s, x, H - 14, x, Y(base - (ring ? I.rh : I.sh)) + 6, P.arw, 2, "dz-grow") }
@@ -259,7 +272,11 @@ export function vesselDraw(I, out, P) {
   }
   // diagram tekanan tanah ASD penentu
   const r0 = out.res[0].r, gv = r0.asd.reduce((a, b) => (b.pr.qmax / b.qa > a.pr.qmax / a.qa ? b : a), r0.asd[0])
-  if (gv && isFinite(gv.pr.qmax)) {
+  if (out.deep) {
+    const xs = []
+    out.res.forEach(({ m }, i) => m.piles.forEach((p) => xs.push(X((foots.length > 1 ? foots[i] : 0) + p.x))))
+    pileStubs(s, xs, baseY, H - 6, Math.max(out.deep.D * k, 5), P, { ...out.deep.s, n: out.deep.nTot })
+  } else if (gv && isFinite(gv.pr.qmax) && gv.pr.qmax > 0) {
     const qmax = gv.pr.qmax, Bx = vert || I.fType === "comb" ? B : I.B, xs = foots.length > 1 ? foots : [0]
     xs.forEach((fx) => {
       const pts = [], n = 24
@@ -269,7 +286,7 @@ export function vesselDraw(I, out, P) {
     })
     T(s, X(B / 2) + 10, baseY + 40, `q ${L("maks", "max")} ${ndu("Q", qmax, 1)} · ${gv.c.id}`, { c: P.arw, fs: 12, b: true })
   }
-  dim(s, X(-footW / 2), baseY + 0 + 4 + 52 + 10, X(footW / 2), baseY + 4 + 52 + 10, `B = ${nf(footW, 2)} m`, P)
+  if (!out.deep) dim(s, X(-footW / 2), baseY + 0 + 4 + 52 + 10, X(footW / 2), baseY + 4 + 52 + 10, `B = ${nf(footW, 2)} m`, P)
   return s
 }
 
@@ -316,8 +333,9 @@ export function dynDraw(I, out, P) {
   s.append(sv("line", { x1: 20, y1: Y(0), x2: 580, y2: Y(0), stroke: P.ink, "stroke-width": 2 }))
   const bTop = Y(top), bBot = Y(top - I.H)
   R(s, X(-I.Bx / 2), bTop, I.Bx * k, I.H * k, P.conc, P.concD); R(s, X(-I.Bx / 2), bTop, I.Bx * k, I.H * k, s.hatch, null)
-  // pegas & peredam
-  for (let i = 0; i < 4; i++) {
+  // pegas & peredam (atau tiang)
+  if (out.deep) pileStubs(s, out.m.piles.map((p) => X(p.x)), bBot, H - 8, Math.max(out.deep.D * k, 5), P, { ...out.deep.s, n: out.deep.n })
+  else for (let i = 0; i < 4; i++) {
     const x = X(-I.Bx / 2 + I.Bx * (i + 0.5) / 4), y0 = bBot, y1 = bBot + 52
     let d = `M${x},${y0}`; for (let q = 1; q <= 6; q++) d += ` L${x + (q % 2 ? 7 : -7)},${y0 + q * 7}`; d += ` L${x},${y1}`
     path(s, d, { stroke: P.mut, "stroke-width": 2, class: "dz-spring", style: `--i:${i}` })
@@ -385,7 +403,8 @@ export function trafoDraw(I, out, P) {
   for (let i = 0; i < 3; i++) { const bx = X(I.Lt * (0.05 + 0.13 * i)); for (let q = 0; q < 5; q++) g.append(sv("ellipse", { cx: bx, cy: Y(z0 + I.Ht * 0.8 + q * 0.12), rx: 9, ry: 4, fill: P.concL, stroke: P.mut })) }
   s.append(g)
   windArrows(s, X(-I.Lt / 2) - 130, Y(z0 + I.Ht * 0.9), Y(z0 + 0.3), P, 4, 80)
-  dim(s, X(-I.Lf / 2), base + 26, X(I.Lf / 2), base + 26, `${nf(I.Lf, 2)} m`, P)
+  if (out.deep) pileStubs(s, out.m.piles.map((p) => X(p.x)), base, H - 4, Math.max(out.deep.D * k, 5), P, { ...out.deep.s, n: out.deep.n })
+  else dim(s, X(-I.Lf / 2), base + 26, X(I.Lf / 2), base + 26, `${nf(I.Lf, 2)} m`, P)
   T(s, X(I.Lpit / 2) + 10, Y(I.t + I.hpit) + 4, `${L("bak oli", "oil pit")} ${nf(I.Lpit, 1)} × ${nf(I.Bpit, 1)} m`, { c: P.mut, fs: 11 })
   T(s, X(I.Lpit / 2) + 10, Y(I.t + I.hpit) + 20, `${L("kerikil", "gravel")} ${nf(I.hg, 2)} m`, { c: P.mut, fs: 11 })
   return s

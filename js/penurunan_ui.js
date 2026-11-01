@@ -1,510 +1,262 @@
-// Halaman "Penurunan Pondasi" untuk app iPad offline. Rumus ada di penurunan.js (diuji terhadap Python). Teks Indonesia di sini = kunci terjemahan Inggris:
-// fungsi t menerjemahkan, T menerjemahkan lalu mengisi tanda kurung kurawal kosong dengan argumen, K hanya menandai teks yang perlu diterjemahkan
-// (data/en_penurunan.json dibuat oleh ipad_build.py dari semua teks yang dibungkus ketiganya).
-import { analyze, SettleError, fixed, fmtG } from "./penurunan.js"
+// Tab "Penurunan Pondasi" (dibangun ulang): penurunan pondasi DANGKAL (segera Steinbrenner + konsolidasi primer Terzaghi + sekunder) dan
+// DALAM (kelompok tiang: pemendekan elastis + rakit ekuivalen, pembanding Vesic) memakai profil tab Tanah. Daftar kasus otomatis dari semua
+// modul Desain (B, L, Df, q atau konfigurasi tiang) ditambah kasus manual. Mesin: js/penurunan.js (diuji terhadap Python) lewat js/desain/soil.js.
+import { L, lang, nf, toDisp, uName } from "./desain/core.js"
+import { el, field, exportBar, reveal, tableView, urClass } from "./desain/ui.js"
+import { palette, root, T, R as Rect } from "./desain/draw.js"
+import { lineChart } from "./desain/chart.js"
+import { projLoad, projSave, soilDS, stepper } from "./project.js"
+import { settleShallow, settleGroup, pileAxial, typeName, AXIAL_METHOD } from "./desain/soil.js"
+import { initUnits, hero, card, footer, nextBtn } from "./pj_ui.js"
 
-const K = (s) => s
-const KEY = "ymd.penurunan.v1"
-const SHAPES = { persegi: K("Persegi / persegi panjang"), lajur: K("Lajur (menerus)"), lingkaran: K("Lingkaran") }
-const RIG = { fleksibel_tengah: K("Fleksibel, titik tengah (×1,00)"), fleksibel_rata: K("Fleksibel, rata-rata (×0,85)"), kaku: K("Kaku (×0,93)") }
-const NAMES = [K("Tekanan bersih positif"), K("Penurunan total ≤ batas izin"), K("Distorsi sudut ≤ batas")]   // nama pengecekan dari penurunan.js
-const ERRORS = [K("Lebar (dan panjang) pondasi harus positif."), K("Isi minimal satu lapis tanah di bawah dasar pondasi."), K("Tebal tiap lapis harus positif."),
-  K("Tekanan bersih (q bruto dikurangi tegangan overburden di dasar pondasi) tidak positif: tidak ada penurunan tambahan.")]   // pesan SettleError
-const DETAIL = [K("q bersih = {} kPa (bruto {} - overburden {})"), K("{} mm pada {} tahun (batas {} mm)"), K("Δ/L = 1/{} (batas 1/{}; Δ = {} mm pada {} m)")]
-const LAYER_DEF = [
-  { name: "Pasir", H: 3.0, g: 18.0, gs: 19.0, E: 20.0, nu: 0.30, clay: false },
-  { name: "Lempung", H: 4.0, g: 17.0, gs: 17.5, E: 8.0, nu: 0.50, clay: true },
-  { name: "Lempung", H: 3.0, g: 17.0, gs: 17.5, E: 8.0, nu: 0.50, clay: true },
-  { name: "Pasir", H: 3.0, g: 18.0, gs: 19.0, E: 30.0, nu: 0.30, clay: false },
-  { name: "Lempung", H: 3.0, g: 17.0, gs: 17.5, E: 8.0, nu: 0.50, clay: true },
-]
+const RIG = () => ({ fleksibel_tengah: L("Fleksibel, tengah", "Flexible, centre"), fleksibel_rata: L("Fleksibel, rata-rata", "Flexible, average"), kaku: L("Kaku (×0,93)", "Rigid (×0.93)") })
+const SHAPE = () => ({ persegi: L("Persegi/panjang", "Rectangular"), lingkaran: L("Lingkaran", "Circular"), lajur: L("Lajur", "Strip") })
 
-function defaults() {
-  return {
-    shape: "persegi", B: 3.0, L: 3.0, Df: 1.0, mode: "q", q: 150.0, Q: 1350.0, gu: 18.0, gsu: 19.0, dwOn: true, dw: 2.0, nl: 2,
-    layers: LAYER_DEF.map((d) => ({ ...d, e0: 0.9, cc: 0.25, cs: 0.05, ocr: 1.0, cv: 2.0, dbl: false, ca: 0.0 })),
-    method: "boussinesq", rig: "fleksibel_tengah", dz: 0.5, life: 20.0, allow: 50.0, diff: 0.0, span: 6.0, ang: 500.0,
-    cmp: { si: 0, sc: 0, tot: 0, tol: 10 },
-  }
-}
-
-const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e }
-const svgNS = "http://www.w3.org/2000/svg"
-const sv = (tag, attrs, txt) => { const e = document.createElementNS(svgNS, tag); for (const k in attrs || {}) e.setAttribute(k, attrs[k]); if (txt != null) e.textContent = txt; return e }
-const EMO = /^(✅|❌|⚠️)\s*(.*)$/
-function withEmoji(node, txt) {                       // glyph emoji menjorok melewati lebarnya; beri jarak lewat span
-  const m = String(txt).match(EMO)
-  if (!m) { node.textContent = txt; return node }
-  const e = document.createElement("span"); e.className = "emo"; e.textContent = m[1]
-  node.append(e, document.createTextNode(m[2]))
-  return node
-}
-const parseNum = (s) => { const v = parseFloat(String(s).trim().replace(",", ".")); return isFinite(v) ? v : NaN }
-
-// ---------------------------------------------------------------- dipakai juga oleh modul Desain (penurunan pondasi dari hasil desain)
-export function settleLoad() {
-  let S = defaults()
-  try { const saved = JSON.parse(localStorage.getItem(KEY) || "null"); if (saved && saved.layers && saved.layers.length === 5) S = { ...S, ...saved, cmp: { ...S.cmp, ...(saved.cmp || {}) } } } catch (e) { /* tanpa penyimpanan: pakai bawaan */ }
-  return S
-}
-export const settleSave = (S) => { try { localStorage.setItem(KEY, JSON.stringify(S)) } catch (e) { /* abaikan */ } }
-function buildInputs(S, q) {
-  const layers = S.layers.slice(0, S.nl).map((ly) => {
-    const o = { name: ly.name, H: ly.H, gamma: ly.g, gsat: ly.gs, E: ly.E * 1000.0, nu: ly.nu, clay: ly.clay }
-    if (ly.clay) Object.assign(o, { e0: ly.e0, Cc: ly.cc, Cs: ly.cs, OCR: ly.ocr, cv: ly.cv, double: ly.dbl, Ca: ly.ca })
-    return o
-  })
-  return {
-    foot: { shape: S.shape, B: S.B, L: S.L }, soil: { Df: S.Df, gamma_up: S.gu, gsat_up: S.gsu, Dw: S.dwOn ? S.dw : null, layers }, q,
-    opt: { method: S.method, rigidity: S.rig, dz: S.dz, lifeYears: S.life, allowMm: S.allow, diffMm: S.diff, spanM: S.span, angLimit: S.ang },
-  }
-}
-// Penurunan untuk pondasi dari modul Desain: foot = {shape (persegi|lingkaran|lajur), B, L, Df, q (kPa bruto)}; profil tanah & kriteria dari tab Penurunan
-export function settleFor(foot) {
-  const S = settleLoad()
-  const I = buildInputs({ ...S, shape: foot.shape, B: foot.B, L: foot.L ?? foot.B, Df: foot.Df }, foot.q)
-  try { return { res: analyze(I.foot, I.soil, I.q, I.opt), allow: S.allow, life: S.life, rig: S.rig } } catch (e) { return { error: e.message, allow: S.allow, life: S.life } }
-}
-// Ringkasan tab Penurunan untuk dashboard beranda
-export function settleSummary() {
-  const S = settleLoad(), area = S.shape === "lajur" ? S.B : S.shape === "persegi" ? S.B * S.L : Math.PI * S.B * S.B / 4
-  const I = buildInputs(S, S.mode === "q" ? S.q : S.Q / area)
-  try { const r = analyze(I.foot, I.soil, I.q, I.opt); return { s: r.s_life * 1000, allow: S.allow, ok: r.checks.every((c) => c[1]), B: S.B, L: S.L, shape: S.shape, q: I.q, link: S.link || null } } catch (e) { return { error: e.message, link: S.link || null } }
-}
-// Kirim pondasi dari Desain ke tab Penurunan (ditautkan; tab Penurunan menampilkan asal datanya)
-export function settleSend(foot) {
-  const S = settleLoad()
-  Object.assign(S, { shape: foot.shape, B: +foot.B.toFixed(3), L: +(foot.L ?? foot.B).toFixed(3), Df: +foot.Df.toFixed(3), mode: "q", q: +foot.q.toFixed(2), link: { mod: foot.mod, label: foot.label, at: Date.now() } })
-  settleSave(S)
-}
-
-export function mountPenurunan(root, ctx) {
-  const t = ctx.t
-  const T = (s, ...a) => { let i = 0; return t(s).replace(/\{\}/g, () => (a[i] === undefined ? "{}" : a[i++])) }
-  const LL = (id, en) => (ctx.lang === "en" ? en : id)
-  let S = settleLoad()
-  const save = () => settleSave(S)
-
-  root.textContent = ""
-  const intro = el("p", "intro")
-  intro.innerHTML = t("Pembanding **independen** untuk **penurunan pondasi dangkal**: penurunan segera (elastis, Steinbrenner untuk tanah berlapis), konsolidasi primer lempung (Terzaghi dengan sublapis, muka air tanah, dan tegangan tambahan Boussinesq atau 2:1), kecepatan konsolidasi, dan kompresi sekunder opsional. Nilai bawaan hanya contoh.").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
-  const tabs = el("div", "tabs", "")
-  const bCalc = el("button", "tab on", t("📉 Hitung")), bInfo = el("button", "tab", t("📘 Rumus & batasan"))
-  bCalc.type = bInfo.type = "button"
-  tabs.append(bCalc, bInfo)
-  const paneCalc = el("div", "pane"), paneInfo = el("div", "pane info"); paneInfo.hidden = true
-  bCalc.onclick = () => { bCalc.classList.add("on"); bInfo.classList.remove("on"); paneCalc.hidden = false; paneInfo.hidden = true }
-  bInfo.onclick = () => { bInfo.classList.add("on"); bCalc.classList.remove("on"); paneInfo.hidden = false; paneCalc.hidden = true }
-  const linkBox = el("div")
-  const drawLink = () => {
-    linkBox.textContent = ""
-    if (!S.link) return
-    const b = el("div", "note linkbar")
-    const d = new Date(S.link.at || Date.now()), p2 = (x) => String(x).padStart(2, "0")
-    b.append(el("b", null, "🔗 " + LL("Terhubung ke Desain: ", "Linked to Design: ") + S.link.label),
-      el("span", null, LL(` — data pondasi dikirim ${p2(d.getDate())}/${p2(d.getMonth() + 1)} ${p2(d.getHours())}:${p2(d.getMinutes())}. Profil tanah & kriteria di halaman ini juga dipakai modul Desain untuk menghitung penurunannya.`,
-        ` — foundation data sent ${p2(d.getDate())}/${p2(d.getMonth() + 1)} ${p2(d.getHours())}:${p2(d.getMinutes())}. The soil profile & criteria on this page are also used by the Design module to compute its settlement.`)))
-    const g = el("div", "btns")
-    const back = el("a", "btn", LL("← Kembali ke Desain ", "← Back to Design ") + S.link.label); back.href = "#/desain/" + S.link.mod
-    const un = el("button", "ghost", LL("Lepas tautan", "Unlink")); un.type = "button"; un.onclick = () => { delete S.link; save(); drawLink() }
-    g.append(back, un); b.append(g)
-    linkBox.append(b)
-  }
-  drawLink()
-  root.append(linkBox, intro, tabs, paneCalc, paneInfo)
-  paneInfo.append(mdToDom(t(INFO_ID)))
-
-  const formBox = el("div", "form"), resBox = el("div", "res"), cmpBox = el("div", "cmpbox"), expBox = el("div", "exp")
-  const bar = el("a", "stickybar"); bar.href = "#"; bar.onclick = (e) => { e.preventDefault(); resBox.scrollIntoView({ behavior: "smooth", block: "start" }) }
-  paneCalc.append(bar, formBox, resBox, cmpBox, expBox)
-
-  // ------------------------------------------------------------ bentuk-bentuk masukan
-  function numField(parent, label, key, o, getSet) {
-    const w = el("label", "fld" + (o.disabled ? " dis" : ""))
-    w.append(el("span", "lb", label))
-    const inp = el("input"); inp.type = "text"; inp.inputMode = "decimal"; inp.autocomplete = "off"; inp.disabled = !!o.disabled
-    const [get, set] = getSet
-    inp.value = String(get())
-    let committed = get()                              // nilai saat terakhir selesai mengetik: pembanding untuk o.struct
-    const rng = el("span", "rg", `${fmtG(o.lo)} – ${fmtG(o.hi)}`)
-    inp.addEventListener("input", () => { const v = parseNum(inp.value); const okv = !isNaN(v) && v >= o.lo && v <= o.hi; inp.classList.toggle("bad", !okv); if (okv) { set(v); after(false) } })       // bentuk formulir baru digambar ulang saat selesai mengetik (change), supaya kursor tidak hilang
-    inp.addEventListener("change", () => {
-      let v = parseNum(inp.value)
-      if (isNaN(v)) v = get()
-      v = Math.min(o.hi, Math.max(o.lo, v)); inp.value = String(v); inp.classList.remove("bad")
-      const was = committed; set(v); committed = v
-      after(!!o.struct && (o.struct === true || o.struct(was, v)))
-    })
-    w.append(inp)
-    if (o.help) { w.title = t(o.help); w.append(el("span", "hp", t(o.help))) } else w.append(rng)
-    parent.append(w)
-    return inp
-  }
-  const after = (structural) => { save(); if (structural) renderForm(); renderResults() }
-  const row = () => el("div", "grid")
-  function selField(parent, label, key, opts, cur, onSet, o = {}) {
-    const w = el("label", "fld"); w.append(el("span", "lb", label))
-    const s = el("select")
-    Object.entries(opts).forEach(([k, v]) => { const op = el("option", null, t(v)); op.value = k; if (k === cur) op.selected = true; s.append(op) })
-    s.onchange = () => { onSet(s.value); after(true) }
-    w.append(s); parent.append(w)
-  }
-  function radioField(parent, label, opts, cur, onSet) {
-    const w = el("div", "fld"); w.append(el("span", "lb", label))
-    const g = el("div", "seg")
-    Object.entries(opts).forEach(([k, v]) => {
-      const b = el("button", "segb" + (k === cur ? " on" : ""), t(v)); b.type = "button"
-      b.onclick = () => { onSet(k); after(true) }
-      g.append(b)
-    })
-    w.append(g); parent.append(w)
-  }
-  function checkField(parent, label, cur, onSet, help) {
-    const w = el("label", "chk"); const c = el("input"); c.type = "checkbox"; c.checked = !!cur
-    c.onchange = () => { onSet(c.checked); after(true) }
-    w.append(c, el("span", null, label)); if (help) w.title = t(help)
-    parent.append(w)
-  }
-  const area = () => (S.shape === "lajur" ? S.B : S.shape === "persegi" ? S.B * S.L : Math.PI * S.B * S.B / 4)
-  const qNow = () => (S.mode === "q" ? S.q : S.Q / area())
-  const prop = (o, k) => [() => o[k], (v) => { o[k] = v }]
-
-  function renderForm() {
-    formBox.textContent = ""
-    const h = (txt) => formBox.append(el("h4", null, t(txt)))
-    h(K("Pondasi dan beban"))
-    let g = row()
-    selField(g, t("Bentuk pondasi"), "shape", SHAPES, S.shape, (v) => { S.shape = v })
-    numField(g, t("Lebar B / diameter D (m)"), "B", { lo: 0.3, hi: 100, help: K("Lingkaran: isi diameter. Lajur: lebar pondasi menerus.") }, prop(S, "B"))
-    numField(g, t("Panjang L (m)"), "L", { lo: 0.3, hi: 500, disabled: S.shape !== "persegi" }, prop(S, "L"))
-    numField(g, t("Kedalaman dasar Df (m)"), "Df", { lo: 0, hi: 20 }, prop(S, "Df"))
-    formBox.append(g)
-    g = row()
-    radioField(g, t("Masukan beban"), { q: K("Tekanan kontak q (kPa)"), Q: K("Beban total Q (kN)") }, S.mode, (v) => { S.mode = v })
-    if (S.mode === "q") numField(g, t("Tekanan kontak bruto q (kPa)"), "q", { lo: 1, hi: 2000, help: K("Tekanan di dasar pondasi (beban struktur + berat pondasi + tanah di atasnya) dibagi luas.") }, prop(S, "q"))
-    else {
-      numField(g, t("Beban total Q (kN)") + (S.shape === "lajur" ? t(" per meter") : ""), "Q", { lo: 1, hi: 1e7, help: K("Lajur: kN per meter panjang. Luas dasar dipakai untuk mengubah ke tekanan.") }, prop(S, "Q"))
-      const m = el("div", "fld"); m.append(el("span", "lb", t("q = Q / A (kPa)")), el("b", "qv", fixed(qNow(), 1))); m.id = "qv"; g.append(m)
+// ---------------------------------------------------------------- daftar kasus (modul Desain + manual)
+export async function collectCases(P, lng) {
+  const out = []
+  try {
+    const D = await import("./desain_ui.js")
+    const { mods } = D.runAll(lng, { P })
+    for (const { m, out: o, error } of mods) {
+      if (error || !o || !o.settle) continue
+      const sb = o.settle
+      out.push({ id: "mod:" + m.id, src: "mod", icon: m.icon, title: m.title(), sub: o.sub, kind: sb.kind, foot: sb.foot, group: sb.group, allowOv: sb.allow, href: "#/desain/" + m.id })
     }
-    formBox.append(g)
-    h(K("Tanah di atas dasar pondasi dan muka air"))
-    g = row()
-    numField(g, t("γ tanah di atas dasar (kN/m³)"), "gu", { lo: 10, hi: 25 }, prop(S, "gu"))
-    numField(g, t("γ jenuh di atas dasar (kN/m³)"), "gsu", { lo: 10, hi: 25 }, prop(S, "gsu"))
-    checkField(g, t("Ada muka air tanah"), S.dwOn, (v) => { S.dwOn = v })
-    numField(g, t("Muka air dari permukaan tanah (m)"), "dw", { lo: 0, hi: 50, disabled: !S.dwOn }, prop(S, "dw"))
-    formBox.append(g)
-    h(K("Lapisan tanah di bawah dasar pondasi"))
-    g = row()
-    selField(g, t("Jumlah lapis"), "nl", { 1: "1", 2: "2", 3: "3", 4: "4", 5: "5" }, String(S.nl), (v) => { S.nl = parseInt(v, 10) })
-    formBox.append(g)
-    S.open = S.open || [true, true, false, false, false]
-    for (let i = 0; i < S.nl; i++) {
-      const ly = S.layers[i]
-      const d = el("details", "layer"); d.open = !!S.open[i]
-      d.addEventListener("toggle", () => { S.open[i] = d.open })
-      d.append(el("summary", null, T("Lapis {}: ", i + 1) + (ly.name || "")))
-      let r = row()
-      const nm = el("label", "fld"); nm.append(el("span", "lb", t("Nama lapis")))
-      const ni = el("input"); ni.type = "text"; ni.value = ly.name; ni.oninput = () => { ly.name = ni.value; d.firstChild.textContent = T("Lapis {}: ", i + 1) + ly.name; save(); renderResults() }
-      nm.append(ni); r.append(nm)
-      numField(r, t("Tebal H (m)"), "H", { lo: 0.2, hi: 100 }, prop(ly, "H"))
-      numField(r, t("γ (kN/m³)"), "g", { lo: 10, hi: 25 }, prop(ly, "g"))
-      numField(r, t("γ jenuh (kN/m³)"), "gs", { lo: 10, hi: 25 }, prop(ly, "gs"))
-      d.append(r)
-      r = row()
-      numField(r, t("Modulus elastis E (MPa)"), "E", { lo: 0, hi: 2000, help: K("Untuk penurunan segera. Lempung: E undrained (Eu) dengan ν = 0,5. 0 = lapis tidak ikut dihitung. 1 MPa = 1000 kPa.") }, prop(ly, "E"))
-      numField(r, t("Angka Poisson ν"), "nu", { lo: 0, hi: 0.5 }, prop(ly, "nu"))
-      checkField(r, t("Lempung yang berkonsolidasi"), ly.clay, (v) => { ly.clay = v }, K("Hitung konsolidasi primer (Terzaghi) untuk lapis ini."))
-      d.append(r)
-      if (ly.clay) {
-        r = row()
-        numField(r, "e0", "e0", { lo: 0.2, hi: 5 }, prop(ly, "e0"))
-        numField(r, "Cc", "cc", { lo: 0.01, hi: 3, help: K("Indeks kompresi (garis normal-konsolidasi).") }, prop(ly, "cc"))
-        numField(r, "Cs (Cr)", "cs", { lo: 0.001, hi: 1, help: K("Indeks pengembangan/rekompresi.") }, prop(ly, "cs"))
-        numField(r, "OCR", "ocr", { lo: 1, hi: 10, help: K("σ'p = OCR × σ'0 di tengah tiap sublapis. 1 = normal-konsolidasi.") }, prop(ly, "ocr"))
-        numField(r, t("cv (m²/tahun)"), "cv", { lo: 0.01, hi: 1000, help: K("Koefisien konsolidasi.") }, prop(ly, "cv"))
-        d.append(r)
-        r = row()
-        checkField(r, t("Drainase dua arah (atas dan bawah)"), ly.dbl, (v) => { ly.dbl = v }, K("Jalur drainase Hdr = H/2 bila dicentang, H bila tidak."))
-        numField(r, t("Cαε (kompresi sekunder)"), "ca", { lo: 0, hi: 0.1, help: K("Regangan per siklus log waktu setelah konsolidasi primer. 0 = diabaikan.") }, prop(ly, "ca"))
-        d.append(r)
+  } catch (e) { console.error(e) }
+  ;(P.settle.manual || []).forEach((c, i) => out.push({ id: "man:" + i, src: "man", idx: i, icon: c.kind === "deep" ? "📍" : "🧱", title: c.label || `${L("Kasus manual", "Manual case")} ${i + 1}`, sub: c.kind === "deep" ? L("tiang (manual)", "piles (manual)") : L("dangkal (manual)", "shallow (manual)"), kind: c.kind, man: c }))
+  return out
+}
+// hitung satu kasus memakai kriteria tab ini
+export function computeCase(P, ds, c) {
+  const o = P.settle
+  if (c.kind === "deep") {
+    let g = c.group
+    if (c.src === "man") {
+      const m = c.man, D = m.D / 1000, ax = pileAxial(ds, { D, t: (m.t || 12.7) / 1000, Lp: m.Lp, open: true, method: m.method, kind: m.pk, z0: m.z0 })
+      const Ap = m.pk === "bored" ? Math.PI * D * D / 4 : Math.PI / 4 * (D * D - (D - 2 * (m.t || 12.7) / 1000) ** 2)
+      g = { D, Lp: m.Lp, n: Math.max(1, Math.round(m.n)), Bg: m.Bg, Lg: m.Lg, Q: m.Q, z0: m.z0, Qb: ax.Qb, Qu: ax.Qc, qb: ax.q, Ap, Ep: m.pk === "bored" ? 4700 * Math.sqrt(30) * 1000 : 2e8, driven: m.pk !== "bored" }
+    }
+    if (!g) return { error: L("data kelompok tiang tidak tersedia", "pile group data unavailable") }
+    const st = settleGroup(ds, g, o)
+    const allow = c.src === "mod" && c.allowOv ? c.allowOv : o.allowDeep
+    return { kind: "deep", g, st, res: st.raft, layers: st.raftSoil ? st.raftSoil.layers : [], s: st.total * 1000, si: (st.se + st.si) * 1000, sc: st.sc * 1000, allow, error: st.error && !st.raft ? st.error : null }
+  }
+  const f = c.src === "man" ? { shape: c.man.shape, B: c.man.B, L: c.man.shape === "persegi" ? c.man.L : c.man.B, Df: c.man.Df, q: c.man.q } : c.foot
+  if (!f) return { error: L("data pondasi tidak tersedia", "foundation data unavailable") }
+  const r = settleShallow(ds, f, o)
+  const allow = c.src === "mod" && c.allowOv ? c.allowOv : o.allow
+  if (r.error) return { kind: "shallow", foot: f, error: r.error, allow }
+  const x = r.res
+  return { kind: "shallow", foot: f, res: x, layers: r.soil.layers, s: x.s_life * 1000, si: x.si * 1000, sc: (x.s_life - x.si) * 1000, allow }
+}
+
+export function mountPenurunan(box, ctx) {
+  lang.cur = ctx.lang
+  initUnits()
+  const P = projLoad(), o = P.settle
+  box.textContent = ""
+  const crit = el("div"), listBox = el("div"), detBox = el("div"), manBox = el("div"), expBox = el("div", "dz-expbox dz-in")
+  box.append(stepper("penurunan", P), hero(L("Langkah 4 · analisis", "Step 4 · analysis"), L("Penurunan Pondasi — Dangkal & Dalam", "Foundation Settlement — Shallow & Deep"),
+    L("Penurunan segera (Steinbrenner, tanah berlapis), konsolidasi primer (Terzaghi, NC/OC) + sekunder, dan total terhadap waktu — untuk pondasi dangkal dan kelompok tiang (pemendekan elastis + rakit ekuivalen). Profil tanah dari tab Tanah; daftar pondasi otomatis dari tab Desain.",
+      "Immediate (Steinbrenner, layered soil), primary consolidation (Terzaghi, NC/OC) + secondary, and total over time — for shallow foundations and pile groups (elastic shortening + equivalent raft). Soil profile from the Soil tab; foundation list automatic from the Design tab."),
+    ["SNI 8460:2017 §9–10", "Steinbrenner", "Terzaghi", L("Rakit ekuivalen", "Equivalent raft")]), crit, listBox, detBox, manBox, expBox, nextBtn("#/laporan", L("Lanjut: laporan proyek", "Next: project report"), L("gabungan tanah, gempa, desain & penurunan", "soil, seismic, design & settlement combined")), footer())
+  let cases = [], results = [], last = null, timer = 0
+  const changed = (structural) => { projSave(P); if (structural) { drawCrit(); drawManual() } clearTimeout(timer); timer = setTimeout(recompute, structural ? 0 : 200) }
+  function drawCrit() {
+    crit.textContent = ""
+    const g = el("div", "dz-grid")
+    g.append(field({ k: "life", lab: L("Umur rencana", "Design life"), u: L("tahun", "years"), lo: 0.1, hi: 100, obj: o }, o, changed),
+      field({ k: "allow", lab: L("Batas penurunan pondasi dangkal", "Shallow foundation limit"), u: "mm", lo: 5, hi: 1000, obj: o }, o, changed),
+      field({ k: "allowDeep", lab: L("Batas penurunan pondasi tiang", "Pile foundation limit"), u: "mm", lo: 5, hi: 500, obj: o }, o, changed),
+      field({ k: "method", type: "seg", lab: L("Distribusi tegangan Δσ", "Stress distribution Δσ"), opts: { boussinesq: "Boussinesq", "2:1": "2V : 1H" }, obj: o }, o, changed),
+      field({ k: "rig", type: "seg", lab: L("Kekakuan pondasi (penurunan segera)", "Foundation rigidity (immediate)"), opts: RIG(), obj: o, wide: true }, o, changed),
+      field({ k: "dz", lab: L("Tebal sublapis konsolidasi", "Consolidation sublayer"), u: "m", lo: 0.1, hi: 2, obj: o }, o, changed))
+    crit.append(card("s-crit", "⚙️", L("Kriteria & metode (berlaku untuk semua modul Desain)", "Criteria & methods (apply to all Design modules)"), `${nf(o.life, 0)} ${L("th", "yr")} · ${nf(o.allow, 0)} / ${nf(o.allowDeep, 0)} mm`, [g,
+      el("p", "dz-note", L("Batas umum: telapak terpisah 25–50 mm, mat/rakit 50–100 mm, tangki timbun 150–300 mm (seragam), tiang 10–25 mm. Batas khusus per modul (isian 'Batas penurunan izin' di modul) diutamakan.", "Typical limits: isolated footings 25–50 mm, mats/rafts 50–100 mm, storage tanks 150–300 mm (uniform), piles 10–25 mm. A module-specific limit (its 'Allowable settlement' field) takes precedence."))]))
+  }
+  function drawManual() {
+    manBox.textContent = ""
+    const list = el("div")
+    ;(o.manual || []).forEach((c, i) => {
+      const g = el("div", "dz-grid pj-man")
+      g.append(field({ k: "label", type: "txt", lab: L("Nama", "Name"), obj: c }, c, () => changed(false)))
+      if (c.kind === "deep") {
+        g.append(field({ k: "pk", type: "seg", lab: L("Tiang", "Pile"), opts: { pipe: L("Pipa", "Pipe"), bored: L("Bor", "Bored") }, obj: c }, c, changed),
+          field({ k: "method", type: "seg", lab: L("Metode", "Method"), opts: { api: "α/β", spt: "N-SPT", cpt: "CPT" }, obj: c }, c, changed),
+          field({ k: "D", lab: "D", u: "mm", lo: 150, hi: 2000, obj: c }, c, changed), field({ k: "Lp", lab: "Lp", u: "m", lo: 3, hi: 80, obj: c }, c, changed),
+          field({ k: "n", lab: L("Jumlah tiang n", "Number of piles n"), u: "", lo: 1, hi: 500, obj: c }, c, changed), field({ k: "z0", lab: L("Kepala tiang z0", "Pile head z0"), u: "m", lo: 0, hi: 10, obj: c }, c, changed),
+          field({ k: "Bg", lab: L("Lebar kelompok Bg", "Group width Bg"), u: "m", lo: 0.3, hi: 100, obj: c }, c, changed), field({ k: "Lg", lab: L("Panjang kelompok Lg", "Group length Lg"), u: "m", lo: 0.3, hi: 100, obj: c }, c, changed),
+          field({ k: "Q", lab: L("Beban layan tetap Q", "Sustained service load Q"), u: "F", lo: 1, hi: 1e6, obj: c }, c, changed))
+      } else {
+        g.append(field({ k: "shape", type: "seg", lab: L("Bentuk", "Shape"), opts: SHAPE(), obj: c }, c, changed),
+          field({ k: "B", lab: c.shape === "lingkaran" ? L("Diameter", "Diameter") : "B", u: "m", lo: 0.3, hi: 100, obj: c }, c, changed),
+          ...(c.shape === "persegi" ? [field({ k: "L", lab: "L", u: "m", lo: 0.3, hi: 200, obj: c }, c, changed)] : []),
+          field({ k: "Df", lab: "Df", u: "m", lo: 0, hi: 10, obj: c }, c, changed), field({ k: "q", lab: L("q bruto (tetap)", "Gross q (sustained)"), u: "Q", lo: 1, hi: 2000, obj: c }, c, changed))
       }
-      formBox.append(d)
-    }
-    h(K("Metode dan kriteria"))
-    g = row()
-    radioField(g, t("Tegangan tambahan"), { boussinesq: K("Boussinesq (Newmark)"), "2:1": K("Metode 2:1") }, S.method, (v) => { S.method = v })
-    selField(g, t("Kekakuan pondasi (penurunan segera)"), "rig", RIG, S.rig, (v) => { S.rig = v })
-    numField(g, t("Tebal maksimum sublapis lempung (m)"), "dz", { lo: 0.1, hi: 2, help: K("Makin kecil makin teliti. Satu sublapis tebal dapat memperkecil konsolidasi sampai ±30 %.") }, prop(S, "dz"))
-    numField(g, t("Umur rencana (tahun)"), "life", { lo: 0.1, hi: 200 }, prop(S, "life"))
-    formBox.append(g)
-    g = row()
-    numField(g, t("Batas penurunan total (mm)"), "allow", { lo: 1, hi: 1000, help: K("Contoh umum. Ikuti kriteria proyek (kode, pemilik, jenis struktur/tangki).") }, prop(S, "allow"))
-    numField(g, t("Penurunan diferensial perkiraan (mm), 0 = tidak dicek"), "diff", { lo: 0, hi: 1000, struct: (a, b) => (a > 0) !== (b > 0) }, prop(S, "diff"))
-    numField(g, t("Jarak antar titik (m)"), "span", { lo: 0.1, hi: 500, disabled: S.diff <= 0 }, prop(S, "span"))
-    numField(g, t("Batas distorsi sudut 1/…"), "ang", { lo: 50, hi: 2000, disabled: S.diff <= 0, help: K("Contoh umum 1/500 untuk rangka tanpa retak.") }, prop(S, "ang"))
-    formBox.append(g)
-    const rs = el("button", "ghost", t("↺ Kembalikan nilai bawaan")); rs.type = "button"
-    rs.onclick = () => { if (confirm(t("Kembalikan semua masukan ke nilai bawaan?"))) { S = defaults(); save(); cmpBuilt = false; cmpBox.textContent = ""; renderForm(); renderResults() } }
-    formBox.append(rs)
-  }
-
-  // ------------------------------------------------------------ hasil
-  let res = null, lastIn = null
-  const fmtT = (x) => (x == null ? "-" : x < 1 ? fixed(x * 12, 1) + " bln" : fixed(x, 1) + " th")
-  const tdet = (s) => {
-    for (const tp of DETAIL) {
-      const rx = new RegExp("^" + tp.replace(/[.*+?^$()|[\]\\]/g, "\\$&").replace(/\{\}/g, "(.+?)") + "$")
-      const m = s.match(rx)
-      if (m) return T(tp, ...m.slice(1))
-    }
-    return s
-  }
-  const inputs = () => buildInputs(S, qNow())
-  const mcard = (lab, val) => { const c = el("div", "metric"); c.append(el("div", "ml", lab), el("div", "mv", val)); return c }
-  function table(cols, rows) {
-    const tb = el("table"), hr = el("tr")
-    cols.forEach((c) => hr.append(el("th", null, c)))
-    tb.append(hr)
-    rows.forEach((r) => { const tr = el("tr"); r.forEach((c) => tr.append(withEmoji(el("td"), c == null ? "" : String(c)))); tb.append(tr) })
-    const w = el("div", "tw"); w.append(tb); return w
-  }
-
-  function renderResults() {
-    const qv = document.getElementById("qv"); if (qv) qv.lastChild.textContent = fixed(qNow(), 1)
-    resBox.textContent = ""
-    lastIn = inputs()
-    try { res = analyze(lastIn.foot, lastIn.soil, lastIn.q, lastIn.opt) } catch (e) {
-      res = null; bar.className = "stickybar bad"; bar.textContent = "❌ " + (e instanceof SettleError ? t(e.message) : e.message)
-      resBox.append(el("div", "err", e instanceof SettleError ? t(e.message) : T("Perhitungan tidak dapat diselesaikan: {}", e.message)))
-      renderCmp(); renderExport(); return
-    }
-    const ok = res.checks.every((c) => c[1])
-    bar.className = "stickybar " + (ok ? "ok" : "bad")
-    bar.textContent = `${ok ? "✅" : "❌"} ${T("Total pada {} tahun (mm)", fmtG(S.life))}: ${fixed(res.s_life * 1000, 1)} · ${t("Batas penurunan total (mm)")}: ${fmtG(S.allow)} ↓`
-    const m = el("div", "metrics")
-    m.append(mcard(t("Tekanan bersih (kPa)"), fixed(res.q_net, 1)), mcard(t("Penurunan segera (mm)"), fixed(res.si * 1000, 1)), mcard(t("Konsolidasi primer (mm)"), fixed(res.sc * 1000, 1)),
-      mcard(T("Total pada {} tahun (mm)", fmtG(S.life)), fixed(res.s_life * 1000, 1)), mcard(t("Waktu 90 % konsolidasi"), fmtT(res.t90)))
-    resBox.append(m)
-    if (res.ss_life > 0) resBox.append(el("p", "cap", T("Termasuk kompresi sekunder {} mm pada umur rencana. Penurunan akhir (primer selesai, tanpa sekunder) = {} mm.", fixed(res.ss_life * 1000, 1), fixed(res.s_final * 1000, 1))))
-    const hc = el("h4"); hc.append(t("Pengecekan") + " "); withEmoji(hc, ok ? t("✅ semua OK") : t("❌ ada yang tidak memenuhi")); resBox.append(hc)
-    resBox.append(table([t("Pengecekan"), t("Status"), t("Keterangan")], res.checks.map(([n, o, d]) => [t(n), o ? "✅ OK" : "❌ NOT OK", tdet(d)])))
-    const two = el("div", "two")
-    const left = el("div"), right = el("div")
-    left.append(profileSVG(lastIn.foot, lastIn.soil, res, t, T))
-    right.append(el("b", null, t("Penurunan terhadap waktu")), timeChart(res, t), table([t("Waktu"), t("Penurunan (mm)")], TIMES.map(([tt, n]) => [t(n), fixed(res.at(tt) * 1000, 1)])))
-    two.append(left, right)
-    resBox.append(two)
-    const det = el("details", "more"); det.append(el("summary", null, t("Rincian per lapis dan sublapis")))
-    det.append(table([t("Lapis"), t("Tebal (m)"), t("E (MPa)"), "ν", t("Penurunan segera (mm)")], lastIn.soil.layers.map((ly, i) => [ly.name || T("Lapis {}", i + 1), ly.H, ly.E / 1000, ly.nu, fixed(res.si_layers[i] * 1000, 1)])))
-    if (res.cons.length) {
-      det.append(table([t("Lapis lempung"), t("H (m)"), t("Hdr (m)"), t("cv (m²/th)"), t("Sc (mm)"), "t50", "t90"], res.cons.map((c) => [c.lapis, c.H, c.Hdr, c.cv, fixed(c.sc * 1000, 1), fmtT(c.t50), fmtT(c.t90)])))
-      det.append(table([t("Lapis"), t("z tengah dari dasar (m)"), t("Δσ (kPa)"), t("σ'0 (kPa)"), t("σ'p (kPa)"), t("Sc sublapis (mm)")], res.subs.map((s) => [s.lapis, fixed(s.z_tengah, 2), fixed(s.ds, 1), fixed(s.s0, 1), fixed(s.sp, 1), fixed(s.sc * 1000, 2)])))
-    } else det.append(el("p", "cap", t("Tidak ada lapis lempung yang dicentang; hanya penurunan segera yang dihitung.")))
-    det.append(el("p", "cap", T("Tegangan overburden total di dasar pondasi = {} kPa (dikurangkan dari q bruto {} kPa).", fixed(res.overburden, 1), fixed(res.q_gross, 1))))
-    resBox.append(det)
-    renderCmp(); renderExport()
-  }
-  const TIMES = [[0.25, K("3 bulan")], [0.5, K("6 bulan")], [1, K("1 tahun")], [2, K("2 tahun")], [5, K("5 tahun")], [10, K("10 tahun")], [20, K("20 tahun")], [50, K("50 tahun")]]
-
-  // ------------------------------------------------------------ perbandingan dengan dokumen
-  let cmpBuilt = false
-  function renderCmp() {
-    if (!cmpBuilt) {
-      cmpBuilt = true
-      cmpBox.append(el("h4", null, t("Bandingkan dengan nilai di dokumen yang direview")))
-      const g = row()
-      const mk = (lab, key) => numField(g, lab, key, { lo: 0, hi: 1e9, help: K("0 = tidak dibandingkan") }, [() => S.cmp[key], (v) => { S.cmp[key] = v }])
-      mk(t("Penurunan segera di dokumen (mm)"), "si"); mk(t("Konsolidasi primer di dokumen (mm)"), "sc"); mk(T("Total {} th di dokumen (mm)", fmtG(S.life)), "tot")
-      numField(g, t("Toleransi (%)"), "tol", { lo: 0.5, hi: 50 }, [() => S.cmp.tol, (v) => { S.cmp.tol = v }])
-      cmpBox.append(g, el("div", "cmpres"))
-      cmpBox.querySelectorAll("input").forEach((i) => i.addEventListener("input", () => { setTimeout(() => { save(); renderCmp() }, 0) }))
-    }
-    const out = cmpBox.querySelector(".cmpres"); out.textContent = ""
-    if (!res) return
-    const items = [[t("Penurunan segera"), res.si * 1000, S.cmp.si], [t("Konsolidasi primer"), res.sc * 1000, S.cmp.sc], [T("Total {} th", fmtG(S.life)), res.s_life * 1000, S.cmp.tot]]
-    const rows = []
-    let bad = false
-    cmpRows = []
-    items.forEach(([lab, c, v]) => {
-      if (!(v > 0) || !c) return
-      const d = (v - c) / c, ok = Math.abs(d) <= S.cmp.tol / 100 + 1e-9
-      bad = bad || !ok
-      cmpRows.push([lab + " (mm)", c, v, d, ok])
-      rows.push([lab + " (mm)", fixed(c, 4), fixed(v, 4), fixed(d * 100, 1), ok ? t("✅ dalam toleransi") : t("⚠️ di luar toleransi")])
+      const del = el("button", "dz-x", "✕"); del.type = "button"; del.title = L("Hapus kasus", "Remove case"); del.onclick = () => { o.manual.splice(i, 1); if (o.sel === "man:" + i) o.sel = ""; changed(true) }
+      const w = el("div", "pj-manrow"); w.append(el("span", "pj-tag", c.kind === "deep" ? L("DALAM", "DEEP") : L("DANGKAL", "SHALLOW")), g, del)
+      list.append(w)
     })
-    if (rows.length) {
-      out.append(table([t("Besaran"), t("Hitung app"), t("Dokumen"), t("Selisih (%)"), t("Status")], rows))
-      if (bad) out.append(el("div", "warn", t("Ada selisih di luar toleransi. Periksa asumsi (beban, berat pondasi, parameter tanah, faktor beban/kombinasi, metode daya dukung) sebelum menjadikannya komentar.")))
-    } else out.append(el("p", "cap", t("Isi nilai dari dokumen untuk melihat selisihnya terhadap hitungan app.")))
+    const bar = el("div", "pj-row")
+    const a1 = el("button", "dz-add", L("＋ Kasus dangkal", "＋ Shallow case")); a1.type = "button"
+    a1.onclick = () => { o.manual.push({ kind: "shallow", label: L("Telapak manual", "Manual footing"), shape: "persegi", B: 3, L: 3, Df: 1.5, q: 150 }); changed(true) }
+    const a2 = el("button", "dz-add", L("＋ Kasus tiang", "＋ Pile case")); a2.type = "button"
+    a2.onclick = () => { o.manual.push({ kind: "deep", label: L("Kelompok tiang manual", "Manual pile group"), pk: "pipe", method: "api", D: 406.4, t: 12.7, Lp: 18, n: 9, z0: 1.5, Bg: 3.0, Lg: 3.0, Q: 3000 }); changed(true) }
+    bar.append(a1, a2)
+    manBox.append(card("s-man", "✍️", L("Kasus manual (pondasi lain)", "Manual cases (other foundations)"), `${(o.manual || []).length}`, [list, bar], (o.manual || []).length > 0))
   }
-  let cmpRows = []
-
-  // ------------------------------------------------------------ unduh
-  function mdText() {
-    const o = (s) => t(s)
-    const I = lastIn
-    const inp = [[t("Bentuk / B / L (m)"), `${t(SHAPES[I.foot.shape])} / ${I.foot.B} / ${I.foot.shape === "persegi" ? I.foot.L : "-"}`], [t("Df (m) / q bruto (kPa)"), `${I.soil.Df} / ${fixed(I.q, 1)}`],
-      [t("Tanah di atas dasar γ / γ jenuh / MAT (m)"), `${I.soil.gamma_up} / ${I.soil.gsat_up} / ${I.soil.Dw !== null ? I.soil.Dw : t("tanpa air")}`],
-      [t("Metode tegangan / kekakuan / dz"), `${S.method} / ${S.rig} / ${S.dz} m`], [t("Umur rencana (tahun) / batas total (mm)"), `${S.life} / ${S.allow}`]]
-    I.soil.layers.forEach((ly, i) => inp.push([`${T("Lapis {} {}", i + 1, ly.name || "")}`.trim(),
-      `H ${ly.H} m · γ ${ly.gamma}/${ly.gsat} · E ${fmtG(ly.E / 1000)} MPa · ν ${ly.nu}` + (ly.clay ? ` · ${t("lempung")} e0 ${ly.e0} Cc ${ly.Cc} Cs ${ly.Cs} OCR ${ly.OCR} cv ${ly.cv} ${ly.double ? t("2 arah") : t("1 arah")} Cαε ${ly.Ca}` : "")]))
-    const r2 = (x) => (x == null ? "" : Math.round(x * 100) / 100)
-    const resRows = [[t("Tekanan bersih (kPa)"), r2(res.q_net)], [t("Penurunan segera (mm)"), r2(res.si * 1000)], [t("Konsolidasi primer (mm)"), r2(res.sc * 1000)],
-      [t("Kompresi sekunder pada umur rencana (mm)"), r2(res.ss_life * 1000)], [T("Total pada {} tahun (mm)", fmtG(S.life)), r2(res.s_life * 1000)],
-      [t("Waktu 50 % konsolidasi (tahun)"), res.t50 == null ? "-" : Math.round(res.t50 * 1000) / 1000], [t("Waktu 90 % konsolidasi (tahun)"), res.t90 == null ? "-" : Math.round(res.t90 * 1000) / 1000]]
-    const L = [`# ${t("Cek independen penurunan pondasi dangkal")}`, "", t("Penurunan pondasi dangkal: penurunan segera (Steinbrenner), konsolidasi primer lempung (Terzaghi, sublapis, muka air tanah), kecepatan konsolidasi, dan kompresi sekunder opsional. Perhitungan independen dengan YMD-CAL; bandingkan dengan dokumen yang direview dan konfirmasikan asumsi (modulus, parameter konsolidasi, metode tegangan)."), ""]
-    L.push(`## ${t("Masukan")}`, "", ...inp.map(([a, b]) => `- ${a}: ${b}`), "", `## ${t("Hasil")}`, "", ...resRows.map(([a, b]) => `- ${a}: ${b}`), "", `## ${t("Pengecekan")}`, "",
-      ...res.checks.map(([n, ok, d]) => `- ${ok ? "OK" : "NOT OK"} — ${t(n)}: ${tdet(d)}`), "")
-    if (cmpRows.length) {
-      L.push(`## ${t("Perbandingan dengan nilai di dokumen yang direview")}`, "")
-      cmpRows.forEach(([k, c, v, d, ok]) => L.push(`- ${k}: ${t("hitung app")} = ${Number(c.toPrecision(4))}; ${t("dokumen")} = ${Number(v.toPrecision(4))}; ${t("selisih")} ${d >= 0 ? "+" : ""}${fixed(d * 100, 1)} % — ${ok ? "OK" : t("di luar toleransi")}`))
-      L.push("")
+  async function recompute() {
+    const ds = soilDS(P)
+    cases = await collectCases(P, ctx.lang)
+    results = cases.map((c) => ({ c, r: computeCase(P, ds, c) }))
+    if (!results.find((x) => x.c.id === o.sel)) o.sel = results.length ? results[0].c.id : ""
+    drawList(); drawDetail()
+  }
+  function drawList() {
+    listBox.textContent = ""
+    const grid = el("div", "pj-cases")
+    results.forEach(({ c, r }, i) => {
+      const a = el("button", "pj-case dz-in" + (c.id === o.sel ? " on" : "")); a.type = "button"; a.style.setProperty("--i", i)
+      const top = el("div", "pj-case-top"); top.append(el("span", "pj-case-ic", c.icon), el("b", null, c.title.split(" (")[0]), el("span", "pj-tag" + (c.kind === "deep" ? " deep" : ""), c.kind === "deep" ? L("DALAM", "DEEP") : L("DANGKAL", "SHALLOW")))
+      a.append(top)
+      if (r.error) a.append(el("small", "pj-err", r.error))
+      else {
+        const ur = r.s / r.allow
+        const v = el("div", "pj-case-v"); v.append(el("b", urClass(ur), `${nf(r.s, 1)} mm`), el("span", null, `/ ${nf(r.allow, 0)} mm`))
+        const bar = el("div", "dz-bar"), fill = el("i", urClass(ur)); fill.style.transform = `scaleX(${Math.min(ur, 1.2) / 1.2})`; const mk = el("b"); mk.style.left = `${100 / 1.2}%`; bar.append(fill, mk)
+        a.append(v, bar, el("small", null, `si ${nf(r.si, 1)} · sc ${nf(r.sc, 1)} mm`))
+      }
+      a.onclick = () => { o.sel = c.id; projSave(P); drawList(); drawDetail(); detBox.scrollIntoView({ behavior: "smooth", block: "start" }) }
+      grid.append(a)
+    })
+    if (!results.length) grid.append(el("p", "dz-note", L("Belum ada kasus. Buka tab Desain atau tambah kasus manual.", "No cases yet. Open the Design tab or add a manual case.")))
+    listBox.append(card("s-list", "📋", L("Daftar pondasi (otomatis dari Desain + manual)", "Foundation list (automatic from Design + manual)"), `${results.length}`, grid))
+  }
+  function drawDetail() {
+    detBox.textContent = ""
+    const it = results.find((x) => x.c.id === o.sel)
+    const ds = soilDS(P)
+    last = buildOut(P, ds, results, it)
+    if (it) {
+      const { c, r } = it
+      const body = []
+      if (r.error) body.push(el("p", "dz-note", r.error))
+      else {
+        const k = el("div", "pj-kpis")
+        const items = r.kind === "deep" ? [[L("Pemendekan elastis se", "Elastic shortening se"), r.st.se * 1000], [L("Segera (rakit) si", "Immediate (raft) si"), r.st.si * 1000], [L("Konsolidasi sc", "Consolidation sc"), r.st.sc * 1000], [L(`Total ${nf(o.life, 0)} th`, `Total ${nf(o.life, 0)} yr`), r.s], [L("Izin", "Allowable"), r.allow], [L("Vesic (pembanding)", "Vesic (comparison)"), r.st.sgV * 1000]]
+          : [[L("Segera si", "Immediate si"), r.res.si * 1000], [L("Konsolidasi primer sc", "Primary consolidation sc"), r.res.sc * 1000], [L("Sekunder", "Secondary"), r.res.ss_life * 1000], [L(`Total ${nf(o.life, 0)} th`, `Total ${nf(o.life, 0)} yr`), r.s], [L("Total akhir", "Final total"), r.res.s_final * 1000 + r.res.ss_life * 1000], [L("Izin", "Allowable"), r.allow]]
+        items.forEach(([lab, v], i) => { const d = el("div", "pj-kpi dz-in" + (i === 3 ? " hi" : "")); d.style.setProperty("--i", i); d.append(el("span", null, lab), el("b", null, `${nf(v, 1)} mm`)); k.append(d) })
+        body.push(k)
+        if (r.res) body.push(el("p", "dz-note", `t50 = ${r.res.t50 == null ? "–" : nf(r.res.t50, 2)} · t90 = ${r.res.t90 == null ? "–" : nf(r.res.t90, 2)} ${L("tahun", "years")} · q ${L("bersih", "net")} = ${nf(toDisp("Q", r.res.q_net), 1)} ${uName("Q")}${r.kind === "deep" ? ` · ${L("rakit ekuivalen", "equivalent raft")} ${nf(r.st.Br, 2)} × ${nf(r.st.Lr, 2)} m @ z = ${nf(r.st.zr, 2)} m` : ""}`))
+        const figs = el("div", "pj-figs")
+        last.drawings.forEach((d) => { if (d.detail) { const f = el("figure", "dz-fig pj-fig"); try { f.append(d.make("screen")) } catch (e) { f.append(el("div", "err", e.message)) } f.append(el("figcaption", "dz-cap", d.cap)); figs.append(f) } })
+        body.push(figs)
+        last.tables.filter((t) => t.detail).forEach((t) => {
+          if (!t.fold) { body.push(tableView(t)); return }
+          const d = el("details", "dz-tdet"); const sm = el("summary", null, t.title); sm.append(el("span", "dz-badge", String(t.rows.length))); d.append(sm, tableView({ ...t, title: "" })); body.push(d)
+        })
+        last.steps.forEach((st) => { const t = tableView({ title: st.h, cols: [L("Besaran", "Quantity"), L("Rumus", "Formula"), L("Substitusi", "Substitution"), L("Hasil", "Result")], rows: st.rows, align: ["l", "l", "l", "r"] }); t.classList.add("dz-steptbl"); body.push(t) })
+        if (c.href) { const a = el("a", "pj-link"); a.href = c.href; a.append(el("span", "pj-link-ic", c.icon), (() => { const x = el("span"); x.append(el("b", null, L("Buka modul desain", "Open design module")), el("small", null, c.sub || "")); return x })(), el("span", "pj-go", "→")); body.push(a) }
+      }
+      detBox.append(card("s-det", "🔬", `${L("Rincian", "Details")} — ${c.title.split(" (")[0]}`, c.kind === "deep" ? L("TIANG", "PILES") : L("DANGKAL", "SHALLOW"), body))
     }
-    L.push(`_${t("Batas: perhitungan elastis/konsolidasi satu dimensi sederhana sebagai pembanding, lapisan mendatar dan beban merata. Lihat tab Rumus & batasan.")}_`)
-    return { md: L.join("\n"), inp, resRows }
+    exportBar(expBox, () => last, { project: P.info })
+    reveal(box)
   }
-  function csvText(m) {
-    const q = (v) => { const s = String(v == null ? "" : v); return /[",;\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s }
-    const blocks = [[t("Masukan"), [[t("Parameter"), t("Nilai")], ...m.inp]], [t("Hasil"), [[t("Besaran"), t("Nilai")], ...m.resRows]],
-      [t("Sublapis"), [[t("Lapis"), t("z tengah (m)"), t("Δσ (kPa)"), t("σ'0 (kPa)"), t("σ'p (kPa)"), t("Sc (mm)")], ...res.subs.map((s) => [s.lapis, fixed(s.z_tengah, 2), fixed(s.ds, 2), fixed(s.s0, 2), fixed(s.sp, 2), fixed(s.sc * 1000, 3)])]],
-      [t("Waktu"), [[t("Waktu (tahun)"), t("Penurunan (mm)")], ...res.curve.map(([a, b]) => [fixed(a, 4), fixed(b * 1000, 2)])]],
-      [t("Pengecekan"), [[t("Pengecekan"), t("Status"), t("Keterangan")], ...res.checks.map(([n, o, d]) => [t(n), o ? "OK" : "NOT OK", tdet(d)])]]]
-    return "﻿" + blocks.map(([h, rows]) => [q(h), ...rows.map((r) => r.map(q).join(","))].join("\n")).join("\n\n") + "\n"
-  }
-  function download(name, text, mime) {
-    const a = el("a"); a.href = URL.createObjectURL(new Blob([text], { type: mime })); a.download = name
-    document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove() }, 500)
-  }
-  function renderExport() {
-    expBox.textContent = ""
-    if (!res) return
-    expBox.append(el("h4", null, t("Unduh")))
-    const g = el("div", "btns")
-    const b1 = el("button", "pri", t("⬇️ Ringkasan (.md)")), b2 = el("button", "pri", t("⬇️ Tabel (.csv, bisa dibuka di Excel)")), b3 = el("button", "pri", t("🖨️ Cetak / simpan PDF"))
-    b1.type = b2.type = b3.type = "button"
-    b1.onclick = () => download("Cek_Penurunan_Pondasi.md", mdText().md, "text/markdown")
-    b2.onclick = () => download("Cek_Penurunan_Pondasi.csv", csvText(mdText()), "text/csv")
-    b3.onclick = () => window.print()
-    g.append(b1, b2, b3); expBox.append(g)
-  }
-
-  renderForm(); renderResults()
+  drawCrit(); drawManual(); recompute()
 }
 
-// ---------------------------------------------------------------- gambar
-function nice(maxv, n) {
-  const raw = maxv / n, p = 10 ** Math.floor(Math.log10(raw)), f = raw / p
-  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p
+// ---------------------------------------------------------------- hasil untuk tampilan & ekspor
+function buildOut(P, ds, results, it) {
+  const o = P.settle, uQ = uName("Q")
+  const sum = { title: L("Ringkasan penurunan semua pondasi", "Settlement summary, all foundations"), cols: [L("Pondasi", "Foundation"), L("Tipe", "Type"), "si (mm)", "sc (mm)", `${L("Total", "Total")} ${nf(o.life, 0)} ${L("th", "yr")} (mm)`, L("Izin (mm)", "Allow. (mm)"), "UR", "Status"],
+    rows: results.map(({ c, r }) => (r.error ? [c.title, c.kind === "deep" ? L("dalam", "deep") : L("dangkal", "shallow"), "–", "–", "–", "–", "–", r.error] : { cells: [c.title.split(" (")[0], c.kind === "deep" ? L("dalam (tiang)", "deep (piles)") : L("dangkal", "shallow"), r.si, r.sc, r.s, r.allow, r.s / r.allow, r.s <= r.allow ? "OK" : "NOT OK"], cls: r.s <= r.allow ? "" : "bad" })),
+    dec: [null, null, 1, 1, 1, 0, 3, null], align: ["l", "l", "r", "r", "r", "r", "r", "l"] }
+  const checks = results.filter(({ r }) => !r.error).map(({ c, r }) => ({ grp: L("Penurunan", "Settlement"), item: `${c.title.split(" (")[0]} — ${c.kind === "deep" ? L("kelompok tiang", "pile group") : L("pondasi dangkal", "shallow foundation")}`, ref: c.kind === "deep" ? "SNI 8460 §10 · Tomlinson" : "SNI 8460 §9 · Steinbrenner + Terzaghi", dem: r.s, cap: r.allow, unit: "mm", ur: r.s / r.allow, ok: r.s <= r.allow + 1e-9, d: 1, note: `si ${nf(r.si, 1)} + sc ${nf(r.sc, 1)} mm` }))
+  const tables = [sum], drawings = [], steps = []
+  if (it && !it.r.error) {
+    const { c, r } = it, x = r.res
+    if (x) {
+      tables.push({ detail: true, title: L("Penurunan segera per lapis (Steinbrenner)", "Immediate settlement per layer (Steinbrenner)"), cols: [L("Lapis", "Layer"), "H (m)", "E (MPa)", "ν", "si (mm)"],
+        rows: (x.si_layers || []).map((si, i) => { const ly = (r.layers || [])[i] || {}; return [`${i + 1} · ${ly.name || ""}`, ly.H ?? "", ly.E != null ? ly.E / 1000 : "", ly.nu ?? "", si * 1000] }), dec: [null, 2, 1, 2, 2], align: ["l", "r", "r", "r", "r"] })
+      tables.push({ detail: true, title: L("Konsolidasi per lapis lempung (Terzaghi)", "Consolidation per clay layer (Terzaghi)"), cols: [L("Lapis", "Layer"), "H (m)", "Hdr (m)", "cv (m²/th)", "sc (mm)", "t90 (th)"],
+        rows: x.cons.map((k) => [k.lapis, k.H, k.Hdr, k.cv, k.sc * 1000, k.t90 == null ? "–" : k.t90]), dec: [null, 2, 2, 2, 1, 2], align: ["l", "r", "r", "r", "r", "r"] })
+      tables.push({ detail: true, fold: true, title: L("Sublapis konsolidasi", "Consolidation sublayers"), cols: [L("Lapis", "Layer"), "z (m)", `σ'v0 (${uQ})`, `σ'p (${uQ})`, `Δσ (${uQ})`, "sc (mm)"],
+        rows: x.subs.map((k) => [k.lapis, k.z_tengah, toDisp("Q", k.s0), toDisp("Q", k.sp), toDisp("Q", k.ds), k.sc * 1000]), dec: [null, 2, 1, 1, 1, 2], align: ["l", "r", "r", "r", "r", "r"] })
+      drawings.push({ detail: true, make: (m) => { const Pp = palette(m); return lineChart(Pp, { title: L("Penurunan vs waktu", "Settlement vs time"), xLog: true, xLab: L("waktu (tahun, log)", "time (years, log)"), yLab: "s (mm)", yDown: true, yMin: 0,
+        series: [{ c: Pp.acc, w: 3, pts: x.curve.map(([t, s]) => [t, (s + (r.kind === "deep" ? r.st.se : 0)) * 1000]), fill: true }], hlines: [{ y: r.allow, label: `${L("izin", "allow.")} ${nf(r.allow, 0)} mm`, c: Pp.bad }], vlines: [{ x: o.life, label: `${nf(o.life, 0)} ${L("th", "yr")}` }] }) }, cap: L("Kurva penurunan terhadap waktu (segera + konsolidasi + sekunder)", "Settlement–time curve (immediate + consolidation + secondary)"), maxH: 300 })
+      drawings.push({ detail: true, make: (m) => { const Pp = palette(m); return lineChart(Pp, { title: L("Tegangan di bawah pusat pondasi", "Stress below foundation centre"), xLab: uQ, yLab: L("kedalaman di bawah dasar (m)", "depth below base (m)"), yDown: true, legendRight: true,
+        series: [{ name: "Δσ", c: Pp.bad, w: 3, pts: x.stress.map(([z, d]) => [toDisp("Q", d), z]) }, { name: "σ'v0", c: Pp.steel, dash: "6 4", pts: x.stress.map(([z, , s0]) => [toDisp("Q", s0), z]) }, { name: "0,1σ'v0", c: Pp.mut, dash: "2 4", w: 1.6, pts: x.stress.map(([z, , s0]) => [toDisp("Q", 0.1 * s0), z]) }] }) }, cap: L("Distribusi Δσ dan σ'v0 di bawah pusat (kedalaman pengaruh: Δσ ≈ 0,1σ'v0)", "Δσ and σ'v0 below the centre (influence depth: Δσ ≈ 0.1σ'v0)"), maxH: 300 })
+    }
+    drawings.push({ detail: true, make: (m) => sectionDraw(ds, it, palette(m)), cap: L("Potongan pondasi & profil tanah (tab Tanah)", "Foundation section & soil profile (Soil tab)"), maxH: 300 })
+    if (r.kind === "deep") steps.push({ h: L("Penurunan kelompok tiang", "Pile group settlement"), rows: [
+      [L("Beban per tiang", "Load per pile"), "Q/n", `${nf(r.g.Q, 1)} / ${r.g.n}`, `${nf(r.st.Qpile, 1)} kN`],
+      [L("Bagian ujung / selimut", "Tip / shaft share"), "Qp = Q·Qb/Qu ; Qs = Q − Qp", `Qb/Qu = ${nf(r.st.ratioB, 3)}`, `${nf(r.st.Qp, 1)} / ${nf(r.st.Qs, 1)} kN`],
+      [L("Pemendekan elastis", "Elastic shortening"), "se = (Qp + 0,5·Qs)·L/(Ap·Ep)", `L ${nf(r.g.Lp, 2)} m, Ap·Ep ${nf(r.g.Ap * r.g.Ep / 1000, 0)} MN`, `${nf(r.st.se * 1000, 2)} mm`],
+      [L("Rakit ekuivalen", "Equivalent raft"), r.st.endB ? L("di ujung tiang (dukung ujung)", "at pile tip (end bearing)") : "z = z0 + 2L/3 ; B' = Bg + 2·(2L/3)/4", `Bg × Lg = ${nf(r.g.Bg, 2)} × ${nf(r.g.Lg, 2)} m`, `${nf(r.st.Br, 2)} × ${nf(r.st.Lr, 2)} m @ ${nf(r.st.zr, 2)} m`],
+      [L("Tekanan bersih rakit", "Raft net pressure"), "q = Q/(B'·L')", "", `${nf(toDisp("Q", r.st.qnet), 1)} ${uQ}`],
+      [L("Penurunan rakit", "Raft settlement"), "si (Steinbrenner) + sc (Terzaghi)", r.res ? `si ${nf(r.res.si * 1000, 1)} + sc ${nf(r.res.sc * 1000, 1)}` : "", r.res ? `${nf(r.res.s_life * 1000, 1)} mm` : "–"],
+      [L("Total", "Total"), "s = se + s,rakit", "", `${nf(r.s, 1)} mm`],
+      [L("Pembanding Vesic", "Vesic comparison"), "s1 = se + Cp·Qp/(D·qp) + Qs/(pL)·D/Es·(1 − ν²)·Iws ; sg = s1·√(Bg/D)", `s1 ${nf(r.st.s1 * 1000, 2)} mm`, `${nf(r.st.sgV * 1000, 1)} mm`]] })
+    else steps.push({ h: L("Penurunan pondasi dangkal", "Shallow foundation settlement"), rows: [
+      [L("Pondasi", "Foundation"), SHAPE()[r.foot.shape], `B ${nf(r.foot.B, 2)}${r.foot.shape === "persegi" ? ` × L ${nf(r.foot.L, 2)}` : ""} m, Df ${nf(r.foot.Df, 2)} m`, ""],
+      [L("Tekanan bersih", "Net pressure"), "q = q bruto − σv0(Df)", `${nf(toDisp("Q", x.q_gross), 1)} − ${nf(toDisp("Q", x.overburden), 1)}`, `${nf(toDisp("Q", x.q_net), 1)} ${uQ}`],
+      [L("Penurunan segera", "Immediate settlement"), "si = Σ q·B'·(1 − ν²)/E·(Is,bawah − Is,atas)·4·Fr", `${RIG()[o.rig]}`, `${nf(x.si * 1000, 1)} mm`],
+      [L("Konsolidasi primer", "Primary consolidation"), "sc = Σ H/(1 + e0)·[Cs·log(σ'p/σ'0) + Cc·log((σ'0 + Δσ)/σ'p)]", `Δσ ${o.method === "2:1" ? "2V:1H" : "Boussinesq"}`, `${nf(x.sc * 1000, 1)} mm`],
+      [L("Derajat konsolidasi", "Degree of consolidation"), "Tv = cv·t/Hdr² → U(Tv)", `t = ${nf(o.life, 1)} ${L("th", "yr")}`, `t90 = ${x.t90 == null ? "–" : nf(x.t90, 2)} ${L("th", "yr")}`],
+      [L("Sekunder", "Secondary"), "ss = Cα/(1 + e0)·H·log(t/tp)", "", `${nf(x.ss_life * 1000, 1)} mm`],
+      [L("Total pada umur rencana", "Total at design life"), "s = si + U·sc + ss", "", `${nf(r.s, 1)} mm`]] })
+  }
+  const worst = results.filter((x) => !x.r.error).reduce((a, b) => (!a || b.r.s / b.r.allow > a.r.s / a.r.allow ? b : a), null)
+  return {
+    file: "Penurunan_Pondasi", suite: L("PENURUNAN PONDASI", "FOUNDATION SETTLEMENT"), title: L("Penurunan Pondasi — Dangkal & Dalam", "Foundation Settlement — Shallow & Deep"), sub: `${results.length} ${L("pondasi", "foundations")} · ${L("umur", "life")} ${nf(o.life, 0)} ${L("th", "yr")} · ${o.method === "2:1" ? "2V:1H" : "Boussinesq"} · ${P.soil.name}`,
+    refs: "SNI 8460:2017 §9–10 · Steinbrenner (1934) · Terzaghi · Das · Tomlinson · Vesic (1977)",
+    metrics: [{ lab: L("Jumlah pondasi", "Foundations"), val: String(results.length) }, { lab: L("Penurunan terbesar", "Largest settlement"), val: worst ? worst.r.s : 0, d: 1, unit: "mm" }, { lab: L("Pondasi penentu", "Governing"), val: worst ? worst.c.title.split(" (")[0] : "–" }, { lab: L("Umur rencana", "Design life"), val: o.life, d: 0, unit: L("th", "yr") }],
+    checks, kv: [{ title: L("Kriteria", "Criteria"), rows: [[L("Umur rencana", "Design life"), o.life, L("tahun", "years"), 0], [L("Batas dangkal / tiang", "Limit shallow / pile"), `${nf(o.allow, 0)} / ${nf(o.allowDeep, 0)} mm`], ["Δσ", o.method === "2:1" ? "2V:1H" : "Boussinesq"], [L("Kekakuan", "Rigidity"), RIG()[o.rig]], [L("Sublapis", "Sublayer"), o.dz, "m", 2]] }],
+    tables, drawings, steps, combos: [], cases: {},
+    notes: [L("Parameter tanah (E, ν, e0, Cc, Cs, OCR, cv, Cα) dari tab Tanah (korelasi atau nilai manual). Tegangan awal memakai γ dan muka air tanah dari profil yang sama.", "Soil parameters (E, ν, e0, Cc, Cs, OCR, cv, Cα) from the Soil tab (correlated or manual). Initial stresses use γ and groundwater of the same profile."),
+      L("Kelompok tiang: rakit ekuivalen (Terzaghi–Peck/Tomlinson) pada 2L/3 dengan sebaran 1H:4V untuk tiang gesek atau di ujung tiang untuk tiang dukung ujung; ditambah pemendekan elastis tiang. Vesic ditampilkan sebagai pembanding.", "Pile groups: equivalent raft (Terzaghi–Peck/Tomlinson) at 2L/3 with 1H:4V spread for friction piles or at the pile tip for end-bearing piles; plus pile elastic shortening. Vesic shown for comparison.")],
+  }
 }
-
-function timeChart(res, t) {
-  const W = 420, H = 260, ml = 52, mr = 12, mt = 12, mb = 38
-  const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img" })
-  const pts = res.curve.map(([tt, s]) => [tt, s * 1000])
-  const ymin = Math.min(...pts.map((p) => p[1])), ymax = Math.max(...pts.map((p) => p[1]))
-  const y0 = Math.max(0, ymin - (ymax - ymin) * 0.05), y1 = ymax + (ymax - ymin) * 0.05 + 1e-9
-  const X = (tt) => ml + (Math.log10(tt) + 2) / 4 * (W - ml - mr)
-  const Y = (s) => mt + (s - y0) / (y1 - y0) * (H - mt - mb)
-  svg.append(sv("rect", { x: ml, y: mt, width: W - ml - mr, height: H - mt - mb, class: "ch-bg" }))
-  for (let d = -2; d <= 2; d++) {
-    const x = X(10 ** d)
-    svg.append(sv("line", { x1: x, y1: mt, x2: x, y2: H - mb, class: "ch-grid" }), sv("text", { x, y: H - mb + 15, class: "ch-tx", "text-anchor": "middle" }, fmtG(10 ** d)))
+function sectionDraw(ds, it, P) {
+  const { c, r } = it, W = 760, H = 420, s = root(W, H, P, L("Potongan pondasi", "Foundation section"))
+  const deep = r.kind === "deep", B = deep ? r.g.Bg : r.foot.B, Df = deep ? r.g.z0 : r.foot.Df
+  const zr = deep ? (r.st.zr + Math.max(r.st.Br, 2) * 1.5) : Df + Math.max(B, 1) * 2.5, depth = Math.min(Math.max(zr, deep ? r.g.z0 + r.g.Lp + 3 : 6), ds.depth + 5)
+  const top = 50, ky = (H - top - 26) / depth, kx = deep ? (W - 380) / Math.max(r.st.Br, B * 1.3, 1) : Math.min((W - 300) / Math.max(B * 1.6, 1), ky * 2), cx = 330, Y = (z) => top + z * ky, X = (x) => cx + x * kx
+  T(s, 16, 28, `${c.title.split(" (")[0]} — ${deep ? L("kelompok tiang & rakit ekuivalen", "pile group & equivalent raft") : L("pondasi dangkal", "shallow foundation")}`, { c: P.ink, fs: 14, b: true })
+  for (const l of ds.layers) { if (l.z0 > depth) break; Rect(s, 16, Y(l.z0), W - 32, (Math.min(l.z1, depth) - l.z0) * ky, l.coh ? P.clay : P.sand, null, { op: 0.45 }); T(s, W - 22, Y(l.z0) + 15, `${typeName(l.type)} · ${l.coh ? "cu " + nf(l.cu, 0) + " · Cc " + nf(l.Cc, 2) : "φ " + nf(l.phi, 0) + "°"} · E ${nf(l.E / 1000, 1)} MPa`, { c: P.ink, fs: 10.5, a: "end" }) }
+  if (ds.gwt < depth) { s.append(sv2("line", { x1: 16, x2: W - 16, y1: Y(ds.gwt), y2: Y(ds.gwt), stroke: P.water, "stroke-width": 2, "stroke-dasharray": "8 5" })); T(s, 22, Y(ds.gwt) - 5, `▽ MAT ${nf(ds.gwt, 1)} m`, { c: P.water, fs: 11 }) }
+  s.append(sv2("line", { x1: 16, x2: W - 16, y1: Y(0), y2: Y(0), stroke: P.ink, "stroke-width": 2 }))
+  if (deep) {
+    Rect(s, X(-B / 2), Y(Df - 0.8), B * kx, 0.8 * ky, P.conc, P.ink, { sw: 2 })
+    const n = Math.min(Math.round(Math.sqrt(r.g.n)), 8), w = Math.max(r.g.D * kx, 4)
+    for (let i = 0; i < n; i++) { const x = -B / 2 + r.g.D / 2 + (B - r.g.D) * (n > 1 ? i / (n - 1) : 0.5); Rect(s, X(x) - w / 2, Y(Df), w, r.g.Lp * ky, P.steel, P.ink, { sw: 1, cls: "dz-grow" }) }
+    const Br = r.st.Br
+    s.append(sv2("path", { d: `M${X(-B / 2)},${Y(Df)} L${X(-Br / 2)},${Y(r.st.zr)} L${X(Br / 2)},${Y(r.st.zr)} L${X(B / 2)},${Y(Df)}`, fill: "none", stroke: P.acc, "stroke-width": 1.6, "stroke-dasharray": "6 4" }))
+    Rect(s, X(-Br / 2), Y(r.st.zr) - 4, Br * kx, 8, P.acc, null, { op: 0.85 })
+    T(s, X(Br / 2) + 10, Y(r.st.zr) + 4, `${L("rakit ekuivalen", "equivalent raft")} ${nf(Br, 2)} m @ ${nf(r.st.zr, 2)} m`, { c: P.acc, fs: 11.5, b: true })
+  } else {
+    Rect(s, X(-B / 2), Y(Df - Math.min(0.6, Df || 0.6)), B * kx, Math.min(0.6, Df || 0.6) * ky, P.conc, P.ink, { sw: 2 })
+    // bola tegangan 2:1
+    s.append(sv2("path", { d: `M${X(-B / 2)},${Y(Df)} L${X(-B / 2 - (depth - Df) / 2)},${Y(depth)} M${X(B / 2)},${Y(Df)} L${X(B / 2 + (depth - Df) / 2)},${Y(depth)}`, stroke: P.acc, "stroke-width": 1.4, "stroke-dasharray": "6 4" }))
+    T(s, X(B / 2) + 10, Y(Df) + 16, `B ${nf(B, 2)} m · Df ${nf(Df, 2)} m · q ${nf(toDisp("Q", r.foot.q), 0)} ${uName("Q")}`, { c: P.ink, fs: 11.5, b: true })
   }
-  const step = nice(y1 - y0, 5)
-  for (let v = Math.ceil(y0 / step) * step; v <= y1; v += step) {
-    const y = Y(v)
-    svg.append(sv("line", { x1: ml, y1: y, x2: W - mr, y2: y, class: "ch-grid" }), sv("text", { x: ml - 6, y: y + 4, class: "ch-tx", "text-anchor": "end" }, fmtG(Math.round(v * 100) / 100)))
-  }
-  svg.append(sv("path", { d: pts.map((p, i) => (i ? "L" : "M") + X(p[0]).toFixed(1) + " " + Y(p[1]).toFixed(1)).join(" "), class: "ch-line" }))
-  svg.append(sv("text", { x: (ml + W - mr) / 2, y: H - 4, class: "ch-lb", "text-anchor": "middle" }, t("Waktu (tahun)")))
-  svg.append(sv("text", { x: 12, y: (mt + H - mb) / 2, class: "ch-lb", "text-anchor": "middle", transform: `rotate(-90 12 ${(mt + H - mb) / 2})` }, t("Penurunan (mm)")))
-  return svg
+  T(s, 16, H - 8, `${L("Total", "Total")} ${nf(r.s, 1)} mm ${L("dari izin", "of allowable")} ${nf(r.allow, 0)} mm`, { c: r.s <= r.allow ? P.ok : P.bad, fs: 12, b: true })
+  return s
 }
+const sv2 = (tag, a) => { const e = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const k in a) e.setAttribute(k, a[k]); return e }
 
-function profileSVG(foot, soil, res, t, T) {
-  const W = 1000, H = 620
-  const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, class: "profile", role: "img" })
-  svg.append(sv("rect", { x: 0, y: 0, width: W, height: H, fill: "#FAF9F7" }))
-  const B = foot.B, Df = soil.Df, ztot = soil.layers.reduce((a, l) => a + l.H, 0)
-  const xl = -1.6 * B, xr = 1.6 * B
-  const topY = -(0.9 + 0.04 * (Df + ztot)), botY = Df + ztot
-  const padx = 40, pady = 36
-  const k = Math.min((W * 0.55 - padx) / (xr - xl), (H - 2 * pady) / (botY - topY))
-  const ox = padx - xl * k, oy = pady - topY * k
-  const P = (x, y) => [ox + x * k, oy + y * k]
-  const rect = (a, b, fill, stroke) => { const [x1, y1] = P(a[0], a[1]), [x2, y2] = P(b[0], b[1]); svg.append(sv("rect", { x: Math.min(x1, x2), y: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1), fill, stroke: stroke || "none" })) }
-  const text = (p, s, fill, anchor, base) => svg.append(sv("text", { x: p[0], y: p[1], fill, "font-size": 21, "text-anchor": anchor, "dominant-baseline": base, "font-family": "Helvetica, Arial, sans-serif" }, s))
-  const cols = ["#E0D6C6", "#CDD6BE", "#DEC8B4", "#C4CCDA", "#D6C4D6", "#BED2CE"]
-  if (Df > 0) rect([xl, 0], [xr, Df], "#EBE4D6")
-  let z = Df
-  soil.layers.forEach((ly, i) => {
-    rect([xl, z], [xr, z + ly.H], ly.clay ? "#C8BCAA" : cols[i % cols.length], "#786E64")
-    text(P(xl + 0.08, z + ly.H / 2), `${ly.name || T("Lapis {}", i + 1)} · H = ${fmtG(ly.H)} m` + (ly.clay ? t(" (lempung)") : ""), "#322D28", "start", "middle")
-    z += ly.H
-  })
-  if (soil.Dw != null && soil.Dw >= 0 && soil.Dw <= botY) {
-    const a = P(xl, soil.Dw), b = P(xr, soil.Dw)
-    svg.append(sv("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: "#1E64A0", "stroke-width": 3 }))
-    text([b[0] - 6, a[1] - 3], t("MAT"), "#1E64A0", "end", "text-after-edge")
-  }
-  const g0 = P(xl, 0), g1 = P(xr, 0)
-  svg.append(sv("line", { x1: g0[0], y1: g0[1], x2: g1[0], y2: g1[1], stroke: "#463E37", "stroke-width": 3 }))
-  const fh = Math.max(0.25, 0.06 * ztot)
-  rect([-B / 2, Df - fh], [B / 2, Df], "#8C96A5", "#463E37")
-  for (let i = 0; i < 5; i++) {
-    const xx = -B / 2 + B * i / 4, a = P(xx, Df - fh - 0.5), b = P(xx, Df - fh)
-    svg.append(sv("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: "#C83C28", "stroke-width": 2 }))
-  }
-  text(P(0, Df - fh - 0.6), T("q = {} kPa (bersih {})", fmtG(res.q_gross), Math.round(res.q_net)), "#C83C28", "middle", "text-after-edge")
-  const gx0 = W * 0.62, gx1 = W - padx, qmax = Math.max(res.q_net, 1e-9)
-  const yTop = P(0, Df)[1], yBot = P(0, Df + ztot)[1]
-  const pts = res.stress.map(([zz, ds]) => [gx0 + (gx1 - gx0) * ds / qmax, P(0, Df + zz)[1]])
-  svg.append(sv("polygon", { points: [[gx0, pts[0][1]], ...pts, [gx0, pts[pts.length - 1][1]]].map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" "), fill: "#CDDEF0" }))
-  svg.append(sv("line", { x1: gx0, y1: yTop, x2: gx0, y2: yBot, stroke: "#3C3732", "stroke-width": 2 }))
-  svg.append(sv("polyline", { points: pts.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" "), fill: "none", stroke: "#1E64A0", "stroke-width": 3 }))
-  text([gx0, yTop - 10], t("Δσ di bawah titik tengah (kPa)"), "#1E64A0", "start", "alphabetic")
-  text([gx1, pts[0][1] + 4], String(Math.round(res.q_net)), "#1E64A0", "end", "hanging")
-  text([gx0 + (gx1 - gx0) * 0.5, yBot + 8], T("Si = {} mm · Sc = {} mm", Math.round(res.si * 1000), Math.round(res.sc * 1000)), "#3C3732", "middle", "hanging")
-  return svg
+// laporan semua pondasi (tab Laporan)
+export async function settleReport(P, lng) {
+  const ds = soilDS(P), cases = await collectCases(P, lng)
+  const results = cases.map((c) => ({ c, r: computeCase(P, ds, c) }))
+  return { out: buildOut(P, ds, results, null), results }
 }
-
-// ---------------------------------------------------------------- teks "Rumus & batasan" (Indonesia; terjemahan lewat t())
-const INFO_ID = `**Tekanan bersih dan tegangan tambahan**
-- q bersih = q bruto di dasar pondasi − tegangan total overburden pada kedalaman Df (muka air tanah dihitung)
-- Boussinesq: persegi panjang di bawah titik tengah = 4 × (sudut Newmark) dengan I(m, n), m = (B/2)/z, n = (L/2)/z; lajur dihitung sebagai L/B = 1000; lingkaran Δσ = q[1 − (1 + (R/z)²)^(-3/2)]
-- Metode 2:1: Δσ = q·B·L / ((B + z)(L + z))
-
-**Penurunan segera (elastis)**
-- Steinbrenner: S = 4 · q · B' · (1 − ν²)/E · Is, B' = B/2; Is = F1 + (1 − 2ν)/(1 − ν) · F2 (dari m = L'/B' dan n = H/B'). Tanah berlapis: selisih penurunan di batas bawah dan atas tiap lapis dengan E dan ν lapis itu
-- Faktor kekakuan: fleksibel titik tengah ×1,00; fleksibel rata-rata ×0,85; kaku ×0,93 (nilai umum). Lingkaran dihitung sebagai persegi berluas sama. Tanpa faktor kedalaman (konservatif)
-- Lempung memakai E undrained (Eu) dengan ν = 0,5; pasir memakai E drained
-
-**Konsolidasi primer (Terzaghi 1D)**
-- Tiap lapis lempung dibagi sublapis ≤ dz; tegangan efektif awal σ'0 di tengah sublapis, σ'p = OCR × σ'0
-- Sc = H/(1 + e0) · [ Cs · log(σ'p/σ'0) + Cc · log((σ'0 + Δσ)/σ'p) ] (hanya Cs bila σ'0 + Δσ ≤ σ'p; hanya Cc bila σ'0 ≥ σ'p)
-
-**Waktu**
-- Tv = cv·t / Hdr², Hdr = H (drainase satu arah) atau H/2 (dua arah); U(Tv) dari deret eksak (Tv50 = 0,197; Tv90 = 0,848)
-- Kompresi sekunder (opsional): Ss = Cαε · H · log10(t / tp), tp = waktu U = 99 % (Tv = 1,78)
-
-**Batasan**
-- Lapis mendatar homogen, beban merata, pondasi tunggal (tanpa pengaruh pondasi tetangga), tegangan lebih pori awal seragam di tiap lapis lempung, tanpa penurunan akibat turunnya muka air tanah, tanpa pengaruh beban bertahap atau galian, tanpa tegangan pada tangki besar yang fleksibel di tanah lunak yang menuntut analisis khusus
-- Nilai bawaan (batas penurunan, distorsi sudut) adalah contoh umum, bukan kriteria proyek. Ikuti Design Basis dan kode yang dipakai dokumen.`
-
-function mdToDom(md) {
-  const box = document.createElement("div")
-  let ul = null
-  const inline = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
-  md.split("\n").forEach((line) => {
-    if (line.startsWith("- ")) {
-      if (!ul) { ul = document.createElement("ul"); box.append(ul) }
-      const li = document.createElement("li"); li.innerHTML = inline(line.slice(2)); ul.append(li)
-    } else if (line.trim()) {
-      ul = null
-      const p = document.createElement("p"); p.innerHTML = inline(line); box.append(p)
-    } else ul = null
-  })
-  return box
+// ringkasan untuk beranda
+export async function settleSummary(lng) {
+  const P = projLoad(), ds = soilDS(P), cases = await collectCases(P, lng)
+  const res = cases.map((c) => ({ c, r: computeCase(P, ds, c) })).filter((x) => !x.r.error)
+  const worst = res.reduce((a, b) => (!a || b.r.s / b.r.allow > a.r.s / a.r.allow ? b : a), null)
+  return { n: res.length, nBad: res.filter((x) => x.r.s > x.r.allow).length, worst: worst ? { title: worst.c.title, s: worst.r.s, allow: worst.r.allow, kind: worst.r.kind } : null }
 }

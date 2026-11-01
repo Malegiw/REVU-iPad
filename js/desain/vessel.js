@@ -3,6 +3,7 @@
 // gesek termal saddle geser (PIP STE03350/03360), baut angkur ACI 318M-14 Bab 17. Desain telapak & pedestal memakai mesin footing.js.
 import { L, chk, windOnBody, cfRound, seismicCoef } from "./core.js"
 import { analyzeFooting } from "./footing.js"
+import { pileLayout } from "./deep.js"
 import { anchorCheck, ANCHOR } from "./steel.js"
 import { barA } from "./core.js"
 
@@ -61,6 +62,7 @@ const pick = (vec, map) => map.flatMap((k) => vec.slice(5 * k, 5 * k + 5))
 
 export function analyzeVessel(I, combos) {
   const models = vesselModels(I)
+  if (I.fdType === "deep") models.forEach((m) => { m.piles = pileLayout(m.shape, m.B, m.L, I.psx, I.pce); m.pileD = I.pD / 1000 })
   const res = models.map((m) => {
     const cb = combos.map((c) => ({ ...c, vec: pick(c.vec, m.map) }))
     const r = analyzeFooting(m, cb, { qa: I.qa, mu: I.muB }, I.crit, { fc: I.fc, fy: I.fy, cover: I.cover, db: I.db }, { fc: I.fc, fy: I.fy, n: I.nBars, db: I.dbP, cover: 50, tie: 10 })

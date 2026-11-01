@@ -14,14 +14,19 @@ export function mountHome(app, ctx) {
   const tx = el("div", "hm-tx")
   const h1 = el("h1"); h1.innerHTML = `YMD<i>-CAL</i>`
   tx.append(el("span", "hm-kicker", L("Kalkulator desain sipil migas · offline", "Oil & gas civil design calculator · offline")), h1,
-    el("p", null, L("Desain pondasi tiang, tangki, vessel, peralatan dinamis, dan trafo dengan kombinasi beban SNI/ASCE, penurunan terhubung, serta laporan Excel & PDF.",
-      "Design piles, tanks, vessels, dynamic equipment and transformer foundations with SNI/ASCE load combinations, linked settlement, and Excel & PDF reports.")))
+    el("p", null, L("Satu proyek, satu alur: data tanah (N-SPT/CPT) → parameter gempa → desain pondasi dangkal atau dalam (tiang, tangki, vessel, peralatan dinamis, trafo) → penurunan → laporan Excel & PDF.",
+      "One project, one flow: soil data (SPT/CPT) → seismic parameters → shallow or deep foundation design (piles, tanks, vessels, dynamic equipment, transformers) → settlement → Excel & PDF report.")))
   const cta = el("div", "hm-cta")
-  const a1 = el("a", "hm-btn pri", L("Mulai desain →", "Start designing →")); a1.href = "#/desain"
+  const a1 = el("a", "hm-btn pri", L("Mulai dari data tanah →", "Start with soil data →")); a1.href = "#/tanah"
+  const a3 = el("a", "hm-btn", L("Desain", "Design")); a3.href = "#/desain"
   const a2 = el("a", "hm-btn", L("Alur produksi migas", "Oil & gas flow")); a2.href = "#/alur"
-  cta.append(a1, a2); tx.append(cta)
+  cta.append(a1, a3, a2); tx.append(cta)
   hero.append(logo, tx)
   app.append(hero)
+  // ---- alur proyek
+  const wf = el("div", "hm-sech"); wf.append(el("h2", null, L("Alur proyek", "Project workflow")), el("span", "hm-meta", L("Tanah → Gempa → Desain → Penurunan → Laporan", "Soil → Seismic → Design → Settlement → Report")))
+  const wfBox = el("div", "hm-wf")
+  app.append(wf, wfBox)
 
   // ---- dashboard
   const dh = el("div", "hm-sech"); dh.append(el("h2", null, L("Dashboard", "Dashboard")), el("span", "hm-meta", L("dihitung dari masukan terakhir", "computed from your latest inputs")))
@@ -53,10 +58,11 @@ export function mountHome(app, ctx) {
 
   // isi dashboard setelah halaman tampil (perhitungan semua modul ± 0,3 detik)
   setTimeout(async () => {
-    let D, P
+    let D, PJ
     try {
-      const [dm, pm] = await Promise.all([import("./desain_ui.js"), import("./penurunan_ui.js")])
-      D = dm.dashboard(ctx.lang); P = pm.settleSummary()
+      const [dm, pj] = await Promise.all([import("./desain_ui.js"), import("./project.js")])
+      D = dm.dashboard(ctx.lang); PJ = pj
+      wfBox.append(pj.stepper("", pj.projLoad()))
     } catch (e) { grid.textContent = ""; grid.append(el("div", "err", e.message)); return }
     if (!app.isConnected) return
     const okMods = D.mods.filter((m) => m.ok).length, nChk = D.mods.reduce((a, m) => a + (m.nChk || 0), 0), nBad = D.mods.reduce((a, m) => a + (m.nBad || 0), 0)
@@ -67,19 +73,21 @@ export function mountHome(app, ctx) {
       stat(L("Pemeriksaan", "Checks"), `${nChk - nBad} / ${nChk}`, nBad ? `${nBad} ${L("tidak OK", "not OK")}` : L("tanpa kegagalan", "no failures"), nBad ? "bad" : "ok"),
       stat(L("Penurunan terbesar", "Largest settlement"), sMax ? `${nf(sMax.settle.s, 1)} mm` : "–", sMax ? sMax.title.split(" (")[0] : "", sMax && sMax.settle.s > sMax.settle.allow ? "bad" : "ok"))
     const chips = el("div", "hm-chips")
-    ;[[L("Proyek", "Project"), D.project.name || "–"], ["Doc", D.project.doc || "–"], ["V", `${nf(D.site.V, 0)} m/s · ${D.site.exp}`], ["SDS", nf(D.sp.SDS, 3)], [L("Satuan", "Units"), D.units === "t" ? "ton · t/m²" : "kN · kPa"]]
+    ;[[L("Proyek", "Project"), D.project.name || "–"], ["Doc", D.project.doc || "–"], ["V", `${nf(D.site.V, 0)} m/s · ${D.site.exp}`], [L("Kelas situs", "Site class"), D.ss.cls], ["SDS", nf(D.sp.SDS, 3)], [L("Satuan", "Units"), D.units === "t" ? "ton · t/m²" : "kN · kPa"]]
       .forEach(([k, v]) => chips.append(el("span", null, `${k}: ${v}`)))
     stats.append(chips)
     grid.textContent = ""
     D.mods.forEach((m, i) => grid.append(tile(m, i, L)))
-    // tile penurunan
+    // tile penurunan (semua pondasi dari modul Desain)
     const t = el("a", "hm-tile in"); t.href = "#/penurunan"; t.style.setProperty("--i", D.mods.length)
     const top = el("div", "hm-tile-top"); top.append(el("span", "hm-ic", "📉"), el("b", null, L("Penurunan Pondasi", "Foundation Settlement")))
     t.append(top)
-    if (P.error) t.append(el("p", "hm-sub", P.error))
+    const st = D.mods.filter((m) => m.settle)
+    if (!sMax) t.append(el("p", "hm-sub", L("Belum ada hasil penurunan.", "No settlement results yet.")))
     else {
-      t.append(el("p", "hm-sub", `${P.shape === "lingkaran" ? "Ø" + nf(P.B, 2) : nf(P.B, 2) + " × " + nf(P.L, 2)} m · q ${nf(P.q, 1)} kPa${P.link ? " · 🔗 " + P.link.label : ""}`))
-      t.append(gauge(P.s / P.allow, `${nf(P.s, 1)} / ${nf(P.allow, 0)} mm`, P.ok, P.ok ? "✓ OK" : L("✕ melebihi izin", "✕ exceeds limit"), L("penurunan total vs izin", "total settlement vs limit")))
+      const w = st.reduce((a, m) => (!a || m.settle.s / m.settle.allow > a.settle.s / a.settle.allow ? m : a), null), ok = w.settle.s <= w.settle.allow
+      t.append(el("p", "hm-sub", `${st.length} ${L("pondasi", "foundations")} · ${st.filter((m) => m.settle.kind === "deep").length} ${L("tiang", "piled")} · ${L("penentu", "governing")}: ${w.title.split(" (")[0]}`))
+      t.append(gauge(w.settle.s / w.settle.allow, `${nf(w.settle.s, 1)} / ${nf(w.settle.allow, 0)} mm`, ok, ok ? "✓ OK" : L("✕ melebihi izin", "✕ exceeds limit"), L("segera + konsolidasi vs izin", "immediate + consolidation vs limit")))
     }
     t.append(el("span", "hm-open", L("Buka →", "Open →")))
     grid.append(t)
@@ -92,6 +100,7 @@ function tile(m, i, L) {
   a.append(top)
   if (m.error) { a.append(el("p", "hm-sub", m.error)); return a }
   a.append(el("p", "hm-sub", m.sub))
+  if (m.fdType) a.append(el("span", "hm-fd " + m.fdType, m.fdType === "deep" ? L("DALAM · tiang", "DEEP · piles") : L("DANGKAL", "SHALLOW")))
   a.append(gauge(m.gov ? m.gov.ur : 0, m.gov ? `UR ${isFinite(m.gov.ur) ? m.gov.ur.toFixed(3) : "∞"}` : "", m.ok, m.ok ? L("✓ OK", "✓ OK") : `✕ ${m.nBad} ${L("tidak OK", "not OK")}`, m.gov ? m.gov.item : ""))
   a.append(el("span", "hm-open", `${m.nCmb} ${L("kombinasi", "combinations")} · ${L("Buka →", "Open →")}`))
   return a
