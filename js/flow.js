@@ -43,8 +43,12 @@ export function mountFlow(parentElement, data, setTriggerValue) {
   // ---- narasi suara (Indonesia: suara wanita, Inggris: suara pria)
   const lang = data.lang === "en" ? "en" : "id"
   const VT = lang === "en"
-    ? { listen: "Listen to the story", play: "Play", pause: "Pause", resume: "Resume", stop: "Stop", auto: "Continue to next stage", voice: "Voice", speed: "Speed", none: "Voice narration is not supported in this browser.", male: "male voice", female: "female voice", nov: "no English voice installed — use Settings → Accessibility → Spoken Content → Voices" }
-    : { listen: "Dengarkan cerita", play: "Putar", pause: "Jeda", resume: "Lanjut", stop: "Berhenti", auto: "Lanjut otomatis ke tahap berikutnya", voice: "Suara", speed: "Kecepatan", none: "Narasi suara tidak didukung peramban ini.", male: "suara pria", female: "suara wanita", nov: "suara Bahasa Indonesia belum terpasang — buka Pengaturan → Aksesibilitas → Konten Lisan → Suara" }
+    ? { listen: "Listen to the story", play: "Play", pause: "Pause", resume: "Resume", stop: "Stop", auto: "Continue to next stage", voice: "Voice", speed: "Speed", none: "Voice narration is not supported in this browser.", male: "male voice", female: "female voice", nov: "no English voice installed — use Settings → Accessibility → Spoken Content → Voices",
+        src: "Voice source", rec: "Natural recording", dev: "Device voice", dl: "Save for offline", dling: "Saving", dlok: "Saved for offline", recOn: "natural recording",
+        tip: "Tip for a more natural device voice: download an Enhanced/Premium voice (iPad: Settings → Accessibility → Spoken Content → Voices → English → Daniel (Enhanced)) and pick it here." }
+    : { listen: "Dengarkan cerita", play: "Putar", pause: "Jeda", resume: "Lanjut", stop: "Berhenti", auto: "Lanjut otomatis ke tahap berikutnya", voice: "Suara", speed: "Kecepatan", none: "Narasi suara tidak didukung peramban ini.", male: "suara pria", female: "suara wanita", nov: "suara Bahasa Indonesia belum terpasang — buka Pengaturan → Aksesibilitas → Konten Lisan → Suara",
+        src: "Sumber suara", rec: "Rekaman alami", dev: "Suara perangkat", dl: "Simpan untuk offline", dling: "Menyimpan", dlok: "Tersimpan offline", recOn: "rekaman alami",
+        tip: "Tip suara perangkat lebih natural: unduh suara Enhanced/Premium (iPad: Pengaturan → Aksesibilitas → Konten Lisan → Suara → Bahasa Indonesia → Damayanti (Enhanced)), lalu pilih di sini." }
   let autoNext = true, chain = false
   const player = V.createPlayer(lang, {
     onState: (st) => { if (vbar) paintBar(st) },
@@ -59,7 +63,7 @@ export function mountFlow(parentElement, data, setTriggerValue) {
   }
   function voiceBar(segs) {
     const bar = el("div", "vbar")
-    if (!V.supported()) { bar.append(el("span", "vnote", VT.none)); return bar }
+    if (!V.supported() && !V.recCount(lang)) { bar.append(el("span", "vnote", VT.none)); return bar }
     vbar = bar
     const b = el("button", "vplay"); b.type = "button"; vbtn = b
     b.onclick = () => { if (player.state === "playing") { chain = false; player.pause() } else { chain = true; player.play() } }
@@ -76,12 +80,32 @@ export function mountFlow(parentElement, data, setTriggerValue) {
       const list = V.langVoices(lang), cur = V.pickVoice(lang)
       if (!list.length) { const o = el("option", null, VT.nov); vname.append(o); vname.disabled = true; return }
       vname.disabled = false
-      list.forEach((v) => { const o = el("option", null, `${v.name} (${v.lang})`); o.value = v.voiceURI; if (cur.v && cur.v.voiceURI === v.voiceURI) o.selected = true; vname.append(o) })
+      list.forEach((v) => { const q = V.qualityTag(v), o = el("option", null, `${v.name} (${v.lang})${q ? " " + q : ""}`); o.value = v.voiceURI; if (cur.v && cur.v.voiceURI === v.voiceURI) o.selected = true; vname.append(o) })
     }
     fill(); V.onVoices(fill)
-    vname.onchange = () => { V.setPreferred(lang, vname.value) }
-    const head = el("div", "vhead"); head.innerHTML = icoHTML("speaker"); head.append(el("b", null, VT.listen), el("small", null, lang === "en" ? VT.male : VT.female))
-    bar.append(head, b, st, eq, lab, sp, vname)
+    vname.onchange = () => { V.setPreferred(lang, vname.value); sync() }
+    const head = el("div", "vhead"); head.innerHTML = icoHTML("speaker"); const who = el("small"); head.append(el("b", null, VT.listen), who)
+    // sumber suara: rekaman alami (bila assets/voice tersedia) atau suara perangkat
+    const vsrc = el("select", "vrate vsrc"); vsrc.title = VT.src; vsrc.hidden = true
+    ;[["rec", VT.rec], ["dev", VT.dev]].forEach(([v, t]) => { const o = el("option", null, t); o.value = v; vsrc.append(o) })
+    const dl = el("button", "vstop vdl"); dl.type = "button"; dl.hidden = true; dl.innerHTML = icoHTML("download") + `<span>${VT.dl}</span>`
+    const tip = el("small", "vtip"); tip.hidden = true
+    const sync = () => {
+      const recN = V.recCount(lang), useRec = recN > 0 && V.srcGet() !== "dev"
+      vsrc.hidden = !recN; vsrc.value = V.srcGet(); dl.hidden = !useRec
+      vname.hidden = useRec
+      who.textContent = (lang === "en" ? VT.male : VT.female) + (useRec ? " · " + VT.recOn : "")
+      const pv = V.pickVoice(lang).v
+      tip.hidden = useRec || !V.supported() || (pv && V.quality(pv) >= 20); tip.textContent = VT.tip
+    }
+    vsrc.onchange = () => { V.srcSet(vsrc.value); const was = player.state === "playing"; player.stop(); chain = false; sync(); if (was) { chain = true; player.play() } }
+    dl.onclick = async () => {
+      dl.disabled = true
+      const r = await V.recDownload(lang, (k, n) => { dl.lastChild.textContent = `${VT.dling} ${k}/${n}` })
+      dl.lastChild.textContent = r.fail ? `${VT.dl} (${r.ok}/${r.n})` : VT.dlok; dl.disabled = !!(!r.fail && r.n)
+    }
+    sync(); V.onVoices(sync); V.recLoad().then(sync)
+    bar.append(head, b, st, eq, lab, sp, vsrc, vname, dl, tip)
     player.load(segs)
     paintBar("idle")
     return bar
@@ -133,10 +157,12 @@ export function mountFlow(parentElement, data, setTriggerValue) {
     })
     left.append(parts)
     // cerita dipecah per kalimat (disorot saat dibacakan)
-    const story = el("p", "story"), segs = [{ text: `${s.name}. ${s.fn}`, node: gist }]
-    V.sentences(s.story).forEach((t, k) => { const sp = el("span", "sen", t + " "); story.append(sp); segs.push({ text: t, node: sp }) })
+    // teks yang dibacakan = V.stageTexts (sama dengan generator rekaman tools/tts_elevenlabs.mjs)
+    const texts = V.stageTexts(s), ns = V.sentences(s.story).length
+    const story = el("p", "story"), segs = [{ text: texts[0], node: gist }]
+    texts.slice(1, 1 + ns).forEach((t) => { const sp = el("span", "sen", t + " "); story.append(sp); segs.push({ text: t, node: sp }) })
     const stepsL = list("ol", "steps", s.steps)
-    ;[...stepsL.children].forEach((li, k) => segs.push({ text: `${k + 1}. ${li.textContent}`, node: li }))
+    ;[...stepsL.children].forEach((li, k) => segs.push({ text: texts[1 + ns + k], node: li }))
     right.append(el("h4", null, U.story), story, el("h4", null, U.steps), stepsL)
     const io = el("dl", "io")
     io.append(el("dt", null, U.inp), el("dd", null, s.inp), el("dt", null, U.out), el("dd", null, s.out))

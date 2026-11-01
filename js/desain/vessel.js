@@ -58,11 +58,11 @@ export function vesselModels(I) {
   return [0, 1].map((k) => ({ label: k === 0 ? L("Saddle tetap", "Fixed saddle") : L("Saddle geser", "Sliding saddle"), shape: "rect", B: I.B, L: I.Lf, t: I.t, Df: I.Df, gs: I.gs, peds: [ped(0)], map: [k] }))
 }
 // ambil vektor pedestal sesuai peta model (telapak terpisah memakai satu pedestal saja)
-const pick = (vec, map) => map.flatMap((k) => vec.slice(5 * k, 5 * k + 5))
+export const pick = (vec, map) => map.flatMap((k) => vec.slice(5 * k, 5 * k + 5))
 
 export function analyzeVessel(I, combos) {
-  const models = vesselModels(I)
-  if (I.fdType === "deep") models.forEach((m) => { m.piles = pileLayout(m.shape, m.B, m.L, I.psx, I.pce); m.pileD = I.pD / 1000 })
+  const models = I.autoModels || vesselModels(I)
+  if (I.fdType === "deep" && !I.autoModels) models.forEach((m) => { m.piles = pileLayout(m.shape, m.B, m.L, I.psx, I.pce); m.pileD = I.pD / 1000 })
   const res = models.map((m) => {
     const cb = combos.map((c) => ({ ...c, vec: pick(c.vec, m.map) }))
     const r = analyzeFooting(m, cb, { qa: I.qa, mu: I.muB }, I.crit, { fc: I.fc, fy: I.fy, cover: I.cover, db: I.db }, { fc: I.fc, fy: I.fy, n: I.nBars, db: I.dbP, cover: 50, tie: 10 })

@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "provider": "ElevenLabs",
+ "note": "Belum ada rekaman. Jalankan workflow Actions \"Suara alami (ElevenLabs)\" atau tools/tts_elevenlabs.mjs (lihat README).",
+ "voices": {},
+ "files": {}
+}

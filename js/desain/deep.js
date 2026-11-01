@@ -2,49 +2,78 @@
 // manual) atau DALAM (kelompok tiang di bawah telapak yang menjadi pile cap). Untuk tiang: tata letak otomatis, kapasitas aksial dari tab Tanah
 // (α/β, N-SPT, CPT), efisiensi kelompok, lateral (Broms umum + Winkler kepala jepit), struktur tiang (AISC 360 pipa / SNI 2847 bor), pons tiang
 // pada cap, pelat tangki di atas tiang, kekakuan tiang (indikatif) untuk pondasi mesin, dan penurunan kelompok (rakit ekuivalen + pemendekan elastis).
-import { L, chk, nf, toDisp, uName, barA, GAMMA_C, clamp } from "./core.js"
+import { L, chk, nf, toDisp, uName, barA, GAMMA_C, clamp, govern } from "./core.js"
 import { pileAxial, pileLayers, settleGroup, settleShallow, shallowQa, AXIAL_METHOD, QA_METHOD } from "./soil.js"
 import { winkler, bromsGeneral, nhAuto, profile, pmGroup, convLab } from "./pile.js"
 import { pipeCapacity, h1, E_STEEL } from "./steel.js"
 import { pmCapacity, circlePoly, barsOnCircle, vcTwo, vcOne, asFlex, pickBars, phiMn, rhoTS } from "./rc.js"
-import { inside, planPoly } from "./footing.js"
+import { inside, planPoly, weights, resultant, pileGroup, pileReact, analyzeFooting } from "./footing.js"
 import { root, T, R as Rect, dim, palette } from "./draw.js"
+import { projLoad, soilDS } from "../project.js"
 import { sv } from "./ui.js"
 
-export const DEEP0 = { fdType: "shallow", qaSrc: "soil", pk: "pipe", pD: 406.4, pt: 12.7, popen: true, pFy: 310, pL: 18, pmeth: "api", psx: 1.25, pce: 0.5,
+// pSrc: "proj" = tiang rencana dari tab Tanah (acuan kapasitas) | "own" = diatur di modul; pLay: "auto" = jumlah tiang & ukuran cap dari kebutuhan
+// beban | "grid" = tata letak manual (s, ce) di telapak yang diisi; psD/pceD: jarak tiang & tepi dalam kelipatan D; tAuto: tebal cap/pelat dari geser & pons
+export const DEEP0 = { fdType: "shallow", qaSrc: "soil", fSize: "auto", pSrc: "proj", pLay: "auto", psD: 3, pceD: 1, psMax: 0, tAuto: true,
+  pk: "pipe", pD: 406.4, pt: 12.7, popen: true, pFy: 310, pL: 18, pmeth: "api", psx: 1.25, pce: 0.5,
   pfc: 30, pn: 8, pdb: 19, pfsC: 2.5, pfsT: 3.0, pfsL: 2.5, pyAllow: 12, sAllow: 0 }
 const BAR = { 13: "D13", 16: "D16", 19: "D19", 22: "D22", 25: "D25", 29: "D29", 32: "D32" }
 export const isDeep = (s) => s.fdType === "deep"
 
 // ---------------------------------------------------------------- formulir bersama: tipe pondasi
+// o: { tank, autoShallow (vessel/trafo), block (pondasi mesin: ukuran blok tetap) }
 export function fdSection(s, o = {}) {
-  const sh = (x) => !isDeep(x), dp = (x) => isDeep(x), man = (x) => !isDeep(x) && x.qaSrc === "manual", pipe = (x) => isDeep(x) && x.pk === "pipe", bor = (x) => isDeep(x) && x.pk === "bored"
+  const sh = (x) => !isDeep(x), dp = (x) => isDeep(x), man = (x) => !isDeep(x) && x.qaSrc === "manual"
+  const own = (x) => isDeep(x) && x.pSrc === "own", pipe = (x) => own(x) && x.pk === "pipe", bor = (x) => own(x) && x.pk === "bored"
+  const grid = (x) => isDeep(x) && x.pLay === "grid", auto = (x) => isDeep(x) && x.pLay !== "grid"
+  const projCard = { type: "custom", show: (x) => isDeep(x) && x.pSrc !== "own", render: () => projPileCard() }
   return { id: "fdt", icon: isDeep(s) ? "📍" : "🧱", sketch: (st) => skFound(st, o), badge: isDeep(s) ? L("DALAM · TIANG", "DEEP · PILES") : L("DANGKAL", "SHALLOW"),
-    t: L("Tipe pondasi & daya dukung (dari tab Tanah)", "Foundation type & capacity (from Soil tab)"),
-    note: isDeep(s) ? L(`Telapak menjadi <b>pile cap</b>; tiang ditata otomatis (jarak s, tepi ce). Kapasitas aksial dihitung dari profil <b>tab Tanah</b> dengan kepala tiang di dasar cap (Df). ${o.tank ? "Tangki: pelat penuh di atas tiang (ringwall diabaikan)." : ""}`, `The footing becomes a <b>pile cap</b>; piles are laid out automatically (spacing s, edge ce). Axial capacity uses the <b>Soil tab</b> profile with the pile head at cap base (Df). ${o.tank ? "Tank: full slab on piles (ringwall ignored)." : ""}`)
-      : L("Daya dukung izin qa dihitung dari profil <b>tab Tanah</b> (metode N-SPT / CPT / Vesic dipilih di sana) memakai B, L, Df pondasi ini, atau isi manual.", "Allowable bearing qa is computed from the <b>Soil tab</b> profile (N-SPT / CPT / Vesic chosen there) using this footing's B, L, Df, or enter it manually."),
+    t: L("Tipe pondasi & alur desain", "Foundation type & design flow"),
+    note: isDeep(s)
+      ? L(`Alur: <b>kapasitas tiang tunggal</b> (tiang rencana tab Tanah) → <b>beban</b> → <b>jumlah tiang</b> n ≥ P/(Qa·Eg) dicek dengan momen → <b>ukuran pile cap</b> dari jarak s & tepi ce${o.tank ? " (tangki: susunan <b>radial</b> cincin konsentris)" : ""} → <b>tebal & tulangan</b> → pemeriksaan → penurunan.`, `Flow: <b>single pile capacity</b> (Soil tab design pile) → <b>loads</b> → <b>number of piles</b> n ≥ P/(Qa·Eg) checked with moments → <b>pile cap size</b> from spacing s & edge ce${o.tank ? " (tank: <b>radial</b> concentric rings)" : ""} → <b>depth & reinforcement</b> → checks → settlement.`)
+      : L(`Alur: <b>qa dari tab Tanah</b> (N-SPT / CPT / Vesic) → <b>beban</b> → <b>ukuran telapak</b> A ≥ P/qa${o.autoShallow ? " (otomatis)" : ""} → <b>tebal & tulangan</b> → pemeriksaan → penurunan.`, `Flow: <b>qa from Soil tab</b> (N-SPT / CPT / Vesic) → <b>loads</b> → <b>footing size</b> A ≥ P/qa${o.autoShallow ? " (automatic)" : ""} → <b>depth & reinforcement</b> → checks → settlement.`),
     fields: [
       { k: "fdType", type: "seg", lab: L("Tipe pondasi", "Foundation type"), opts: { shallow: L("Dangkal (telapak/mat)", "Shallow (footing/mat)"), deep: L("Dalam (tiang)", "Deep (piles)") }, wide: true },
       { k: "qaSrc", type: "seg", lab: L("Sumber daya dukung qa", "Bearing capacity source"), opts: { soil: L("Data tanah (tab Tanah)", "Soil data (Soil tab)"), manual: L("Manual", "Manual") }, show: sh },
       { k: "qa", lab: L("Daya dukung izin qa", "Allowable bearing qa"), u: "Q", lo: 20, hi: 2000, show: man },
-      { k: "pk", type: "seg", lab: L("Jenis tiang", "Pile type"), opts: { pipe: L("Pipa baja (pancang)", "Steel pipe (driven)"), bored: L("Bor beton (cast in situ)", "Bored (cast in situ)") }, show: dp, wide: true,
-        on: (st, v) => { if (v === "bored") Object.assign(st, { pD: 600, psx: 1.8, pce: 0.6, pmeth: st.pmeth }); else Object.assign(st, { pD: 406.4, pt: 12.7, psx: 1.25, pce: 0.5 }) } },
-      { k: "pD", lab: L("Diameter tiang D", "Pile diameter D"), u: "mm", lo: 150, hi: 2000, show: dp },
+      ...(o.autoShallow ? [{ k: "fSize", type: "seg", lab: L("Ukuran telapak", "Footing size"), opts: { auto: L("Otomatis dari beban & qa", "Automatic from loads & qa"), manual: L("Manual (isian B, L, t)", "Manual (B, L, t inputs)") }, show: sh, wide: true, struct: true }] : []),
+      { k: "pSrc", type: "seg", lab: L("Tiang", "Pile"), opts: { proj: L("Tiang rencana (tab Tanah)", "Design pile (Soil tab)"), own: L("Atur di modul ini", "Set in this module") }, show: dp, wide: true, struct: true },
+      projCard,
+      { k: "pk", type: "seg", lab: L("Jenis tiang", "Pile type"), opts: { pipe: L("Pipa baja (pancang)", "Steel pipe (driven)"), bored: L("Bor beton (cast in situ)", "Bored (cast in situ)") }, show: own, wide: true,
+        on: (st, v) => { if (v === "bored") Object.assign(st, { pD: 600, psx: 1.8, pce: 0.6 }); else Object.assign(st, { pD: 406.4, pt: 12.7, psx: 1.25, pce: 0.5 }) } },
+      { k: "pD", lab: L("Diameter tiang D", "Pile diameter D"), u: "mm", lo: 150, hi: 2000, show: own },
       { k: "pt", lab: L("Tebal dinding t", "Wall thickness t"), u: "mm", lo: 4, hi: 50, show: pipe },
       { k: "popen", type: "seg", lab: L("Ujung tiang", "Pile tip"), opts: { true: L("Terbuka", "Open"), false: L("Tertutup", "Closed") }, show: pipe, on: (st, v) => { st.popen = v === "true" } },
       { k: "pFy", lab: "Fy", u: "MPa", lo: 200, hi: 600, show: pipe },
       { k: "pfc", lab: L("fc' tiang bor", "Bored pile fc'"), u: "MPa", lo: 20, hi: 50, show: bor },
       { k: "pn", lab: L("Jumlah tulangan memanjang", "Longitudinal bars"), u: "", lo: 6, hi: 40, show: bor },
       { k: "pdb", type: "sel", lab: L("Diameter tulangan", "Bar size"), opts: BAR, show: bor },
-      { k: "pL", lab: L("Panjang tiang di bawah cap Lp", "Pile length below cap Lp"), u: "m", lo: 3, hi: 80, show: dp },
-      { k: "pmeth", type: "seg", lab: L("Metode kapasitas aksial", "Axial capacity method"), opts: { api: "α/β", spt: "N-SPT", cpt: "CPT" }, show: dp, help: L("α/β: API RP 2GEO (pancang) / FHWA GEC 10 (bor); N-SPT: Meyerhof; CPT: LCPC.", "α/β: API RP 2GEO (driven) / FHWA GEC 10 (bored); N-SPT: Meyerhof; CPT: LCPC.") },
-      { k: "psx", lab: L("Jarak tiang s (grid)", "Pile spacing s (grid)"), u: "m", lo: 0.5, hi: 6, show: dp, struct: true },
-      { k: "pce", lab: L("Pusat tiang ke tepi cap ce", "Pile centre to cap edge ce"), u: "m", lo: 0.2, hi: 2, show: dp, struct: true },
-      { k: "pfsC", lab: L("FS tekan", "FS compression"), u: "", lo: 1.5, hi: 4, show: dp }, { k: "pfsT", lab: L("FS tarik", "FS tension"), u: "", lo: 1.5, hi: 5, show: dp },
-      { k: "pfsL", lab: L("FS lateral", "FS lateral"), u: "", lo: 1.5, hi: 4, show: dp }, { k: "pyAllow", lab: L("Defleksi izin kepala", "Allowable head deflection"), u: "mm", lo: 3, hi: 100, show: dp },
+      { k: "pL", lab: L("Panjang tiang di bawah cap Lp", "Pile length below cap Lp"), u: "m", lo: 3, hi: 80, show: own },
+      { k: "pmeth", type: "seg", lab: L("Metode kapasitas aksial", "Axial capacity method"), opts: { api: "α/β", spt: "N-SPT", cpt: "CPT" }, show: own, help: L("α/β: API RP 2GEO (pancang) / FHWA GEC 10 (bor); N-SPT: Meyerhof; CPT: LCPC.", "α/β: API RP 2GEO (driven) / FHWA GEC 10 (bored); N-SPT: Meyerhof; CPT: LCPC.") },
+      { k: "pfsC", lab: L("FS tekan", "FS compression"), u: "", lo: 1.5, hi: 4, show: own }, { k: "pfsT", lab: L("FS tarik", "FS tension"), u: "", lo: 1.5, hi: 5, show: own },
+      { k: "pfsL", lab: L("FS lateral", "FS lateral"), u: "", lo: 1.5, hi: 4, show: own }, { k: "pyAllow", lab: L("Defleksi izin kepala", "Allowable head deflection"), u: "mm", lo: 3, hi: 100, show: own },
+      { type: "hr", lab: L("Jumlah & susunan tiang", "Number & layout of piles"), show: dp },
+      { k: "pLay", type: "seg", lab: o.tank ? L("Susunan radial", "Radial layout") : L("Jumlah tiang & ukuran cap", "Pile count & cap size"), opts: { auto: L("Otomatis dari kebutuhan beban", "Automatic from load demand"), grid: o.tank ? L("Jarak manual", "Manual spacing") : L("Grid manual di telapak", "Manual grid in footing") }, show: dp, wide: true, struct: true },
+      { k: "psD", lab: L("Jarak tiang minimum s", "Minimum pile spacing s"), u: "×D", lo: 2.5, hi: 8, show: auto, help: L("Praktik 3D (gesek) – 2,5D (ujung).", "Practice 3D (friction) – 2.5D (end bearing).") },
+      { k: "pceD", lab: L("Pusat tiang ke tepi cap ce", "Pile centre to cap edge ce"), u: "×D", lo: 0.75, hi: 3, show: auto, help: L("≥ D/2 + 150 mm (diambil otomatis bila lebih besar).", "≥ D/2 + 150 mm (applied automatically if larger).") },
+      ...(o.tank ? [] : [{ k: "psMax", lab: L("Jarak tiang maksimum", "Maximum pile spacing"), u: "m", lo: 0, hi: 8, show: auto, help: L("0 = otomatis maks(8D; 3 m). Jarak lebih besar → tiang lebih sedikit, cap lebih tebal.", "0 = automatic max(8D; 3 m). Larger spacing → fewer piles, thicker cap.") }]),
+      { k: "psx", lab: o.tank ? L("Jarak radial & keliling s", "Radial & circumferential spacing s") : L("Jarak tiang s (grid)", "Pile spacing s (grid)"), u: "m", lo: 0.5, hi: 6, show: grid, struct: true },
+      { k: "pce", lab: L("Pusat tiang ke tepi cap ce", "Pile centre to cap edge ce"), u: "m", lo: 0.2, hi: 2, show: grid, struct: true },
+      ...(o.block ? [] : [{ k: "tAuto", type: "chk", lab: o.tank ? L("Tebal pelat otomatis (lentur, geser, pons)", "Automatic slab depth (flexure, shear, punching)") : L("Tebal pile cap otomatis (geser satu arah & pons)", "Automatic pile cap depth (one-way & punching shear)"), show: dp }]),
     ] }
 }
-
+// ringkasan tiang rencana proyek (tab Tanah) di formulir modul
+function projPileCard() {
+  const box = document.createElement("div"); box.className = "pj-pilecard"
+  try {
+    const P = projLoad(), ds = soilDS(P), p = P.pile
+    const I = effPile({ pSrc: "proj" }, { pile: p }), sp = singlePile(I, ds, p.z0)
+    box.innerHTML = `<b>${L("Tiang rencana dari tab Tanah", "Design pile from Soil tab")}</b><span>${p.kind === "bored" ? L("Bor beton", "Bored") : L("Pipa baja", "Steel pipe")} Ø${nf(p.D, 0)}${p.kind === "pipe" ? " × " + nf(p.t, 1) : ""} mm · L ${nf(p.L, 1)} m · ${AXIAL_METHOD()[p.method].split(" (")[0]}</span>`
+      + `<span class="pj-kv"><i>Qa ${L("tekan", "comp.")}</i> ${F_(sp.Qad)} <i>${L("tarik", "tension")}</i> ${F_(sp.Qat)} <i>${L("lateral", "lateral")}</i> ${F_(sp.Ha, 1)}</span><a href="#/tanah">${L("Ubah di tab Tanah →", "Edit in Soil tab →")}</a>`
+      + `<small class="hint">${L(`Nilai di atas pada kepala tiang z0 = ${nf(p.z0, 2)} m (tab Tanah). Modul ini menghitung ulang Qa pada dasar pondasinya sendiri — lihat langkah 1 di Alur perhitungan.`, `Values above at pile head z0 = ${nf(p.z0, 2)} m (Soil tab). This module recomputes Qa at its own foundation base — see step 1 of the Calculation flow.`)}</small>`
+  } catch (e) { box.textContent = e.message }
+  return box
+}
 // ---------------------------------------------------------------- qa dari tab Tanah
 export function qaFor(s, ctx, B, Lf, Df) {
   if (s.qaSrc === "manual" || !ctx.soil) return { qa: s.qa, src: "manual" }
@@ -67,6 +96,143 @@ export function pileLayout(shape, B, Lf, s, ce) {
   }
   if (!out.length) out.push({ x: 0, y: 0 })
   return out
+}
+// grid nx × ny merata di dalam B × L dengan jarak tepi ce (jarak antar tiang mengisi cap)
+export function gridLayout(nx, ny, B, Lf, ce) {
+  const sx = nx > 1 ? (B - 2 * ce) / (nx - 1) : 0, sy = ny > 1 ? (Lf - 2 * ce) / (ny - 1) : 0, piles = []
+  for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) piles.push({ x: (i - (nx - 1) / 2) * sx, y: (j - (ny - 1) / 2) * sy })
+  return { piles, sx, sy }
+}
+// susunan RADIAL untuk pelat bundar (tangki): cincin luar di bawah shell pada R1 = Ds/2 − ce, cincin dalam tiap s ke arah pusat,
+// jumlah tiang tiap cincin = ⌊2πR/s⌋ (selang-seling setengah langkah antar cincin), ditambah satu tiang pusat
+export function ringLayout(Ds, ce, s) {
+  const piles = [], rings = []
+  let R = Ds / 2 - ce
+  while (R > 0.6 * s) {
+    const n = Math.max(3, Math.floor(2 * Math.PI * R / s + 1e-9)), off = rings.length % 2 ? Math.PI / n : 0
+    for (let k = 0; k < n; k++) { const a = off + 2 * Math.PI * k / n; piles.push({ x: R * Math.cos(a), y: R * Math.sin(a), ring: rings.length }) }
+    rings.push({ R, n }); R -= s
+  }
+  piles.push({ x: 0, y: 0, ring: rings.length }); rings.push({ R: 0, n: 1 })
+  return { piles, rings }
+}
+// jarak antar tiang & jarak tepi dari kelipatan D (min 2,5D; tepi ≥ D/2 + 150 mm)
+export function spacing(I) { const D = I.pD / 1000; return { s: Math.max(I.psD || 3, 2.5) * D, ce: Math.max((I.pceD || 1) * D, D / 2 + 0.15), D } }
+// parameter tiang efektif: tiang rencana proyek (tab Tanah) atau milik modul
+export function effPile(s, ctx) {
+  const p = ctx && ctx.pile
+  if (s.pSrc === "own" || !p) return { ...s }
+  return { ...s, pk: p.kind, pD: p.D, pt: p.t, popen: p.open, pFy: p.Fy, pfc: p.fc, pn: p.n, pdb: p.db, pL: p.L, pmeth: p.method, pfsC: p.fsC, pfsT: p.fsT, pfsL: p.fsL, pyAllow: p.yAllow }
+}
+// ---------------------------------------------------------------- kapasitas TIANG TUNGGAL (acuan): geoteknik tekan/tarik, lateral (Broms & batas defleksi), struktur (ASD)
+export function singlePile(s, ds, z0) {
+  const pp = pileProps(s, ds, z0)
+  const lt = lateral({ ...s, psx: 3 * pp.D }, ds, pp, { piles: [{ x: 0, y: 0 }], Df: z0 })
+  const Hd = s.pyAllow / 1000 / Math.max(lt.uH.y0, 1e-12)
+  const Ha = Math.min(lt.Hal, Hd)
+  let Pstr, strTxt
+  if (pp.bored) { const Ag = Math.PI * s.pD ** 2 / 4; Pstr = (0.33 * s.pfc * Ag + 0.4 * 420 * pp.rc.Ast) / 1000; strTxt = "0,33·fc'·Ag + 0,4·fy·As" }
+  else { const Le = Math.max(lt.Lf, 0.5), cs = pipeCapacity(s.pD, s.pt, s.pFy, 1.2 * Le * 1000, Le * 1000); Pstr = cs.phiPn / 0.9 / 1.67; strTxt = "Pn/Ω (AISC, Ω = 1,67)" }
+  const Qac = pp.ax.Qc / s.pfsC, Qat = pp.ax.Qt / s.pfsT
+  return { pp, ax: pp.ax, D: pp.D, Qac, Qat, Hal: lt.Hal, Hd, Ha, Pstr, strTxt, Qad: Math.min(Qac, Pstr), govStr: Pstr < Qac, lt, z0 }
+}
+// pons tiang ke atas menembus cap (tiang tepi: keliling terpotong) — rasio terburuk dari kombinasi LRFD
+function pilePunch(m, r, D, fc) {
+  let wP = null
+  const dmm = r.d, dm = dmm / 1000
+  for (const lr of r.lrfd) {
+    if (!lr.pk) continue
+    m.piles.forEach((p, j) => {
+      const R = lr.pk.Pi[j]; if (R <= 0) return
+      const e = edgeDist(m.shape, m.B, m.L, p), full = Math.PI * (D + dm) * 1000
+      const b0 = Math.min(full, Math.PI * (D + dm) * 500 + 2 * e * 1000)
+      const v = R * 1000 / (b0 * dmm), cap = 0.75 * vcTwo(fc, 1, b0 < full ? 20 : 40, b0, dmm)
+      if (!wP || v / cap > wP.ur) wP = { ur: v / cap, v, cap, combo: lr.c.id, R, b0, edge: b0 < full }
+    })
+  }
+  return wP
+}
+const capConcreteOk = (r) => r.checks.filter((c) => /pile cap|footing/i.test(c.grp) && /geser|shear|pons|punching|≥ 300|≥ 150/i.test(c.item)).every((c) => c.ok || c.info)
+const up = (v, st = 0.05) => Math.ceil(v / st - 1e-9) * st
+// ---------------------------------------------------------------- DESAIN KELOMPOK TIANG OTOMATIS (modul berbasis telapak)
+// Alur: kapasitas tiang tunggal (tab Tanah) → beban terbesar dari kombinasi ASD → jumlah tiang n (grid nx × ny terkecil yang reaksi tiangnya
+// ≤ Qa·Eg, ≥ −Qa tarik, H ≤ Ha) → ukuran cap B × L = (n−1)s + 2ce (≥ denah peralatan) → tebal cap dari geser satu arah, pons kolom & pons tiang.
+// o: { m0, combos, I, ctx, crit, rc, prc, minB, minL, fixB?, fixL?, tAuto }
+const smaxOf = (I, D, s) => (I.psMax > 0 ? Math.max(I.psMax, s) : Math.max(8 * D, 3.0))
+export function autoCap(o) {
+  const { m0, combos, I, ctx } = o, ds = ctx.soil
+  const sp1 = singlePile(I, ds, m0.Df), D = sp1.D, { s, ce } = spacing(I)
+  const asd = combos.filter((c) => c.kind === "ASD"), tf = (o.crit && o.crit.tempFac) ?? 1
+  const tB = o.fixB ?? o.minB, tL = o.fixL ?? o.minL, asp = tB / tL
+  const cand = []
+  // minimal 2 baris di tiap arah: momen dua arah (angin/gempa X & Y) harus dipikul kopel reaksi tiang, bukan jepitan kepala tiang
+  for (let nx = 2; nx <= 14; nx++) for (let ny = 2; ny <= 14; ny++) cand.push({ nx, ny, n: nx * ny })
+  const dimOf = (c) => [o.fixB ?? Math.max((c.nx - 1) * s + 2 * ce, o.minB), o.fixL ?? Math.max((c.ny - 1) * s + 2 * ce, o.minL)]
+  cand.sort((a, b) => a.n - b.n || Math.abs(Math.log(dimOf(a)[0] / dimOf(a)[1] / asp)) - Math.abs(Math.log(dimOf(b)[0] / dimOf(b)[1] / asp)))
+  let best = null, last = null, idx = -1
+  const tGuess = o.tAuto ? Math.max(0.6, up(D + 0.3)) : m0.t
+  for (const c of cand) {
+    const [B, Lc] = dimOf(c), g = gridLayout(c.nx, c.ny, B, Lc, ce)
+    const smin = Math.min(c.nx > 1 ? g.sx : 99, c.ny > 1 ? g.sy : 99), smax = smaxOf(I, D, s)
+    if (smin < 2.5 * D - 1e-9) continue
+    if (Math.max(g.sx, g.sy) > smax + 1e-9) continue                     // jarak maksimum: bentang cap/pelat antar tiang wajar (≤ maks(8D; 3 m))
+    const m = { ...m0, shape: "rect", B, L: Lc, t: tGuess, Df: Math.max(m0.Df, tGuess), piles: g.piles, pileD: D }
+    const W = weights(m, { A: B * Lc }), pg = pileGroup(g.piles)
+    const sEg = smin === 99 ? s : smin, Eg = c.n > 1 ? convLab(c.nx, c.ny, D, sEg) : 1
+    const pmF = c.n > 1 ? Math.min(pmGroup(c.nx, sEg / D), pmGroup(c.ny, sEg / D)) : 1
+    let worst = 0, Pmax = 0, cP = "", gov = ""
+    for (const cb of asd) {
+      const R = resultant(m, W, cb.vec, cb.fD), pk = pileReact(pg, R), fac = cb.temp ? tf : 1
+      const u = [[pk.max / (sp1.Qad * Eg * fac), L("tekan tiang", "pile compression")], [-pk.min / (sp1.Qat * fac), L("tarik tiang", "pile tension")], [pk.H / (sp1.Ha * pmF * fac), L("lateral tiang", "pile lateral")]]
+      for (const [v, t] of u) if (v > worst) { worst = v; gov = `${t} (${cb.id})` }
+      if (R.P > Pmax) { Pmax = R.P; cP = cb.id }
+    }
+    idx++
+    last = { ...c, B, L: Lc, ...g, smin: sEg, Eg, pmF, m, worst, Pmax, cP, gov: idx === 0 && worst <= 1 ? (c.n > 4 ? `${L(`jarak maks. tiang ≤ ${nf(smaxOf(I, D, s), 2)} m pada denah minimum`, `max. pile spacing ≤ ${nf(smaxOf(I, D, s), 2)} m over minimum footprint`)} (UR ${nf(worst, 2)})` : `${L("jumlah minimum 2 × 2", "minimum 2 × 2")} (UR ${nf(worst, 2)})`) : `${gov} (UR ${nf(worst, 2)})` }
+    if (worst <= 1) { best = last; break }
+  }
+  const pick = best || last
+  // tebal cap dari geser & pons (grid kasar selama iterasi)
+  let t = o.tAuto ? Math.max(0.5, up(D + 0.2)) : m0.t, r = null, wP = null, tries = 0
+  const runT = (tt, grid) => { const mt = { ...pick.m, t: tt, Df: Math.max(m0.Df, tt), grid }; const rr = analyzeFooting(mt, combos, { qa: 1, mu: 0.5 }, o.crit, o.rc, o.prc); return { mt, rr, wp: pilePunch(mt, rr, D, o.rc.fc) } }
+  for (; tries < 60; tries++) {
+    const x = runT(t, 30); r = x.rr; wP = x.wp
+    if (!o.tAuto || (capConcreteOk(r) && (!wP || wP.ur <= 1))) break
+    t = Math.round((t + 0.05) * 100) / 100
+  }
+  // verifikasi dengan grid penuh (hasil akhir), tambah tebal bila perlu
+  if (o.tAuto) for (let k = 0; k < 12; k++) { const x = runT(t, undefined); if (capConcreteOk(x.rr) && (!x.wp || x.wp.ur <= 1)) break; t = Math.round((t + 0.05) * 100) / 100 }
+  const mFinal = { ...pick.m, t, Df: Math.max(m0.Df, t) }
+  return { m: mFinal, sp1, nx: pick.nx, ny: pick.ny, n: pick.n, sx: pick.sx, sy: pick.sy, smin: pick.smin, Eg: pick.Eg, worst: pick.worst, gov: pick.gov, Pmax: pick.Pmax, cP: pick.cP, nAx: pick.Pmax / sp1.Qad, ok: !!best, t, s, ce }
+}
+// ---------------------------------------------------------------- UKURAN TELAPAK OTOMATIS (pondasi dangkal)
+// Alur: qa dari tab Tanah (tergantung B, L, Df) → telapak terkecil (tambah δ pada denah minimum) yang memenuhi tekanan ≤ qa, kontak, guling, geser
+// → tebal dari geser satu arah & pons. o: { m0, combos, qaFn(B, L, Df), mu, crit, rc, prc, minB, minL, tAuto }
+export function autoFoot(o) {
+  const tryD = (dl, t) => {
+    const B = up(o.minB + dl), Lc = up(o.minL + dl), m = { ...o.m0, B, L: o.m0.shape === "rect" ? Lc : B, t, Df: Math.max(o.m0.Df, t), grid: 30 }
+    const qa = o.qaFn(B, m.L, m.Df), r = analyzeFooting(m, o.combos, { qa, mu: o.mu }, o.crit, o.rc, o.prc)
+    return { ok: r.checks.filter((c) => /Geoteknik|Geotechnical/.test(c.grp)).every((c) => c.ok || c.info), m, qa, r }
+  }
+  const t0 = o.tAuto ? Math.max(0.4, o.m0.t * 0 + 0.4) : o.m0.t
+  let dl = 0, hit = null
+  for (; dl <= 25; dl += 0.25) { const x = tryD(dl, t0); if (x.ok) { hit = x; break } }
+  if (hit) for (let k = 0; k < 5 && dl > 0; k++) { const x = tryD(Math.max(dl - 0.05, 0), t0); if (!x.ok) break; dl = Math.max(dl - 0.05, 0); hit = x }
+  if (!hit) hit = tryD(Math.min(dl, 25), t0)
+  let t = t0, r = hit.r
+  const concOk = (rr) => rr.checks.filter((c) => /footing|telapak/i.test(c.grp) && /geser|shear|pons|punching|≥ 150/i.test(c.item)).every((c) => c.ok || c.info)
+  if (o.tAuto) for (let k = 0; k < 80; k++) {
+    const x = tryD(dl, t); r = x.r
+    if (!x.ok) { dl += 0.1; continue }                          // telapak lebih tebal = lebih berat: perbesar denah bila geoteknik tidak lagi memenuhi
+    if (concOk(r)) { hit = x; break }
+    t = Math.round((t + 0.05) * 100) / 100
+  }
+  // verifikasi grid penuh
+  const full = (dd, tt) => { const B = up(o.minB + dd), Lc = up(o.minL + dd), m = { ...o.m0, B, L: o.m0.shape === "rect" ? Lc : B, t: tt, Df: Math.max(o.m0.Df, tt) }; const qa = o.qaFn(B, m.L, m.Df), rr = analyzeFooting(m, o.combos, { qa, mu: o.mu }, o.crit, o.rc, o.prc); return { ok: rr.checks.filter((c) => /Geoteknik|Geotechnical/.test(c.grp)).every((c) => c.ok || c.info), m, qa, r: rr } }
+  for (let k = 0; k < 15; k++) { const x = full(dl, t); hit = x; if (!x.ok) { dl += 0.1; continue } if (!o.tAuto || concOk(x.r)) break; t = Math.round((t + 0.05) * 100) / 100 }
+  const gch = hit.r.checks.filter((c) => /Geoteknik|Geotechnical/.test(c.grp) && !c.info), gw = gch.reduce((a, b) => (!a || b.ur > a.ur ? b : a), null)
+  const gov = dl < 1e-9 ? `${o.minTxt || L("ukuran minimum denah peralatan", "minimum equipment footprint")}${gw ? ` (UR ${L("geoteknik", "geotech.")} ${nf(gw.ur, 2)})` : ""}` : gw ? `${gw.item} (UR ${nf(gw.ur, 2)})` : ""
+  return { m: { ...hit.m, t, Df: Math.max(o.m0.Df, t), grid: undefined }, qa: hit.qa, ok: !!hit, t, B: hit.m.B, L: hit.m.L, gov }
 }
 const edgeDist = (shape, B, Lf, p) => {
   if (shape === "rect") return Math.min(B / 2 - Math.abs(p.x), Lf / 2 - Math.abs(p.y))
@@ -98,7 +264,7 @@ export function pileProps(s, ds, z0) {
 // kapasitas kelompok & lateral (Winkler kepala jepit, Broms umum, titik jepit Davisson–Robinson)
 function lateral(s, ds, pp, m) {
   const D = pp.D, n = m.piles.length, z0 = pp.z0
-  const nx = distinct(m.piles.map((p) => p.x)), ny = distinct(m.piles.map((p) => p.y))
+  const nx = m.eqGrid ? m.eqGrid[0] : distinct(m.piles.map((p) => p.x)), ny = m.eqGrid ? m.eqGrid[1] : distinct(m.piles.map((p) => p.y))
   const Eg = n > 1 ? convLab(nx, ny, D, s.psx) : 1
   const Qac = pp.ax.Qc * Eg / s.pfsC, Qat = pp.ax.Qt / s.pfsT
   const lay = pileLayers(ds, z0), gw = Math.max(ds.gwt - z0, 0), P0 = profile(lay, gw)
@@ -163,15 +329,8 @@ export function deepFooting(s, ctx, m, r, crit = {}) {
       info = { Pu: Pc, Tu, Mu, cap: cs.phiMn, B1 }
     }
     if (!wS || ur > wS.ur) wS = { ur, combo: lr.c.id, ...info }
-    // pons tiang ke atas menembus cap (tiang tepi: keliling terpotong)
-    m.piles.forEach((p, j) => {
-      const R = lr.pk.Pi[j]; if (R <= 0) return
-      const e = edgeDist(m.shape, m.B, m.L, p), full = Math.PI * (D + dm) * 1000
-      const b0 = Math.min(full, Math.PI * (D + dm) * 500 + 2 * e * 1000)
-      const v = R * 1000 / (b0 * dmm), cap = 0.75 * vcTwo(fcCap, 1, b0 < full ? 20 : 40, b0, dmm)
-      if (!wP || v / cap > wP.ur) wP = { ur: v / cap, v, cap, combo: lr.c.id, R, b0, edge: b0 < full }
-    })
   }
+  wP = pilePunch(m, r, D, fcCap)
   if (wS) g.checks.push(chk(gS, pp.bored ? L(`Tiang bor Ø${nf(s.pD, 0)}: P–M (${Math.round(s.pn)} D${s.pdb}), Mu = H·Mmaks Winkler`, `Bored pile Ø${nf(s.pD, 0)}: P–M (${Math.round(s.pn)} D${s.pdb}), Mu = H·Mmax Winkler`)
     : L(`Pipa Ø${nf(s.pD, 1)}×${nf(s.pt, 1)}: H1-1 (tekan/tarik + lentur, B1) & geser`, `Pipe Ø${nf(s.pD, 1)}×${nf(s.pt, 1)}: H1-1 (compression/tension + flexure, B1) & shear`), pp.bored ? "SNI 2847 §22.4" : "AISC 360-16 §H1, G5", wS.ur, 1, "", { note: wS.combo, d: 3 }))
   if (wP) g.checks.push(chk(gC, L(`Pons tiang ${wP.edge ? "tepi " : ""}menembus pile cap (b0 = ${nf(wP.b0, 0)} mm)`, `Punching of ${wP.edge ? "edge " : ""}pile through cap (b0 = ${nf(wP.b0, 0)} mm)`), "SNI 2847 §22.6, §13.4.2", wP.v, wP.cap, "MPa", { note: wP.combo, d: 3 }))
@@ -185,9 +344,29 @@ export function deepFooting(s, ctx, m, r, crit = {}) {
 
 // ---------------------------------------------------------------- pelat tangki di atas tiang (pelat lingkaran Ø Ds, beban dari tank.js)
 // tot(c) → { P, M, V } di dasar pelat; I: masukan tangki (sh, proj, fc, fy, cover, db, D, colB, nCol)
+// Tiang disusun RADIAL (cincin konsentris di bawah shell → pusat). pLay "auto": jarak s terbesar (jumlah tiang terkecil) yang reaksinya memenuhi;
+// "grid"/manual: s = psx, tepi = pce.
 export function piledSlab(I, Tk, combos, tot, ctx) {
-  const Ds = I.D + 2 * I.proj, m = { shape: "circle", B: Ds, L: Ds, Df: I.sh, t: I.sh }
-  m.piles = pileLayout("circle", Ds, Ds, I.psx, I.pce)
+  const Ds = I.D + 2 * I.proj, D = I.pD / 1000, sp = spacing(I), auto = I.pLay !== "grid"
+  const ce = auto ? sp.ce : I.pce, sp1 = singlePile(I, ctx.soil, I.sh)
+  const asdC = combos.filter((c) => c.kind === "ASD"), tf = I.tempFac ?? 1
+  const evalLay = (lay, sv) => {
+    const n = lay.piles.length, Sx2 = lay.piles.reduce((a, p) => a + p.x * p.x, 0), k = Math.max(1, Math.round(Math.sqrt(n))), Eg = n > 1 ? convLab(k, k, D, sv) : 1
+    let worst = 0, Pmax = 0, cP = ""
+    for (const c of asdC) { const t = tot(c), fac = c.temp ? tf : 1, mx = t.P / n + (Sx2 > 0 ? Math.abs(t.M) * (Ds / 2 - ce) / Sx2 : 0), mn = t.P / n - (Sx2 > 0 ? Math.abs(t.M) * (Ds / 2 - ce) / Sx2 : 0)
+      worst = Math.max(worst, mx / (sp1.Qad * Eg * fac), -mn / (sp1.Qat * fac)); if (t.P > Pmax) { Pmax = t.P; cP = c.id } }
+    return { worst, Pmax, cP, Eg }
+  }
+  let lay, sUse, ev
+  if (auto) {
+    for (let sv = Math.max(sp.s, up(Ds / 2 - ce)); sv >= sp.s - 1e-9; sv = Math.round((sv - 0.05) * 100) / 100) {
+      lay = ringLayout(Ds, ce, sv); sUse = sv; ev = evalLay(lay, sv)
+      if (ev.worst <= 1) break
+    }
+  } else { sUse = I.psx; lay = ringLayout(Ds, ce, sUse); ev = evalLay(lay, sUse) }
+  const nP = lay.piles.length, kq = Math.max(1, Math.round(Math.sqrt(nP)))
+  const m = { shape: "circle", B: Ds, L: Ds, Df: I.sh, t: I.sh, piles: lay.piles, rings: lay.rings, eqGrid: [kq, kq] }
+  I = { ...I, psx: sUse, pce: ce }
   const n = m.piles.length, Sx2 = m.piles.reduce((a, p) => a + p.x * p.x, 0)
   const react = (t) => { const Pi = m.piles.map((p) => t.P / n + (Sx2 > 0 ? t.M * p.x / Sx2 : 0)); return { Pi, max: Math.max(...Pi), min: Math.min(...Pi), H: t.V / n, P: t.P } }
   const asd = combos.filter((c) => c.kind === "ASD").map((c) => { const t = tot(c); return { c, R: { P: t.P, Mx: 0, My: t.M, H: t.V }, pk: react(t) } })
@@ -195,8 +374,9 @@ export function piledSlab(I, Tk, combos, tot, ctx) {
   const h = I.sh * 1000, d = h - I.cover - I.db
   const r = { asd, lrfd, d }
   const out = deepFooting(I, { ...ctx, capFc: I.fc }, m, r, { tempFac: I.tempFac })
+  Object.assign(out, { sp1, sUse, ce, rings: lay.rings, nAx: ev.Pmax / sp1.Qad, Pmax: ev.Pmax, cP: ev.cP, autoOk: ev.worst <= 1 })
   // lentur pelat datar terbalik (metode desain langsung, panel s × s): Mo = wu·s·ln²/8; lajur kolom s/2
-  const s = I.psx, D = I.pD / 1000, ln = Math.max(s - 0.89 * D, 0.3)
+  const s = I.psx, ln = Math.max(s - 0.89 * D, 0.3)
   let Rm = 0, cR = ""
   for (const lr of lrfd) if (lr.pk.max > Rm) { Rm = lr.pk.max; cR = lr.c.id }
   const wu = Rm / (s * s), Mo = wu * s * ln * ln / 8
@@ -319,6 +499,43 @@ export function deepBundle(s, ctx, res, crit, mod, nm, sAllow) {
 export function shallowSettle(ctx, foot, sAllow) {
   const settle = settleOf("shallow", ctx, foot, sAllow, foot.label, foot.mod)
   return { settle, table: settleTable(settle) }
+}
+
+// ---------------------------------------------------------------- ALUR PERHITUNGAN (ditampilkan di atas hasil, ikut lembar hitung & PDF)
+const F_ = (v, d = 0) => `${nf(toDisp("F", v), d)} ${uName("F")}`, Q_ = (v, d = 0) => `${nf(toDisp("Q", v), d)} ${uName("Q")}`
+const chkSum = (checks) => { const real = checks.filter((c) => !c.info), bad = real.filter((c) => !c.ok).length, g = govern(checks); return { n: real.length, bad, g } }
+// o: { sp1, I, P, M, cP, loadSub, n, layout, cap, rebar, checks, settle, auto, nAx }
+export function flowDeep(o) {
+  const sp = o.sp1, I = o.I, cs = chkSum(o.checks)
+  const govN = o.gov ? ` · ${L("penentu", "governing")}: ${o.gov}` : ""
+  return [
+    { ic: "pile", t: L("Kapasitas tiang tunggal", "Single pile capacity"), v: `Qa ${F_(sp.Qad)}`, f: L("Qa = min(Qu/FS; Pa struktur)", "Qa = min(Qu/FS; structural Pa)"), sub: `${I.pk === "bored" ? L("bor", "bored") : L("pipa", "pipe")} Ø${nf(I.pD, 0)} · L ${nf(I.pL, 1)} m · ${AXIAL_METHOD()[I.pmeth].split(" (")[0]} · ${L("tarik", "tension")} ${F_(sp.Qat)} · ${L("lateral", "lateral")} ${F_(sp.Ha, 1)}${I.pSrc !== "own" ? " · " + L("tab Tanah", "Soil tab") : ""}` },
+    { ic: "loads", t: L("Beban struktur atas", "Superstructure loads"), v: `P ${F_(o.P)}`, f: L("P = Σ beban + berat cap & urugan (ASD terbesar)", "P = Σ loads + cap & backfill weight (max ASD)"), sub: `${o.loadSub || ""}${o.cP ? ` · ${o.cP}` : ""}${o.M ? ` · M ${nf(toDisp("M", o.M), 0)} ${uName("M")}` : ""}` },
+    { ic: "group", t: L("Kebutuhan tiang", "Required piles"), v: `n = ${o.n}`, f: L("n ≥ P/(Qa·Eg), cek momen: Pi = P/n ± M·x/Σx²", "n ≥ P/(Qa·Eg), moment check: Pi = P/n ± M·x/Σx²"), sub: `P/Qa = ${nf(o.nAx, 2)} → ${o.layout}${o.auto ? govN : " (" + L("manual", "manual") + ")"}` },
+    { ic: "found", t: o.capTitle || L("Ukuran pile cap", "Pile cap size"), v: o.cap, f: o.capF || L("B = (nx−1)s + 2ce ≥ denah peralatan; tebal dari geser & pons", "B = (nx−1)s + 2ce ≥ equipment footprint; depth from shear & punching"), sub: o.capSub || "" },
+    { ic: "ruler", t: L("Penulangan", "Reinforcement"), v: o.rebar, f: L("As dari Mu (reaksi tiang), ≥ As min", "As from Mu (pile reactions), ≥ As min"), sub: o.rebarSub || "" },
+    { ic: "check", t: L("Pemeriksaan", "Checks"), v: cs.bad ? `${cs.bad} ${L("tidak OK", "not OK")}` : `${cs.n}/${cs.n} OK`, f: L("UR = demand/kapasitas ≤ 1", "UR = demand/capacity ≤ 1"), sub: cs.g ? `UR ${L("maks", "max")} ${nf(cs.g.ur, 3)} — ${cs.g.item}` : "", ok: !cs.bad },
+    { ic: "settle", t: L("Penurunan", "Settlement"), v: o.settle && o.settle.s != null ? `${nf(o.settle.s, 1)} mm` : "–", f: L("se + si + sc ≤ s izin", "se + si + sc ≤ s allow"), sub: o.settle && o.settle.s != null ? `${L("izin", "allow.")} ${nf(o.settle.allow, 0)} mm` : "", ok: o.settle && o.settle.s != null ? o.settle.s <= o.settle.allow : undefined },
+  ]
+}
+// o: { q (hasil qaFor), P, M, cP, loadSub, A, size, auto, rebar, checks, settle }
+export function flowShallow(o) {
+  const cs = chkSum(o.checks)
+  return [
+    { ic: "soil", t: L("Daya dukung izin tanah", "Allowable soil bearing"), v: `qa ${Q_(o.q.qa)}`, f: o.q.src === "soil" ? o.q.r.txt : L("manual", "manual"), sub: o.q.src === "soil" ? `${L("tab Tanah", "Soil tab")} · FS ${nf(o.q.r.FS, 1)} · ${o.q.r.gov}` : L("diisi manual", "entered manually") },
+    { ic: "loads", t: L("Beban struktur atas", "Superstructure loads"), v: `P ${F_(o.P)}`, f: L("P = Σ beban + berat pondasi & urugan (ASD terbesar)", "P = Σ loads + foundation & backfill weight (max ASD)"), sub: `${o.loadSub || ""}${o.cP ? ` · ${o.cP}` : ""}${o.M ? ` · M ${nf(toDisp("M", o.M), 0)} ${uName("M")}` : ""}` },
+    { ic: "found", t: L("Ukuran telapak", "Footing size"), v: o.size, f: L("A ≥ P/qa, lalu cek eksentrisitas, kontak, guling, geser", "A ≥ P/qa, then eccentricity, contact, overturning, sliding"), sub: `A ${L("perlu", "req.")} ≈ ${nf(o.P / Math.max(o.q.qa, 1), 2)} m² · A ${L("pakai", "used")} ${nf(o.A, 2)} m²${o.sizeNote ? " · " + o.sizeNote : o.auto ? ` · ${L("otomatis", "automatic")}${o.gov ? ` · ${L("penentu", "governing")}: ${o.gov}` : ""}` : " · " + L("manual", "manual")}` },
+    { ic: "ruler", t: L("Tebal & penulangan", "Depth & reinforcement"), v: o.rebar, f: L("tebal dari geser satu arah & pons; As dari Mu", "depth from one-way & punching shear; As from Mu"), sub: o.rebarSub || "" },
+    { ic: "check", t: L("Pemeriksaan", "Checks"), v: cs.bad ? `${cs.bad} ${L("tidak OK", "not OK")}` : `${cs.n}/${cs.n} OK`, f: L("UR = demand/kapasitas ≤ 1", "UR = demand/capacity ≤ 1"), sub: cs.g ? `UR ${L("maks", "max")} ${nf(cs.g.ur, 3)} — ${cs.g.item}` : "", ok: !cs.bad },
+    { ic: "settle", t: L("Penurunan", "Settlement"), v: o.settle && o.settle.s != null ? `${nf(o.settle.s, 1)} mm` : "–", f: L("si + sc ≤ s izin", "si + sc ≤ s allow"), sub: o.settle && o.settle.s != null ? `${L("izin", "allow.")} ${nf(o.settle.allow, 0)} mm` : "", ok: o.settle && o.settle.s != null ? o.settle.s <= o.settle.allow : undefined },
+  ]
+}
+export const flowStep = (flow) => ({ h: L("Alur perhitungan (ringkas)", "Calculation flow (summary)"), rows: flow.map((f, i) => [`${i + 1}. ${f.t}`, f.f || "", f.sub || "", f.v]) })
+// beban vertikal ASD terbesar di dasar pondasi (termasuk berat pondasi)
+export function maxLoad(rows) {
+  let w = null
+  for (const a of rows) if (!w || a.R.P > w.R.P) w = a
+  return w ? { P: w.R.P, M: Math.hypot(w.R.Mx || 0, w.R.My || 0), cP: w.c.id } : { P: 0, M: 0, cP: "" }
 }
 
 // ---------------------------------------------------------------- gambar: denah tiang & reaksi

@@ -1,11 +1,11 @@
 // Modul halaman: Pondasi peralatan dinamis (WIP / WTP / kompresor udara / kompresor torak / lainnya).
 import { L, nf, toDisp, uName, expandCombos, seismicCoef } from "./core.js"
-import { PRESETS, dynamics, dynCases, analyzeDynamic } from "./dynamic.js"
+import { PRESETS, dynamics, dynCases, analyzeDynamic, dynModel } from "./dynamic.js"
 import { palette, dynDraw, footingPlan } from "./draw.js"
 import { skDyn } from "./sketch.js"
 import { dynSteps } from "./steps.js"
 import { footFrom } from "./settle.js"
-import { DEEP0, fdSection, qaFor, qaNote, isDeep, deepBundle, shallowSettle, groupStiffness, pileLayout } from "./deep.js"
+import { DEEP0, fdSection, qaFor, qaNote, isDeep, deepBundle, shallowSettle, groupStiffness, pileLayout, effPile, autoCap, singlePile, flowDeep, flowShallow, flowStep, maxLoad } from "./deep.js"
 import { avgOver } from "./soil.js"
 
 export const id = "dinamis"
@@ -39,7 +39,7 @@ export function form(s) {
       { k: "H", lab: L("Tebal blok H", "Block depth H"), u: "m", lo: 0.4, hi: 5 }, { k: "emb", lab: L("Kedalaman tertanam De", "Embedment depth De"), u: "m", lo: 0, hi: 5 },
       { k: "fc", lab: "fc'", u: "MPa", lo: 17, hi: 50 }, { k: "fy", lab: "fy", u: "MPa", lo: 280, hi: 550 }, { k: "db", type: "sel", lab: L("Tulangan", "Bars"), opts: BAR },
     ] },
-    fdSection(s),
+    fdSection(s, { block: true }),
     { id: "soil", icon: "🧱", t: L("Tanah dinamis & kriteria", "Dynamic soil & criteria"), fields: [
       { k: "Gmode", type: "seg", lab: L("Kekakuan tanah dari", "Soil stiffness from"), opts: { soil: L("N-SPT tab Tanah (Imai)", "Soil tab N-SPT (Imai)"), Vs: "Vs", G: L("G langsung", "G direct") }, show: (x) => !isDeep(x) },
       { k: "xiP", lab: L("Redaman kelompok tiang ξ", "Pile group damping ξ"), u: "", lo: 0.02, hi: 0.2, show: isDeep, help: L("Konservatif 0,05 (tanpa redaman radiasi tiang).", "Conservative 0.05 (no pile radiation damping).") },
@@ -57,8 +57,9 @@ export function form(s) {
 }
 
 export function run(s, ctx) {
-  const I = { ...s, seis: { ...ctx.seisBase, R: 1, Ie: s.Ie, method: "rigid" }, crit: { fsOT: 1.5, fsSL: 1.5, fsOTs: 1, fsSLs: 1, tempFac: 1, minContact: 0.5 } }
+  let I = { ...s, seis: { ...ctx.seisBase, R: 1, Ie: s.Ie, method: "rigid" }, crit: { fsOT: 1.5, fsSL: 1.5, fsOTs: 1, fsSLs: 1, tempFac: 1, minContact: 0.5 } }
   const deep = isDeep(s) && !!ctx.soil
+  if (deep) I = effPile(I, ctx)
   const qs = deep ? null : qaFor(s, ctx, I.Bx, I.By, I.emb)
   if (qs) I.qa = qs.qa
   if (!deep) I.fdType = "shallow"
@@ -71,9 +72,16 @@ export function run(s, ctx) {
     }
     else I.Gmode = "Vs"
   }
-  let pkS = null
+  // pondasi dalam: ukuran blok tetap (kriteria dinamis), jumlah tiang otomatis dari beban statik → kekakuan kelompok tiang → analisis dinamis
+  let pkS = null, auto = null
   if (deep) {
-    const mB = { shape: "rect", B: I.Bx, L: I.By, Df: I.emb, piles: pileLayout("rect", I.Bx, I.By, I.psx, I.pce) }
+    let mB
+    if (I.pLay !== "grid") {
+      const Dy0 = dynamics(I), cb0 = expandCombos(dynCases(I, Dy0).cases, 5, { ...ctx.cmbOpts, labels: { Dyn1: "v", Dyn2: "h", Ex: "x", Ey: "y" } })
+      auto = autoCap({ m0: dynModel(I), combos: cb0, I, ctx, crit: I.crit, rc: { fc: I.fc, fy: I.fy, cover: I.cover, db: I.db }, prc: { fc: I.fc, fy: I.fy, n: 8, db: 16, cover: 50 }, fixB: I.Bx, fixL: I.By, minB: I.Bx, minL: I.By, tAuto: false })
+      I.autoModel = auto.m; I.psx = auto.smin; I.pce = auto.ce
+      mB = auto.m
+    } else mB = { shape: "rect", B: I.Bx, L: I.By, Df: I.emb, piles: pileLayout("rect", I.Bx, I.By, I.psx, I.pce) }
     pkS = groupStiffness(I, ctx, mB, I.Wm + I.Bx * I.By * I.H * 24)
     I.pkS = pkS
   }
@@ -123,6 +131,13 @@ export function run(s, ctx) {
   const drawings = [{ make: (m) => dynDraw(I, { ...out, Dy, pre }, palette(m)), cap: L("Gambar 1 — Blok mesin, model pegas–peredam, dan peta frekuensi", "Figure 1 — Machine block, spring–dashpot model and frequency map") }]
   if (deep) DB.drawings.forEach((d, i) => drawings.push({ ...d, cap: `${L("Gambar", "Figure")} ${i + 2} — ${d.cap}` }))
   else drawings.push({ make: (m) => footingPlan(out.r, out.m, palette(m)), cap: L("Gambar 2 — Denah blok dan tekanan tanah", "Figure 2 — Block plan and soil pressure"), maxH: 300 })
+  const ml = maxLoad(out.r.asd)
+  const loadSub = `${L("mesin", "machine")} ${nf(toDisp("F", I.Wm), 0)} + ${L("blok", "block")} ${nf(toDisp("F", Dy.Wb), 0)} ${uF} · Fo ${nf(toDisp("F", Dy.Fo), 2)} ${uF} · ${nf(I.rpm, 0)} rpm`
+  const sp1 = deep ? (auto ? auto.sp1 : singlePile(I, ctx.soil, I.emb)) : null
+  const flow = deep ? flowDeep({ sp1, I, P: ml.P, M: ml.M, cP: ml.cP, loadSub, n: DB.g0.n, nAx: ml.P / sp1.Qad, layout: `${auto ? auto.nx : DB.g0.nx} × ${auto ? auto.ny : DB.g0.ny} ${L("tiang di bawah blok", "piles under block")}`, auto: !!auto, gov: auto ? auto.gov : "",
+      capTitle: L("Blok mesin (pile cap)", "Machine block (pile cap)"), cap: `${nf(I.Bx, 2)} × ${nf(I.By, 2)} × ${nf(I.H, 2)} m`, capSub: L(`ukuran dari kriteria dinamis; s = ${nf(I.psx, 2)} m, ce = ${nf(I.pce, 2)} m; kekakuan tiang kz ${nf(pkS.kz, 0)} kN/m`, `size from dynamic criteria; s = ${nf(I.psx, 2)} m, ce = ${nf(I.pce, 2)} m; pile stiffness kz ${nf(pkS.kz, 0)} kN/m`),
+      rebar: `X ${out.r.reinf.x.bot.txt} · Y ${out.r.reinf.y.bot.txt}`, rebarSub: L("semua muka (ACI 351.3R)", "all faces (ACI 351.3R)"), checks: out.checks, settle })
+    : flowShallow({ q: qs, P: ml.P, M: ml.M, cP: ml.cP, loadSub, A: out.r.geo.A, size: `${nf(I.Bx, 2)} × ${nf(I.By, 2)} × ${nf(I.H, 2)} m`, auto: false, sizeNote: L("ukuran blok dari kriteria dinamis", "block size from dynamic criteria"), rebar: `X ${out.r.reinf.x.bot.txt} · Y ${out.r.reinf.y.bot.txt}`, rebarSub: L("ukuran blok dari kriteria dinamis (ACI 351.3R)", "block size from dynamic criteria (ACI 351.3R)"), checks: out.checks, settle })
   return { file: "Pondasi_" + pre.replace(/\s+/g, ""), title: `${L("Desain Pondasi Dinamis", "Dynamic Foundation Design")} — ${pre}`, sub: `${deep ? L("Pondasi tiang · ", "Piled · ") : ""}${nf(I.rpm, 0)} rpm · ${L("blok", "block")} ${nf(I.Bx, 2)} × ${nf(I.By, 2)} × ${nf(I.H, 2)} m`, refs: codes, metrics, checks: out.checks, kv, tables: tables.filter(Boolean), notes,
-    drawings, cases, combos, out: { ...out, Dy }, settle, fdType: deep ? "deep" : "shallow", steps: [...dynSteps(I, Dy, out), ...(deep ? DB.steps : qs && qs.r ? [{ h: L("Daya dukung izin dari data tanah", "Allowable bearing from soil data"), rows: qs.r.rows }] : [])] }
+    drawings, cases, combos, out: { ...out, Dy }, settle, fdType: deep ? "deep" : "shallow", flow, steps: [flowStep(flow), ...(!deep && qs && qs.r ? [{ h: L("Daya dukung izin dari data tanah", "Allowable bearing from soil data"), rows: qs.r.rows }] : []), ...dynSteps(I, Dy, out), ...(deep ? DB.steps : [])] }
 }

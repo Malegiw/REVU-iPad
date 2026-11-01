@@ -7,6 +7,7 @@ import { palette, root, T, R as Rect } from "./desain/draw.js"
 import { lineChart } from "./desain/chart.js"
 import { projLoad, projSave, soilDS, seisSite, stepper } from "./project.js"
 import { TYPES, typeName, siteClass, shallowQa, pileAxial, QA_METHOD, AXIAL_METHOD, OVR } from "./desain/soil.js"
+import { singlePile, effPile } from "./desain/deep.js"
 import { initUnits, hero, card, footer, nextBtn } from "./pj_ui.js"
 
 const parseNum = (s) => { const v = parseFloat(String(s).trim().replace(",", ".")); return isFinite(v) ? v : NaN }
@@ -58,17 +59,28 @@ export function mountTanah(box, ctx) {
       field({ k: "B", lab: L("Pratinjau: lebar B (bujur sangkar)", "Preview: width B (square)"), u: "m", lo: 0.5, hi: 20, obj: P.bear }, P.bear, changed))
     const qf = el("figure", "dz-fig pj-fig"); qf.append(out.drawings[1].make("screen"))
     resBox.append(card("t-qa", "🏗️", L("Daya dukung pondasi dangkal", "Shallow foundation bearing capacity"), `qa ${nf(toDisp("Q", out.qa0.qa), 0)} ${uName("Q")}`, [bg, tableView(out.tables[2]), qf, stepsTable(out.steps[0])]))
-    // kapasitas tiang
+    // tiang rencana: acuan kapasitas tiang tunggal untuk semua modul Desain (pondasi dalam)
     const pg = el("div", "dz-grid"), pl = P.pile
-    pg.append(field({ k: "kind", type: "seg", lab: L("Jenis tiang", "Pile type"), opts: { pipe: L("Pipa baja", "Steel pipe"), bored: L("Bor beton", "Bored") }, obj: pl }, pl, changed),
-      field({ k: "method", type: "seg", lab: L("Metode", "Method"), opts: { api: "α/β", spt: "N-SPT", cpt: "CPT" }, obj: pl }, pl, changed),
+    pg.append(field({ k: "kind", type: "seg", lab: L("Jenis tiang", "Pile type"), opts: { pipe: L("Pipa baja (pancang)", "Steel pipe (driven)"), bored: L("Bor beton", "Bored concrete") }, obj: pl, wide: true }, pl, changed),
+      field({ k: "method", type: "seg", lab: L("Metode kapasitas aksial", "Axial capacity method"), opts: { api: "α/β", spt: "N-SPT", cpt: "CPT" }, obj: pl }, pl, changed),
       field({ k: "D", lab: L("Diameter D", "Diameter D"), u: "mm", lo: 150, hi: 2000, obj: pl }, pl, changed),
-      ...(pl.kind === "pipe" ? [field({ k: "t", lab: L("Tebal t", "Wall t"), u: "mm", lo: 4, hi: 50, obj: pl }, pl, changed)] : []),
+      ...(pl.kind === "pipe" ? [field({ k: "t", lab: L("Tebal t", "Wall t"), u: "mm", lo: 4, hi: 50, obj: pl }, pl, changed), field({ k: "Fy", lab: "Fy", u: "MPa", lo: 200, hi: 600, obj: pl }, pl, changed),
+        field({ k: "open", type: "seg", lab: L("Ujung", "Tip"), opts: { true: L("Terbuka", "Open"), false: L("Tertutup", "Closed") }, obj: pl, on: (st, v) => { st.open = v === "true" } }, pl, changed)]
+        : [field({ k: "fc", lab: "fc'", u: "MPa", lo: 20, hi: 50, obj: pl }, pl, changed), field({ k: "n", lab: L("Jumlah tulangan", "Number of bars"), u: "", lo: 6, hi: 40, obj: pl }, pl, changed),
+          field({ k: "db", type: "sel", lab: L("Diameter tulangan", "Bar size"), opts: { 16: "D16", 19: "D19", 22: "D22", 25: "D25", 29: "D29" }, obj: pl }, pl, changed)]),
+      field({ k: "L", lab: L("Panjang tiang rencana L (di bawah cap)", "Design pile length L (below cap)"), u: "m", lo: 3, hi: 80, obj: pl }, pl, changed),
       field({ k: "z0", lab: L("Kepala tiang z0 (dasar cap)", "Pile head z0 (cap base)"), u: "m", lo: 0, hi: 10, obj: pl }, pl, changed),
-      field({ k: "Lmax", lab: L("Panjang maks pratinjau", "Max preview length"), u: "m", lo: 6, hi: 80, obj: pl }, pl, changed))
+      field({ k: "fsC", lab: L("FS tekan", "FS compression"), u: "", lo: 1.5, hi: 4, obj: pl }, pl, changed), field({ k: "fsT", lab: L("FS tarik", "FS tension"), u: "", lo: 1.5, hi: 5, obj: pl }, pl, changed),
+      field({ k: "fsL", lab: L("FS lateral", "FS lateral"), u: "", lo: 1.5, hi: 4, obj: pl }, pl, changed), field({ k: "yAllow", lab: L("Defleksi izin kepala", "Allowable head deflection"), u: "mm", lo: 3, hi: 100, obj: pl }, pl, changed),
+      field({ k: "Lmax", lab: L("Panjang maks tabel", "Max table length"), u: "m", lo: 6, hi: 80, obj: pl }, pl, changed))
+    const sp = out.pile, k = el("div", "pj-kpis")
+    ;[[L("Qu tekan", "Qu comp."), sp.ax.Qc], [`Qa ${L("geoteknik", "geotech.")}`, sp.Qac], [`Pa ${L("struktur", "structural")}`, sp.Pstr], [L("Qa DESAIN tekan", "DESIGN Qa comp."), sp.Qad, true], [L("Qa tarik", "Qa tension"), sp.Qat], [L("Ha lateral", "Ha lateral"), sp.Ha]]
+      .forEach(([lab, v, hi], i2) => { const c = el("div", "pj-kpi dz-in" + (hi ? " hi" : "")); c.style.setProperty("--i", i2); c.append(el("span", null, lab), el("b", null, `${nf(toDisp("F", v), lab.includes("Ha") ? 1 : 0)} ${uName("F")}`)); k.append(c) })
     const pf = el("figure", "dz-fig pj-fig"); pf.append(out.drawings[2].make("screen"))
-    resBox.append(card("t-pile", "📍", L("Kapasitas aksial tiang tunggal (pratinjau)", "Single pile axial capacity (preview)"), AXIAL_METHOD()[pl.method].split(" (")[0], [pg, tableView(out.tables[3]), pf,
-      el("p", "dz-note", L("FS 2,5 (tekan) untuk Qa. Kapasitas ini juga dipakai modul Desain bila tipe pondasi = DALAM (dengan D, L, metode yang diatur di modul).", "FS 2.5 (compression) for Qa. The Design modules use the same engine when the foundation type = DEEP (with D, L, method set in the module)."))]))
+    resBox.append(card("t-pile", "📍", L("Tiang rencana — kapasitas tiang tunggal (acuan desain)", "Design pile — single pile capacity (design reference)"), `Qa ${nf(toDisp("F", sp.Qad), 0)} ${uName("F")}`, [
+      el("p", "dz-note", L("Alur pondasi dalam: kapasitas tiang tunggal di sini → modul Desain menghitung beban, jumlah tiang n ≥ P/(Qa·Eg), ukuran & tebal pile cap, lalu tulangan. Semua modul dengan pondasi dalam memakai tiang rencana ini (kecuali diatur sendiri di modul).", "Deep foundation flow: single pile capacity here → Design modules compute loads, number of piles n ≥ P/(Qa·Eg), pile cap size & depth, then reinforcement. Every module with deep foundations uses this design pile (unless overridden in the module).")),
+      pg, k, stepsTable(out.steps[1]), tableView(out.tables[3]), pf,
+      el("p", "dz-note", L("Qa desain = min(Qu/FS; Pa struktur). Ha = min(Hu Broms kepala jepit/FS; H pada defleksi izin). Efisiensi kelompok Eg dan p-multiplier diterapkan di modul sesuai susunan tiang.", "Design Qa = min(Qu/FS; structural Pa). Ha = min(fixed-head Broms Hu/FS; H at allowable deflection). Group efficiency Eg and p-multipliers are applied in the modules for the actual layout."))]))
     exportBar(expBox, () => last, { project: P.info })
     reveal(box)
   }
@@ -169,7 +181,18 @@ function buildOut(P, ds, sc) {
   const qaRows = Bs.map((B) => { const r = { spt: shallowQa(ds, B, B, b.Df, "spt", b.FS), cpt: shallowQa(ds, B, B, b.Df, "cpt", b.FS), vesic: shallowQa(ds, B, B, b.Df, "vesic", b.FS) }; return [B, toDisp("Q", r.spt.qa), toDisp("Q", r.cpt.qa), toDisp("Q", r.vesic.qa), r[b.method].gov] })
   const pl = P.pile, Ls = []
   for (let Lp = 6; Lp <= pl.Lmax + 1e-9; Lp += 3) Ls.push(Lp)
-  const pRows = Ls.map((Lp) => { const a = pileAxial(ds, { D: pl.D / 1000, t: pl.t / 1000, Lp, open: true, method: pl.method, kind: pl.kind, z0: pl.z0 }); return { Lp, a } })
+  const pRows = Ls.map((Lp) => { const a = pileAxial(ds, { D: pl.D / 1000, t: pl.t / 1000, Lp, open: pl.open !== false, method: pl.method, kind: pl.kind, z0: pl.z0 }); return { Lp, a } })
+  const sp = singlePile(effPile({ pSrc: "proj" }, { pile: pl }), ds, pl.z0), F1 = (v, d = 0) => `${nf(toDisp("F", v), d)} ${uF}`
+  const pSteps = { h: `${L("Tiang rencana", "Design pile")} — ${pl.kind === "bored" ? L("bor", "bored") : L("pipa", "pipe")} Ø${nf(pl.D, 0)} mm, L = ${nf(pl.L, 1)} m (${AXIAL_METHOD()[pl.method].split(" (")[0]})`, rows: [
+    [L("Kepala / ujung tiang", "Pile head / tip"), "z0 ; z0 + L", "", `${nf(pl.z0, 2)} ; ${nf(sp.ax.tip.z, 2)} m (${typeName(sp.ax.tip.type)})`],
+    [L("Gesek selimut Qs", "Shaft friction Qs"), pl.method === "spt" ? "Σ fs·πD·Δz ; fs = 2N60 (pasir) / α·cu" : pl.method === "cpt" ? "Σ (qc/αLCPC)·πD·Δz" : "Σ fs·πD·Δz ; α·cu / K·σ'v·tanδ", "", F1(sp.ax.Qc - sp.ax.Qb)],
+    [L("Tahanan ujung Qb", "End bearing Qb"), "q·Ap", `q = ${nf(toDisp("Q", sp.ax.q), 0)} ${uName("Q")}`, F1(sp.ax.Qb)],
+    [L("Kapasitas ultimit Qu", "Ultimate capacity Qu"), "Qs + Qb", "", F1(sp.ax.Qc)],
+    [L("Qa geoteknik", "Geotechnical Qa"), "Qu / FS", `FS ${nf(pl.fsC, 1)}`, F1(sp.Qac)],
+    [L("Pa struktur", "Structural Pa"), sp.strTxt, "", F1(sp.Pstr)],
+    [L("Qa desain tekan", "Design Qa (comp.)"), "min(Qa geoteknik; Pa struktur)", sp.govStr ? L("struktur menentukan", "structure governs") : L("geoteknik menentukan", "geotechnics governs"), F1(sp.Qad)],
+    [L("Qa tarik", "Qa tension"), "(Qs·k + W tiang)/FS", `FS ${nf(pl.fsT, 1)}`, F1(sp.Qat)],
+    [L("Ha lateral", "Ha lateral"), "min(Hu,Broms jepit/FS; H(y izin))", `${F1(sp.Hal, 1)} ; ${F1(sp.Hd, 1)} (y ${nf(pl.yAllow, 0)} mm)`, F1(sp.Ha, 1)]] }
   const auto = (l, k) => (l.auto[k] ? "" : " ✎")
   const derived = { title: L("Parameter desain turunan", "Derived design parameters"), cols: ["z (m)", L("Jenis", "Type"), "N60", "N1(60)", "qc (MPa)", `σ'v (${uQ})`, `cu (${uQ})`, "φ (°)", "E (MPa)", "ν", "e0", "Cc", "OCR", "cv"],
     rows: ds.layers.map((l) => [`${nf(l.z0, 1)}–${nf(l.z1, 1)}`, typeName(l.type), nf(l.N60, 1), nf(l.N1, 1), nf(l.qcE, 2), nf(toDisp("Q", l.svp), 1), l.coh ? nf(toDisp("Q", l.cu), 1) + auto(l, "cu") : "–", l.coh ? "–" : nf(l.phi, 1) + auto(l, "phi"), nf(l.E / 1000, 1) + auto(l, "E"), nf(l.nu, 2) + auto(l, "nu"),
@@ -178,24 +201,24 @@ function buildOut(P, ds, sc) {
     rows: ds.layers.map((l) => [`${nf(l.z0, 1)}–${nf(l.z1, 1)}`, typeName(l.type), toDisp("G", l.g), toDisp("G", l.gsat), l.N || "–", l.qc || "–", l.fs || "–"]), dec: [null, null, 2, 2, 0, 2, 0], align: ["l", "l", "r", "r", "r", "r", "r"] }
   const qaT = { title: `${L("Daya dukung izin bruto qa (pondasi bujur sangkar, Df", "Gross allowable bearing qa (square footing, Df")} = ${nf(b.Df, 2)} m, FS ${nf(b.FS, 1)})`, cols: ["B (m)", `N-SPT (${uQ})`, `CPT (${uQ})`, `Vesic/Skempton (${uQ})`, L("Penentu (metode aktif)", "Governing (active method)")],
     rows: qaRows, dec: [1, 0, 0, 0, null], align: ["r", "r", "r", "r", "l"], note: L(`Metode aktif: ${QA_METHOD()[b.method]}. Granular: min(qa penurunan 25 mm, qult/FS). Kohesif: Skempton (φ = 0) dengan cu dari korelasi.`, `Active method: ${QA_METHOD()[b.method]}. Granular: min(25 mm settlement qa, qult/FS). Cohesive: Skempton (φ = 0) with correlated cu.`) }
-  const pT = { note: L("Qs = gesek yang terpakai (ujung terbuka: luar saja bila tersumbat, luar + dalam bila tidak).", "Qs = friction used (open end: outer only when plugged, outer + inner when unplugged)."), title: `${L("Kapasitas aksial tiang", "Pile axial capacity")} — ${pl.kind === "bored" ? L("bor", "bored") : L("pipa", "pipe")} Ø${nf(pl.D, 0)} mm, ${AXIAL_METHOD()[pl.method]}, z0 = ${nf(pl.z0, 2)} m`, cols: ["L (m)", `Qs (${uF})`, `Qb (${uF})`, `Qu (${uF})`, `Qa = Qu/2,5 (${uF})`, `Qu,tarik (${uF})`, L("Lapis ujung", "Tip layer")],
-    rows: pRows.map(({ Lp, a }) => [Lp, toDisp("F", a.Qc - a.Qb), toDisp("F", a.Qb), toDisp("F", a.Qc), toDisp("F", a.Qc / 2.5), toDisp("F", a.Qt), typeName(a.tip.type)]), dec: [1, 0, 0, 0, 0, 0, null], align: ["r", "r", "r", "r", "r", "r", "l"] }
+  const pT = { note: L("Qs = gesek yang terpakai (ujung terbuka: luar saja bila tersumbat, luar + dalam bila tidak).", "Qs = friction used (open end: outer only when plugged, outer + inner when unplugged)."), title: `${L("Kapasitas aksial tiang", "Pile axial capacity")} — ${pl.kind === "bored" ? L("bor", "bored") : L("pipa", "pipe")} Ø${nf(pl.D, 0)} mm, ${AXIAL_METHOD()[pl.method]}, z0 = ${nf(pl.z0, 2)} m`, cols: ["L (m)", `Qs (${uF})`, `Qb (${uF})`, `Qu (${uF})`, `Qa = Qu/${nf(pl.fsC, 1)} (${uF})`, `Qu,tarik (${uF})`, L("Lapis ujung", "Tip layer")],
+    rows: pRows.map(({ Lp, a }) => [Lp, toDisp("F", a.Qc - a.Qb), toDisp("F", a.Qb), toDisp("F", a.Qc), toDisp("F", a.Qc / pl.fsC), toDisp("F", a.Qt), typeName(a.tip.type)]), dec: [1, 0, 0, 0, 0, 0, null], align: ["r", "r", "r", "r", "r", "r", "l"] }
   const qaChart = (m) => { const Pp = palette(m); return lineChart(Pp, { title: `${L("qa vs lebar B", "qa vs width B")} (Df ${nf(b.Df, 2)} m)`, xLab: "B (m)", yLab: `qa (${uQ})`, legendRight: true,
     series: [["spt", "N-SPT", Pp.acc], ["cpt", "CPT", Pp.steel], ["vesic", "Vesic", Pp.bad]].map(([k, n, c], i) => ({ name: n + (k === b.method ? " ●" : ""), c, w: k === b.method ? 3.4 : 2, dash: k === b.method ? null : "6 4", pts: qaRows.map((r) => [r[0], r[1 + i]]), dots: k === b.method })),
     marks: [{ x: b.B, y: toDisp("Q", qa0.qa), label: `${nf(toDisp("Q", qa0.qa), 0)}`, c: Pp.bad }] }) }
   const pChart = (m) => { const Pp = palette(m); return lineChart(Pp, { title: L("Kapasitas tiang vs panjang", "Pile capacity vs length"), xLab: "L (m)", yLab: uF, legendRight: true,
-    series: [{ name: "Qu", c: Pp.bad, pts: pRows.map(({ Lp, a }) => [Lp, toDisp("F", a.Qc)]), dots: true }, { name: "Qs", c: Pp.steel, dash: "6 4", pts: pRows.map(({ Lp, a }) => [Lp, toDisp("F", a.Qc - a.Qb)]) }, { name: "Qb", c: Pp.acc, dash: "6 4", pts: pRows.map(({ Lp, a }) => [Lp, toDisp("F", a.Qb)]) }, { name: "Qa", c: Pp.ok, w: 2, pts: pRows.map(({ Lp, a }) => [Lp, toDisp("F", a.Qc / 2.5)]) }] }) }
+    series: [{ name: "Qu", c: Pp.bad, pts: pRows.map(({ Lp, a }) => [Lp, toDisp("F", a.Qc)]), dots: true }, { name: "Qs", c: Pp.steel, dash: "6 4", pts: pRows.map(({ Lp, a }) => [Lp, toDisp("F", a.Qc - a.Qb)]) }, { name: "Qb", c: Pp.acc, dash: "6 4", pts: pRows.map(({ Lp, a }) => [Lp, toDisp("F", a.Qb)]) }, { name: "Qa", c: Pp.ok, w: 2, pts: pRows.map(({ Lp, a }) => [Lp, toDisp("F", a.Qc / pl.fsC)]) }], vlines: [{ x: pl.L, label: `L ${nf(pl.L, 1)} m` }], marks: [{ x: pl.L, y: toDisp("F", sp.ax.Qc), label: `Qu ${nf(toDisp("F", sp.ax.Qc), 0)}`, c: Pp.bad }] }) }
   const ss = seisSite(P)
   return {
     file: "Data_Tanah", suite: L("DATA TANAH", "SOIL DATA"), title: `${L("Data Tanah", "Soil Data")} — ${P.soil.name || "BH"}`, sub: `${P.soil.test === "cpt" ? "CPT" : "N-SPT"} · ${ds.layers.length} ${L("lapis", "layers")} · MAT ${nf(ds.gwt, 2)} m · ${L("kelas situs", "site class")} ${sc.cls} (N̄ ${nf(sc.Nbar, 1)})`,
     refs: "SNI 8460:2017 · SNI 1726:2019 · SNI 4153 (SPT) · SNI 2827 (sondir) · Das · Bowles · FHWA GEC 10 · API RP 2GEO · LCPC",
     metrics: [{ lab: L("Kedalaman penyelidikan", "Investigation depth"), val: ds.depth, d: 1, unit: "m" }, { lab: "N̄ (30 m)", val: sc.Nbar, d: 1 }, { lab: L("Kelas situs", "Site class"), val: sc.cls }, { lab: `qa (B ${nf(b.B, 1)} m)`, val: toDisp("Q", qa0.qa), d: 0, unit: uQ }, { lab: L("SDS (tab Gempa)", "SDS (Seismic tab)"), val: ss.sp.SDS, d: 3 }],
     checks: [], kv: [{ title: L("Penyelidikan", "Investigation"), rows: [[L("Titik", "Point"), P.soil.name || "–"], [L("Uji", "Test"), P.soil.test === "cpt" ? "CPT" : "N-SPT"], [L("Muka air tanah", "Groundwater"), ds.gwt, "m", 2], ["Er", P.soil.Er, "%", 0], ["Nkt", P.soil.Nkt, "", 0], [L("Kelas situs", "Site class"), `${sc.cls} — ${sc.why}`], [L("Metode daya dukung", "Bearing method"), QA_METHOD()[b.method]], ["FS", b.FS, "", 1]] }],
-    tables: [input, derived, qaT, pT], qa0,
+    tables: [input, derived, qaT, pT], qa0, pile: sp,
     notes: [L("Korelasi bersifat empiris; verifikasi dengan uji laboratorium (UU/CU, oedometer) dan uji beban tiang. Parameter yang ditimpa manual ditandai ✎.", "Correlations are empirical; verify with laboratory tests (UU/CU, oedometer) and pile load tests. Manually overridden parameters are marked ✎."),
       L("Daya dukung pasir N-SPT/CPT memakai kriteria penurunan 25 mm (Meyerhof) dibatasi keruntuhan geser Vesic; lempung memakai Skempton φ = 0. Kapasitas tiang α/β mengikuti API RP 2GEO (pancang) / FHWA GEC 10 (bor).", "Sand bearing by N-SPT/CPT uses the 25 mm settlement criterion (Meyerhof) capped by Vesic shear failure; clay uses Skempton φ = 0. α/β pile capacity follows API RP 2GEO (driven) / FHWA GEC 10 (bored).")],
     drawings: [{ make: (m) => profileChart(ds, palette(m)), cap: L("Gambar 1 — Profil tanah, N60, qc, cu/φ", "Figure 1 — Soil profile, N60, qc, cu/φ") }, { make: qaChart, cap: L("Gambar 2 — Daya dukung izin vs lebar pondasi", "Figure 2 — Allowable bearing vs footing width"), maxH: 300 }, { make: pChart, cap: L("Gambar 3 — Kapasitas aksial tiang vs panjang", "Figure 3 — Pile axial capacity vs length"), maxH: 300 }],
-    steps: [{ h: `${L("Daya dukung", "Bearing capacity")} — ${qa0.txt} (B = ${nf(b.B, 2)} m, Df = ${nf(b.Df, 2)} m)`, rows: qa0.rows }],
+    steps: [{ h: `${L("Daya dukung", "Bearing capacity")} — ${qa0.txt} (B = ${nf(b.B, 2)} m, Df = ${nf(b.Df, 2)} m)`, rows: qa0.rows }, pSteps],
     combos: [], cases: {},
   }
 }

@@ -1,5 +1,5 @@
 // Semula dibuat oleh ipad_build.py; daftar berkas & VERSION diperbarui untuk YMD-CAL (lihat README). Menyimpan semua berkas supaya app jalan tanpa internet; versi baru menunggu sampai pengguna menekan Muat ulang.
-const VERSION = "e2a146675c"
+const VERSION = "18db6fc68c"
 const CACHE = "ymd-ipad-" + VERSION
 const FILES = [
  "./",
@@ -129,8 +129,22 @@ self.addEventListener("message", (e) => { if (e.data && e.data.type === "skip") 
 self.addEventListener("activate", (e) => {
   e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k.startsWith("ymd-ipad-") && k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()))
 })
+// rekaman suara alami (assets/voice/): MP3 disimpan saat pertama diputar (cache terpisah, tetap ada antar versi);
+// manifest.json diambil dari jaringan dulu supaya rekaman baru langsung terpakai, cadangannya dari cache.
+const VOICE = "ymd-voice-v1"
+function voiceFetch(req) {
+  if (req.url.endsWith(".json")) {
+    return fetch(req).then((r) => { if (r.ok) { const c = r.clone(); caches.open(VOICE).then((k) => k.put(req, c)) } return r })
+      .catch(() => caches.open(VOICE).then((k) => k.match(req, { ignoreSearch: true })).then((hit) => hit || Response.error()))
+  }
+  return caches.open(VOICE).then((k) => k.match(req, { ignoreSearch: true }).then((hit) => hit || fetch(req).then((r) => {
+    if (r.ok && r.status === 200) k.put(req, r.clone())
+    return r
+  })))
+}
 self.addEventListener("fetch", (e) => {
   const req = e.request
   if (req.method !== "GET") return
+  if (req.url.includes("/assets/voice/")) { if (!req.headers.has("range")) e.respondWith(voiceFetch(req)); return }
   e.respondWith(caches.match(req, { ignoreSearch: true }).then((hit) => hit || fetch(req).catch(() => (req.mode === "navigate" ? caches.match("./index.html") : Response.error()))))
 })

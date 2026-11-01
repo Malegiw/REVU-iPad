@@ -11,7 +11,8 @@ export function projDefaults() {
     info: { name: "Project A", client: "", loc: "", doc: "", rev: "0", eng: AUTHOR, chk: "" },
     soil: defaultSoil(),
     bear: { method: "spt", FS: 3, Df: 1.5, B: 2.5 },
-    pile: { kind: "pipe", D: 406.4, t: 12.7, method: "api", z0: 1.5, Lmax: 30 },
+    // tiang rencana proyek (acuan kapasitas tiang tunggal untuk semua modul Desain dengan pondasi dalam)
+    pile: { kind: "pipe", D: 406.4, t: 12.7, open: true, Fy: 310, fc: 30, n: 8, db: 19, L: 18, method: "api", z0: 1.5, fsC: 2.5, fsT: 3.0, fsL: 2.5, yAllow: 12, Lmax: 30 },
     seis: { Ss: 0.8, S1: 0.35, TL: 8, clsMode: "auto", cls: "SD", risk: "III" },
     settle: { ...SETTLE_OPT, manual: [], sel: "" },
     codes: { wind: "7-22", aci: "19" },

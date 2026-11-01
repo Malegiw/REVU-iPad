@@ -26,7 +26,7 @@ export function designCtx(S, P, cmb) {
   setCode(P.codes)
   const ss = seisSite(P)
   const sc = siteCtx({ ...S.site, Ss: ss.Ss, S1: ss.S1, cls: ss.cls, TL: ss.TL })
-  return { ...sc, ss, soil: soilDS(P), bear: P.bear, settle: P.settle, cmbOpts: { SDS: sc.sp.SDS, wpFrac: cmb.wp, ortho: cmb.ortho, enabled: cmb.en, factors: cmb.fx } }
+  return { ...sc, ss, soil: soilDS(P), bear: P.bear, settle: P.settle, pile: P.pile, cmbOpts: { SDS: sc.sp.SDS, wpFrac: cmb.wp, ortho: cmb.ortho, enabled: cmb.en, factors: cmb.fx } }
 }
 export function loadDesign() {
   const S = loadState(defaults)
@@ -39,6 +39,9 @@ export function loadDesign() {
     if (!o) continue
     if (o.qaSrc === undefined && o.qa !== undefined && m.id !== "tiang") S.m[m.id].qaSrc = "manual"
     if (m.id === "tiang" && o.soilSrc === undefined && o.layers) S.m[m.id].soilSrc = "manual"
+    // sebelum alur desain otomatis: pertahankan ukuran telapak & tiang yang sudah diisi pengguna
+    if (m.id !== "tiang" && o.fSize === undefined && (o.B !== undefined || o.D !== undefined)) S.m[m.id].fSize = "manual"
+    if (m.id !== "tiang" && o.fdType === "deep" && o.pSrc === undefined) Object.assign(S.m[m.id], { pSrc: "own", pLay: "grid", tAuto: false })
   }
   units.sys = S.units === "t" ? "t" : "si"
   return S
@@ -150,6 +153,20 @@ function hub(root, S) {
   const save = (x) => { saveState(S); if (x) { root.textContent = ""; hub(root, S); reveal(root) } }
   root.append(stepper("desain", PJ), hero, bar, grid, projectCard(S, save), footer())
 }
+// alur perhitungan: kartu bernomor berurutan (kapasitas → beban → ukuran → tulangan → pemeriksaan → penurunan)
+function flowView(flow) {
+  const box = el("section", "dz-cflow dz-in")
+  const h = el("div", "dz-cflow-h"); h.append(el("b", null, L("Alur perhitungan", "Calculation flow")), el("span", "hint", L("urutan desain dari data tanah sampai penurunan", "design sequence from soil data to settlement")))
+  const row = el("ol", "dz-cflow-row")
+  flow.forEach((f, i) => {
+    const li = el("li", "dz-fstep" + (f.ok === false ? " bad" : f.ok === true ? " ok" : "")); li.style.setProperty("--i", i)
+    const ic = el("span", "dz-fic"); ic.append(ico(f.ic)); const no = el("span", "dz-fno", String(i + 1))
+    const tx = el("div", "dz-ftx"); tx.append(el("span", "dz-fti", f.t), el("b", "dz-fv", f.v), el("small", "dz-ff", f.f || ""), el("small", "dz-fs", f.sub || ""))
+    li.append(no, ic, tx); row.append(li)
+  })
+  box.append(h, row)
+  return box
+}
 function settleCard(sb) {
   const c = el("div", "dz-settle dz-in")
   const h = el("div", "dz-settle-h")
@@ -240,6 +257,7 @@ function page(root, S, mod) {
     status.append(pill, txt, ur)
     status.classList.remove("flash"); void status.offsetWidth; status.classList.add("flash")
     resBox.append(el("h2", "dz-h2", L("Hasil desain", "Design results")))
+    if (out.flow && out.flow.length) resBox.append(flowView(out.flow))
     // gambar + metrik
     const hero = el("div", "dz-hero2 dz-in")
     const figBox = el("div", "dz-fig")

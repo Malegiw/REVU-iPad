@@ -4,7 +4,7 @@ import { PRESETS, tankLoads, tankCases, analyzeTank } from "./tank.js"
 import { palette, tankDraw } from "./draw.js"
 import { skTank, skTankFound } from "./sketch.js"
 import { tankSteps } from "./steps.js"
-import { DEEP0, fdSection, qaFor, qaNote, isDeep, settleOf, settleTable, deepTables, deepKv, pilePlan, pileSection } from "./deep.js"
+import { DEEP0, fdSection, qaFor, qaNote, isDeep, settleOf, settleTable, deepTables, deepKv, pilePlan, pileSection, effPile, flowDeep, flowShallow, flowStep, maxLoad } from "./deep.js"
 
 export const id = "tangki"
 export const icon = "🛢️"
@@ -59,9 +59,10 @@ export function form(s) {
 }
 
 export function run(s, ctx) {
-  const I = { ...s, wind: ctx.wind, seis: { ...ctx.seisBase, Ie: s.Ie, anchored: s.anchored }, nCol: Math.round(s.nCol), soilDS: ctx.soil, settleOpt: ctx.settle }
+  let I = { ...s, wind: ctx.wind, seis: { ...ctx.seisBase, Ie: s.Ie, anchored: s.anchored }, nCol: Math.round(s.nCol), soilDS: ctx.soil, settleOpt: ctx.settle }
   const deep = isDeep(s) && !!ctx.soil
-  if (!deep) I.fdType = "shallow"
+  if (deep) I = effPile(I, ctx)
+  else I.fdType = "shallow"
   const ringS = !deep && (I.found === "auto" ? I.D > I.dLim : I.found === "ring")
   const qs = deep ? null : ringS ? qaFor(s, ctx, Math.max(I.rbf || 0, I.rb), Math.PI * I.D, Math.max(I.rh - I.z0, 0.3)) : qaFor(s, ctx, I.D + 2 * I.proj, I.D + 2 * I.proj, Math.max(I.sh, 0.3))
   if (qs) I.qa = qs.qa
@@ -70,6 +71,7 @@ export function run(s, ctx) {
   const combos = expandCombos(cases, 6, { ...ctx.cmbOpts, dirs: "x" })
   const out = analyzeTank(I, combos)
   const Rr = out.R, ring = out.type === "ring", piled = out.type === "piled"
+  if (piled) Object.assign(I, { sh: Rr.sh, psx: Rr.sUse, pce: Rr.ce })                 // tebal pelat & jarak radial hasil desain otomatis
   const uF = uName("F"), uM = uName("M"), uQ = uName("Q"), uW = uName("W")
   const s0 = T.s
   const metrics = [
@@ -120,7 +122,17 @@ export function run(s, ctx) {
   const drawings = [{ make: (m) => tankDraw(I, out, palette(m)), cap: L("Gambar 1 — Tangki, pondasi, dan tekanan tanah", "Figure 1 — Tank, foundation and soil pressure") }]
   if (piled) drawings.push({ make: (m) => pilePlan(Rr.m, Rr, palette(m), L("Denah tiang di bawah pelat tangki", "Pile layout under tank slab")), cap: L("Gambar 2 — Denah tiang & reaksi (ASD penentu)", "Figure 2 — Pile layout & reactions (governing ASD)"), maxH: 320 },
     { make: (m) => pileSection(Rr.m, I, Rr, ctx.soil, palette(m)), cap: L("Gambar 3 — Potongan tiang & profil tanah", "Figure 3 — Pile section & soil profile"), maxH: 300 })
+  // ---- alur perhitungan
+  const ml = piled ? maxLoad(Rr.asd) : ring ? { P: Math.max(...Rr.asd.map((r) => r.lineMax)) * Math.PI * I.D, M: 0, cP: Rr.wq ? Rr.wq.c.id : "" } : maxLoad(Rr.asd.map((r) => ({ ...r, R: { P: r.P, Mx: 0, My: r.M } })))
+  const We = T.Ws + T.Wr + T.Wb + I.Wacc
+  const loadSub = `${L("tangki kosong", "empty tank")} ${nf(toDisp("F", We), 0)} + ${L("cairan", "liquid")} ${nf(toDisp("F", T.Wp), 0)} (${L("uji", "test")} ${nf(toDisp("F", T.Wt), 0)}) ${uF}${s0 ? ` · Mrw ${nf(toDisp("M", s0.Mrw), 0)} ${uM}` : ""}`
+  const flow = piled ? flowDeep({ sp1: Rr.sp1, I, P: ml.P, M: ml.M, cP: ml.cP, loadSub, n: Rr.n, nAx: Rr.nAx, auto: I.pLay !== "grid", gov: "",
+      layout: `${L("radial", "radial")} ${Rr.rings.map((g) => g.n).join(" + ")} (${Rr.rings.length - 1} ${L("cincin + pusat", "rings + centre")})`,
+      capTitle: L("Pelat di atas tiang", "Slab on piles"), capF: L("Ø pelat dari Ø tangki; cincin tiang dari tepi (R − ce) ke pusat tiap s; tebal dari pons & lentur", "slab Ø from tank Ø; pile rings from the edge (R − ce) inward every s; depth from punching & flexure"), cap: `Ø${nf(Rr.Ds, 2)} × ${nf(I.sh, 2)} m`, capSub: `s = ${nf(Rr.sUse, 2)} m (${L("radial & keliling", "radial & circumferential")}) · ce = ${nf(Rr.ce, 2)} m${I.tAuto !== false ? " · " + L("tebal otomatis", "automatic depth") : ""}`,
+      rebar: `${L("atas", "top")} ${Rr.top.txt} · ${L("bawah", "bottom")} ${Rr.bot.txt}`, rebarSub: L("dua arah", "both ways"), checks: out.checks, settle })
+    : flowShallow({ q: qs, P: ml.P, M: ml.M, cP: ml.cP, loadSub, A: ring ? Math.PI * I.D * Math.max(I.rbf || 0, I.rb) : Rr.geo.A, size: ring ? `Ringwall ${nf(I.rb, 2)} × ${nf(I.rh, 2)} m${I.rbf > I.rb ? ` · ${L("telapak", "footing")} ${nf(I.rbf, 2)} m` : ""}` : `${L("pelat", "slab")} Ø${nf(Rr.Ds, 2)} × ${nf(I.sh, 2)} m`, sizeNote: L("ukuran dari diameter tangki", "size from tank diameter"),
+      rebar: ring ? `hoop ${Rr.nb} D${I.dbH}` : `${L("bawah", "bottom")} ${Rr.bot.txt} · ${L("atas", "top")} ${Rr.top.txt}`, rebarSub: "", checks: out.checks, settle })
   return { file: I.preset === "wash" ? "Pondasi_WashTank" : "Pondasi_SurgeTank", title: `${L("Desain Pondasi", "Foundation Design")} ${I.preset === "wash" ? "Wash Tank" : "Surge Tank"} — ${ring ? "Ringwall" : piled ? L("Pelat di atas Tiang", "Slab on Piles") : L("Pelat Penuh", "Full Slab")}`,
     sub: `Ø${nf(I.D, 2)} × ${nf(I.Hs, 2)} m · SG ${nf(I.SG, 2)} · ${I.anchored ? L("diangkur", "anchored") : L("tanpa angkur", "unanchored")}`, refs: codes, metrics, checks: out.checks, kv, tables: tables.filter(Boolean), notes,
-    drawings, cases, combos, out, settle, fdType: piled ? "deep" : "shallow", steps: [...tankSteps(I, T, out), ...(qs && qs.r ? [{ h: L("Daya dukung izin dari data tanah", "Allowable bearing from soil data"), rows: qs.r.rows }] : [])] }
+    drawings, cases, combos, out, settle, fdType: piled ? "deep" : "shallow", flow, steps: [flowStep(flow), ...(qs && qs.r ? [{ h: L("Daya dukung izin dari data tanah", "Allowable bearing from soil data"), rows: qs.r.rows }] : []), ...tankSteps(I, T, out)] }
 }
