@@ -195,7 +195,7 @@ export function analyzePile(I, combos) {
   const Eg = I.useEg && n > 1 ? convLab(I.nx, I.ny, D, sp) : 1
   let ax
   if (isH) ax = axialHelical({ ds: D, helices: I.helices.map((d) => d / 1000), zTip: I.zTip, ratio: I.ratio, layers: I.layers, gwt: I.gwt, Kt: I.Kt, T: I.T, plateCap: I.plateCap, shaft: I.shaft })
-  else ax = axialPipe(D, (I.t) / 1000, Lp, I.open, I.layers, I.gwt)
+  else ax = I.axOverride || axialPipe(D, (I.t) / 1000, Lp, I.open, I.layers, I.gwt)
   const Qac = ax.Qc * Eg / I.fsC, Qat = ax.Qt * Eg / I.fsT
   // ---- lateral
   const sec = pipeCapacity(Dmm, tmm, I.Fy, 1000, 1000)

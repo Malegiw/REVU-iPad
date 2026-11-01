@@ -8,12 +8,13 @@ const store = {
 
 // ---------------------------------------------------------------- bahasa
 let lang = store.get("ymd.lang", (navigator.language || "id").startsWith("en") ? "en" : "id")
-const EN = {}                                   // terjemahan antarmuka alat, dimuat dari data/en_<alat>.json
+const EN = {}                                   // terjemahan antarmuka lama (alat baru memakai L(id, en) langsung di kode)
 const SHELL = {
   sub: { id: "Desain pondasi & sipil migas · offline", en: "O&G foundation & civil design · offline" },
   home: { id: "Beranda", en: "Home" }, penurunan: { id: "Penurunan Pondasi", en: "Foundation Settlement" }, alur: { id: "Alur Produksi Migas", en: "Oil & Gas Production Flow" },
-  desain: { id: "Desain Pondasi", en: "Foundation Design" },
+  desain: { id: "Desain Pondasi", en: "Foundation Design" }, tanah: { id: "Data Tanah", en: "Soil Data" }, gempa: { id: "Parameter Gempa", en: "Seismic Parameters" }, laporan: { id: "Laporan Proyek", en: "Project Report" },
   nHome: { id: "Beranda", en: "Home" }, nPenurunan: { id: "Penurunan", en: "Settlement" }, nAlur: { id: "Alur Migas", en: "Oil & Gas Flow" }, nDesain: { id: "Desain", en: "Design" },
+  nTanah: { id: "Tanah", en: "Soil" }, nGempa: { id: "Gempa", en: "Seismic" }, nLaporan: { id: "Laporan", en: "Report" },
   offlineOk: { id: "✓ Siap offline", en: "✓ Offline ready" }, newVer: { id: "Versi baru siap.", en: "A new version is ready." }, reload: { id: "Muat ulang", en: "Reload" },
   load: { id: "Memuat…", en: "Loading…" }, fail: { id: "Gagal memuat. Periksa sambungan lalu coba lagi.", en: "Could not load. Check the connection and try again." },
   themeTip: { id: "Tema: otomatis / terang / gelap", en: "Theme: auto / light / dark" },
@@ -38,7 +39,8 @@ function applyTheme() {
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (theme === "auto") { applyTheme(); route() } })
 
 // ---------------------------------------------------------------- rute
-const ROUTES = ["home", "desain", "penurunan", "alur"]
+const ROUTES = ["home", "tanah", "gempa", "desain", "penurunan", "laporan", "alur"]
+const PAGES = { tanah: ["./tanah_ui.js", "mountTanah"], gempa: ["./gempa_ui.js", "mountGempa"], penurunan: ["./penurunan_ui.js", "mountPenurunan"], laporan: ["./laporan_ui.js", "mountLaporan"] }
 const rawRoute = () => (location.hash.replace(/^#\/?/, "") || "home").split("/")
 const current = () => { const r = rawRoute()[0]; return ROUTES.includes(r) ? r : "home" }
 const subRoute = () => rawRoute()[1] || ""
@@ -50,11 +52,6 @@ function drawNav() {
   $("#btnLang").textContent = lang === "id" ? "ID" : "EN"
   $("#sub").textContent = S("sub")
   document.documentElement.lang = lang
-}
-
-async function loadEN(tool) {
-  if (lang !== "en" || EN["__" + tool]) return
-  try { Object.assign(EN, await (await fetch(`data/en_${tool}.json`)).json()); EN["__" + tool] = "1" } catch (e) { /* tanpa terjemahan: teks Indonesia */ }
 }
 
 async function route() {
@@ -73,14 +70,14 @@ async function route() {
       const box = el("div")
       app.append(box)
       mod.mountDesain(box, { t, lang }, subRoute())
-    } else if (r === "penurunan") {
-      await loadEN("penurunan")
-      const mod = await import("./penurunan_ui.js")
+    } else if (PAGES[r]) {
+      const [file, fn] = PAGES[r]
+      const mod = await import(file)
       if (my !== token) return
       app.textContent = ""
-      const h = el("h1", null, S("penurunan")); const box = el("div")
-      app.append(h, box, el("p", "cap", S("disc")))
-      mod.mountPenurunan(box, { t, lang })
+      const box = el("div")
+      app.append(box, el("p", "cap", S("disc")))
+      mod[fn](box, { t, lang })
     } else if (r === "alur") {
       const data = await (await fetch(`data/flow_${lang}_${dark() ? "dark" : "cloud"}.json`)).json()
       const mod = await import("./flow.js")

@@ -6,6 +6,7 @@
 import { L, chk, GAMMA_W, GAMMA_C, GAMMA_S, windOnBody, cfRound, qz, rad } from "./core.js"
 import { asFlex, pickBars, phiMn, rhoTS, vcOne, vcTwo } from "./rc.js"
 import { makeGeo, planPoly, pressure, contactChecks } from "./footing.js"
+import { piledSlab } from "./deep.js"
 
 export const PRESETS = {
   wash: { D: 10.0, Hs: 9.76, H: 8.5, SG: 1.0, Ht: 9.5, tShell: 7, tBot: 8, tRoof: 6, slope: 9.5, roof: "col", nCol: 1, colB: 0.45, colFrac: 0.45, Wacc: 60, Lr: 1.0 },
@@ -82,7 +83,7 @@ export function analyzeTank(I, combos) {
   const T = tankLoads(I)
   const checks = []
   const gT = L("Tangki (API 650)", "Tank (API 650)"), gG = L("Geoteknik & stabilitas (ASD)", "Geotechnical & stability (ASD)"), gR = L("Beton pondasi (LRFD)", "Foundation concrete (LRFD)")
-  const type = I.found === "auto" ? (I.D <= I.dLim ? "slab" : "ring") : I.found
+  const type = I.fdType === "deep" && I.soilDS ? "piled" : I.found === "auto" ? (I.D <= I.dLim ? "slab" : "ring") : I.found
   checks.push(chk(gT, L("Stabilitas angin tangki kosong tanpa angkur: 0,6Mw ≤ MDL/1,5 + MDLR", "Wind stability, unanchored empty tank: 0.6Mw ≤ MDL/1.5 + MDLR"), "API 650 §5.11.2 (a)", T.urWind, 1, "", { d: 3 }))
   if (T.s) {
     const s = T.s
@@ -90,8 +91,8 @@ export function analyzeTank(I, combos) {
     checks.push(chk(gT, L("Geser dasar gempa ≤ tahanan gesek (μ = 0,4)", "Seismic base shear ≤ friction resistance (μ = 0.4)"), "API 650 §E.7.6", s.V, s.slideR, "F", { d: 1 }))
     checks.push(chk(gT, L("Tinggi gelombang sloshing ≤ ruang bebas (Hs − H)", "Sloshing wave height ≤ freeboard (Hs − H)"), "API 650 §E.7.2", s.slosh, I.Hs - I.H, "m", { d: 2 }))
   }
-  const R = type === "ring" ? ringwall(I, T, combos) : slab(I, T, combos)
-  for (const c of R.checks) checks.push({ ...c, grp: c.grp === "G" ? gG : gR })
+  const R = type === "piled" ? piledTank(I, T, combos) : type === "ring" ? ringwall(I, T, combos) : slab(I, T, combos)
+  for (const c of R.checks) checks.push({ ...c, grp: c.grp === "G" ? gG : c.grp === "S" ? gR : c.grp })
   return { T, type, R, checks }
 }
 
@@ -168,6 +169,19 @@ function columnPad(I, T, combos, out) {
   out.push(chk("S", L(`Lentur pad kolom (${bars.txt})`, `Column pad flexure (${bars.txt})`), "SNI 2847 §13.2.7", Mu, phiMn(bars.As, 1000, d, I.fc, I.fy), "Mm", { note: cp, d: 1 }))
   out.push(chk("S", L("Geser satu arah pad kolom", "Column pad one-way shear"), "SNI 2847 §22.5", Vu, 0.75 * vcOne(I.fc) * d, "W", { note: cp, d: 1 }))
   return { B, t, d, Pu, bars }
+}
+
+// ---------------------------------------------------------------- pelat penuh di atas tiang (pondasi dalam)
+function piledTank(I, T, combos) {
+  const Ds = I.D + 2 * I.proj, h = I.sh, Wsl = Math.PI * Ds * Ds / 4 * h * GAMMA_C
+  const tot = (c) => {
+    const [w, , Ms, V, p, Pc] = c.vec
+    return { P: w * Math.PI * I.D + p * T.A + c.fD * (Wsl + T.Wb) + Pc * (I.nCol || 0), M: Ms + V * h, V }
+  }
+  const R = piledSlab(I, T, combos, tot, { soil: I.soilDS, settle: I.settleOpt })
+  R.checks = R.checks.map((c) => ({ ...c, grp: /LRFD/.test(c.grp) && !/Tiang|Piles/.test(c.grp) ? "S" : c.grp }))
+  R.wq = null
+  return R
 }
 
 // ---------------------------------------------------------------- pelat penuh

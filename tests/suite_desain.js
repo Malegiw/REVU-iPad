@@ -10,7 +10,7 @@ import * as dy from "../js/desain/dynamic.js"
 import { crc32, buildXlsx } from "../js/desain/xlsx.js"
 import { winAnsi, textWidth, reportPdf } from "../js/desain/pdf.js"
 import { footFrom } from "../js/desain/settle.js"
-import { settleFor } from "../js/penurunan_ui.js"
+import { settleShallow, deriveSoil, defaultSoil } from "../js/desain/soil.js"
 import { analyze } from "../js/penurunan.js"
 
 export async function run({ check }) {
@@ -113,9 +113,10 @@ export async function run({ check }) {
   // ---- penautan Desain ↔ Penurunan
   const fo = footFrom("oct", 4, 4, 0.82843 * 16, 1.5, 80, "vessel", "uji")
   near("telapak oktagon → lingkaran luas sama", Math.PI * fo.B ** 2 / 4, 0.82843 * 16, 1e-9)
-  const sf = settleFor({ shape: "persegi", B: 3, L: 4, Df: 1.0, q: 120 })
-  truthy("penurunan dari modul Desain dihitung dengan mesin tab Penurunan", sf.res && sf.res.s_life > 0 && Math.abs(sf.res.q_gross - 120) < 1e-9)
-  const sf2 = settleFor({ shape: "persegi", B: 3, L: 4, Df: 1.0, q: 240 })
+  const dsT = deriveSoil(defaultSoil())
+  const sf = settleShallow(dsT, { shape: "persegi", B: 3, L: 4, Df: 1.0, q: 120 })
+  truthy("penurunan dari modul Desain dihitung dengan mesin tab Penurunan (data tab Tanah)", sf.res && sf.res.s_life > 0 && Math.abs(sf.res.q_gross - 120) < 1e-9)
+  const sf2 = settleShallow(dsT, { shape: "persegi", B: 3, L: 4, Df: 1.0, q: 240 })
   truthy("penurunan naik bila tekanan naik", sf2.res.s_life > sf.res.s_life)
 
   // ---- penulis berkas

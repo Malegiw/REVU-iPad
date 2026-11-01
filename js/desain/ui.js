@@ -354,7 +354,8 @@ export function buildReport(out, S, now) {
   const metrics = out.metrics.map((m) => [m.lab, (typeof m.val === "number" ? nf(m.val, m.d ?? 1) : m.val) + (m.unit ? " " + m.unit : "")])
   const gf = g ? fmtCheck(g) : null
   return { title: out.title, sub: out.sub, refs: out.refs, project: S.project, stamp: stamp(now), copy: copyright(now), author: AUTHOR, units: unitsTxt, ok,
-    gov: g ? `${L("Menentukan", "Governing")}: ${g.item} — UR ${gf.urTxt}${g.note ? " (" + g.note + ")" : ""}` : "", metrics, g }
+    banner: out.checks.length ? null : (out.banner || L("RINGKASAN DATA PROYEK", "PROJECT DATA SUMMARY")),
+    gov: g ? `${L("Menentukan", "Governing")}: ${g.item} — UR ${gf.urTxt}${g.note ? " (" + g.note + ")" : ""}` : (out.govTxt || ""), metrics, g }
 }
 export function exportBar(box, getOut, S) {
   box.textContent = ""
@@ -370,10 +371,17 @@ export function exportBar(box, getOut, S) {
     busy(bp, true)
     try {
       const o = getOut(), now = new Date(), rep = buildReport(o, S, now)
-      const imgs = []
-      for (const d of o.drawings || []) { try { imgs.push({ ...(await svgToJpeg(d.make("print"))), cap: d.cap, maxH: d.maxH }) } catch (e) { /* gambar dilewati */ } }
-      rep.sections = pdfSections(o, imgs)
-      dl(`YMD_${o.file}_${(S.project.doc || "calc").replace(/[^\w-]+/g, "_")}_${fileStamp(now)}.pdf`, reportPdf(rep, LBL()), "application/pdf")
+      const shoot = async (o2) => { const imgs = []; for (const d of o2.drawings || []) { try { imgs.push({ ...(await svgToJpeg(d.make("print"))), cap: d.cap, maxH: d.maxH }) } catch (e) { /* gambar dilewati */ } } return imgs }
+      if (o.chapters) {
+        rep.sections = []
+        for (let i = 0; i < o.chapters.length; i++) {
+          const ch = o.chapters[i], letter = "ABCDEFGHIJ"[i]
+          rep.sections.push({ h: `${letter}. ${ch.title}`, text: ch.sub ? [ch.sub] : undefined })
+          rep.sections.push(...pdfSections(ch.out, ch.noImg ? [] : await shoot(ch.out), letter + "."))
+        }
+        if (o.notes && o.notes.length) rep.sections.push({ h: L("Catatan umum", "General notes"), text: o.notes })
+      } else rep.sections = pdfSections(o, await shoot(o))
+      dl(`YMD_${o.file}_${(S.project.doc || "calc").replace(/[^\w-]+/g, "_")}_${fileStamp(now)}.pdf`, reportPdf(rep, { ...LBL(), ...(o.suite ? { suite: o.suite } : {}) }), "application/pdf")
     } finally { busy(bp, false) }
   }
   bpr.onclick = () => window.print()
@@ -381,15 +389,15 @@ export function exportBar(box, getOut, S) {
   box.append(h, g, el("p", "dz-copy", `© ${AUTHOR} · ${L("cap waktu ditambahkan saat ekspor", "timestamp added on export")} (DD/MM/YYYY - HH:MM)`))
 }
 function kvRows(kv) { return kv.map(([a, b, u, d]) => [a, typeof b === "number" ? nf(b, d ?? 3) : String(b ?? ""), u || ""]) }
-function pdfSections(o, imgs) {
+function pdfSections(o, imgs, prefix = "") {
   const sec = []
   let n = 1
-  const H = (t) => `${n++}. ${t}`
+  const H = (t) => `${prefix}${n++}. ${t}`
   for (const blk of o.kv) sec.push({ h: H(blk.title), kv: kvRows(blk.rows) })
   imgs.forEach((im, i) => sec.push({ h: i === 0 ? H(L("Gambar", "Drawings")) : "", img: im }))
   ;(o.steps || []).forEach((st, i) => sec.push({ h: i === 0 ? H(L("Lembar perhitungan", "Calculation sheet")) : "", note: st.h, table: { cols: [L("Besaran", "Quantity"), L("Rumus", "Formula"), L("Substitusi", "Substitution"), L("Hasil", "Result")], rows: st.rows, w: [24, 32, 28, 16], align: ["l", "l", "l", "r"], fs: 6.9 } }))
   for (const t of o.tables) sec.push({ h: H(t.title), note: t.note, table: { cols: t.cols, rows: t.rows.map((r) => (r.cells || r).map((c, j) => cellStr(c, t.dec && t.dec[j]))), align: t.align ? t.align.map((a) => (a === "r" ? "r" : "l")) : undefined } })
-  sec.push({ h: H(L("Pemeriksaan (rasio pemanfaatan UR = demand/kapasitas)", "Checks (utilisation ratio UR = demand/capacity)")), checks: o.checks.map((c) => ({ ...c, ...fmtCheck(c), item: `${c.item}`, note: c.note, ref: c.ref })) })
+  if (o.checks.length) sec.push({ h: H(L("Pemeriksaan (rasio pemanfaatan UR = demand/kapasitas)", "Checks (utilisation ratio UR = demand/capacity)")), checks: o.checks.map((c) => ({ ...c, ...fmtCheck(c), item: `${c.item}`, note: c.note, ref: c.ref })) })
   if (o.notes && o.notes.length) sec.push({ h: H(L("Catatan & batasan", "Notes & limitations")), text: o.notes })
   return sec.filter((s) => s.h !== "" || s.img)
 }
@@ -400,7 +408,7 @@ function xlsxFrom(o, S, now) {
   const P = S.project
   ;[[L("Proyek", "Project"), P.name], [L("Klien", "Client"), P.client], [L("No. dokumen", "Document no."), P.doc], ["Rev.", P.rev], [L("Dihitung", "Prepared"), P.eng], [L("Diperiksa", "Checked"), P.chk], [L("Tanggal", "Date"), stamp(now)], [L("Satuan", "Units"), rep.units]]
     .forEach(([a, b]) => sum.push([{ v: a, s: ST.lab }, { v: b || "–", s: ST.text }]))
-  sum.push([], [{ v: rep.ok ? L("SEMUA PEMERIKSAAN OK", "ALL CHECKS OK") : L("ADA PEMERIKSAAN YANG TIDAK MEMENUHI", "SOME CHECKS NOT SATISFIED"), s: rep.ok ? ST.ok : ST.bad }], [{ v: rep.gov, s: ST.text }], [])
+  sum.push([], [{ v: rep.banner || (rep.ok ? L("SEMUA PEMERIKSAAN OK", "ALL CHECKS OK") : L("ADA PEMERIKSAAN YANG TIDAK MEMENUHI", "SOME CHECKS NOT SATISFIED")), s: rep.banner ? ST.sec : rep.ok ? ST.ok : ST.bad }], [{ v: rep.gov, s: ST.text }], [])
   sum.push([{ v: L("Ringkasan", "Summary"), s: ST.head }, { v: L("Nilai", "Value"), s: ST.head }])
   rep.metrics.forEach(([a, b]) => sum.push([{ v: a, s: ST.text }, { v: b, s: ST.text }]))
   sum.push([], cp)

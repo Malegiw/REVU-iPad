@@ -1,6 +1,7 @@
 // Lembar perhitungan langkah demi langkah (Besaran | Rumus | Substitusi | Hasil) untuk tiap modul Desain: ditampilkan di layar dan ikut ke PDF/Excel.
 import { L, nf, toDisp, uName, GAMMA_C, GAMMA_W, GAMMA_S, rad, seismicCoef, qz, kz } from "./core.js"
 import { beta1, rhoTS, sqfc } from "./rc.js"
+import { deepSteps } from "./deep.js"
 
 const F = (v, d = 1) => `${nf(toDisp("F", v), d)} ${uName("F")}`
 const Mo = (v, d = 1) => `${nf(toDisp("M", v), d)} ${uName("M")}`
@@ -23,7 +24,7 @@ export function footingSteps(md, r, rc, prc, label = "") {
     [L("Berat tanah urug", "Backfill weight"), "Ws = (A − Ap)·(Df − t)·γs", `(${nf(A, 3)} − ${nf(pedA, 3)}) × ${nf(W.cover, 2)} × ${G(md.gs ?? 18)}`, F(W.soil)],
     [L("Total berat pondasi", "Total foundation weight"), "W = Wf + Wp + Ws", "", F(W.total)],
   ]))
-  const gv = r.asd.reduce((a, b) => (b.pr.qmax / b.qa > a.pr.qmax / a.qa ? b : a), r.asd[0])
+  const gv = r.piled ? null : r.asd.reduce((a, b) => (b.pr.qmax / b.qa > a.pr.qmax / a.qa ? b : a), r.asd[0])
   if (gv) {
     const R = gv.R, pr = gv.pr, full = pr.mode === "full"
     const Sx = r.geo.Ixx / (Math.max(...r.geo.poly.map((q) => Math.abs(q[1])))), Sy = r.geo.Iyy / (Math.max(...r.geo.poly.map((q) => Math.abs(q[0]))))
@@ -44,7 +45,7 @@ export function footingSteps(md, r, rc, prc, label = "") {
   const rows = [[L("Tinggi efektif", "Effective depth"), "d = t − selimut − db", `${nf(h, 0)} − ${rc.cover} − ${rc.db}`, `${nf(d, 0)} mm`]]
   for (const ax of ["x", "y"]) {
     const q = r.reinf[ax], AX = ax.toUpperCase(), Mu = q.Mpos * 1e6, Rn = Mu / (0.9 * 1000 * d * d)
-    rows.push([`Mu ${AX} (${L("muka pedestal", "pedestal face")})`, L("Mu = Σ(qu − wu)·dist·dA / lebar", "Mu = Σ(qu − wu)·dist·dA / width"), q.posAt ? `${q.posAt.combo} · ${q.posAt.at}` : "", Mm(q.Mpos)])
+    rows.push([`Mu ${AX} (${L("muka pedestal", "pedestal face")})`, r.piled ? L("Mu = Σ Ri·dist − Σ wu·dist·dA / lebar (reaksi tiang)", "Mu = Σ Ri·dist − Σ wu·dist·dA / width (pile reactions)") : L("Mu = Σ(qu − wu)·dist·dA / lebar", "Mu = Σ(qu − wu)·dist·dA / width"), q.posAt ? `${q.posAt.combo} · ${q.posAt.at}` : "", Mm(q.Mpos)])
     rows.push([`Rn ${AX}`, "Rn = Mu/(φ·b·d²)", `${nf(Mu / 1e6, 1)}e6 / (0,9 × 1000 × ${nf(d, 0)}²)`, `${nf(Rn, 3)} MPa`])
     rows.push([`As ${AX} ${L("perlu", "req.")}`, "As = 0,85fc'/fy·[1 − √(1 − 2Rn/(0,85fc'))]·b·d", `fc' ${rc.fc}, fy ${rc.fy}`, `${nf(q.fb.As || 0, 0)} mm²/m`])
     rows.push([`As,min`, "As,min = ρts·b·h", `${rhoTS(rc.fy)} × 1000 × ${nf(h, 0)}`, `${nf(rhoTS(rc.fy) * 1000 * h, 0)} mm²/m`])
@@ -56,7 +57,7 @@ export function footingSteps(md, r, rc, prc, label = "") {
     rows.push([`${L("Pons pedestal", "Pedestal punching")}${r.punch.length > 1 ? " " + (k + 1) : ""}`, "vu = Vu/(b0·d) + γv·Mu·c/Jc", `Vu ${F(p.Vu)}, b0 ${nf(p.b0, 0)} mm`, `${nf(p.vu, 3)} MPa`])
     rows.push(["φvc", "φ·min(0,33; 0,17(1+2/β); 0,083(αs·d/b0+2))·√fc'", `0,75 × … × ${nf(sqfc(rc.fc), 3)}`, `${nf(p.phivc, 3)} MPa`])
   })
-  out.push(sec(L("Desain beton telapak (LRFD)", "Footing concrete design (LRFD)") + sfx, rows))
+  out.push(sec((r.piled ? L("Desain beton pile cap (LRFD, reaksi tiang §13.4.2.5)", "Pile cap concrete design (LRFD, pile reactions §13.4.2.5)") : L("Desain beton telapak (LRFD)", "Footing concrete design (LRFD)")) + sfx, rows))
   const pr = r.pedRes[0]
   if (pr && pr.worst && md.pedKind !== "plinth" && md.peds[0].h > 0) out.push(sec(L("Pedestal (LRFD)", "Pedestal (LRFD)") + sfx, [
     [L("Luas & tulangan", "Area & steel"), "ρ = As/Ag", `${prc.n} D${prc.db} / ${nf(pr.Ag, 0)} mm²`, `${nf(pr.rho * 100, 3)} %`],
@@ -193,6 +194,17 @@ export function tankSteps(I, T, out) {
     [L("Tarik hoop terfaktor", "Factored hoop tension"), "Tu = 1,6·T", "", F(R.Tu)],
     [L("Tulangan hoop perlu", "Required hoop steel"), "As = max(Tu/(0,9·fy) ; 0,0025·b·h)", `${nf(R.AsH, 0)} ; ${nf(R.AsHmin, 0)}`, `${nf(Math.max(R.AsH, R.AsHmin), 0)} mm² → ${R.nb} D${I.dbH}`],
   ]))
+  else if (out.type === "piled") {
+    s.push(sec(L("Pelat di atas tiang (pelat datar terbalik, metode desain langsung)", "Slab on piles (inverted flat plate, direct design)"), [
+      [L("Diameter pelat", "Slab diameter"), "Ds = D + 2a", `${nf(I.D, 2)} + 2 × ${nf(I.proj, 2)}`, m(R.Ds)],
+      [L("Jumlah tiang", "Number of piles"), L("grid s di dalam Ø(Ds − 2ce)", "grid s inside Ø(Ds − 2ce)"), `s ${nf(I.psx, 2)} m, ce ${nf(I.pce, 2)} m`, String(R.n)],
+      [L("Beban merata ekuivalen", "Equivalent uniform load"), "wu = Pu,tiang,maks/s²", "", `${nf(toDisp("Q", R.wu), 1)} ${uName("Q")}`],
+      [L("Momen statis panel", "Panel static moment"), "Mo = wu·s·ln²/8, ln = s − 0,89D", "", Mo(R.wu * I.psx * Math.max(I.psx - 0.89 * I.pD / 1000, 0.3) ** 2 / 8, 1)],
+      [L("Momen negatif / positif lajur kolom", "Column-strip negative / positive"), "0,65·0,75·Mo/(s/2) ; 0,35·0,6·Mo/(s/2)", "", `${Mm(R.Mneg)} / ${Mm(R.Mpos)}`],
+      [L("Tulangan", "Reinforcement"), "As dari Mu, ≥ 0,5·ρts·b·h per muka", "", `${L("atas", "top")} ${R.top.txt} · ${L("bawah", "bottom")} ${R.bot.txt}`],
+    ]))
+    for (const st of deepSteps(I, R)) s.push(st)
+  }
   else s.push(sec(L("Pelat penuh (pelat lingkaran kaku)", "Full slab (rigid circular plate)"), [
     [L("Diameter pelat", "Slab diameter"), "Ds = D + 2a", `${nf(I.D, 2)} + 2 × ${nf(I.proj, 2)}`, m(R.Ds)],
     [L("Tekanan maks (penentu)", "Max pressure (governing)"), "q = P/A + M/S (tanpa tarik)", R.wq.c.id, Q(R.wq.pr.qmax)],

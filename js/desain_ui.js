@@ -7,6 +7,8 @@ import * as tangki from "./desain/m_tangki.js"
 import * as vessel from "./desain/m_vessel.js"
 import * as dinamis from "./desain/m_dinamis.js"
 import * as trafo from "./desain/m_trafo.js"
+import { projLoad, projSave, soilDS, seisSite, stepper } from "./project.js"
+import { QA_METHOD } from "./desain/soil.js"
 
 export const MODS = [tiang, tangki, vessel, dinamis, trafo]
 const CMB0 = () => ({ en: {}, fx: {}, ortho: false, wp: 0.5 })
@@ -18,34 +20,59 @@ function defaults() {
   }
 }
 
-// Ringkasan semua modul untuk dashboard beranda: jalankan tiap modul dengan masukan tersimpan
-export function dashboard(lng) {
-  lang.cur = lng
+// konteks hitung bersama: angin dari data lokasi Desain, gempa & tanah & kriteria penurunan dari data proyek (tab Gempa / Tanah / Penurunan)
+export function designCtx(S, P, cmb) {
+  const ss = seisSite(P)
+  const sc = siteCtx({ ...S.site, Ss: ss.Ss, S1: ss.S1, cls: ss.cls, TL: ss.TL })
+  return { ...sc, ss, soil: soilDS(P), bear: P.bear, settle: P.settle, cmbOpts: { SDS: sc.sp.SDS, wpFrac: cmb.wp, ortho: cmb.ortho, enabled: cmb.en, factors: cmb.fx } }
+}
+export function loadDesign() {
   const S = loadState(defaults)
   for (const m of MODS) S.cmb[m.id] = { ...CMB0(), ...(S.cmb[m.id] || {}) }
+  // masukan lama (sebelum ada tab Tanah): pertahankan qa & lapisan manual yang sudah diisi pengguna
+  let raw = null
+  try { raw = JSON.parse(localStorage.getItem("ymd.desain.v1") || "null") } catch (e) { raw = null }
+  for (const m of MODS) {
+    const o = raw && raw.m && raw.m[m.id]
+    if (!o) continue
+    if (o.qaSrc === undefined && o.qa !== undefined && m.id !== "tiang") S.m[m.id].qaSrc = "manual"
+    if (m.id === "tiang" && o.soilSrc === undefined && o.layers) S.m[m.id].soilSrc = "manual"
+  }
   units.sys = S.units === "t" ? "t" : "si"
-  const sc = siteCtx(S.site)
+  return S
+}
+// Jalankan semua modul dengan masukan tersimpan (dashboard beranda, tab Penurunan, laporan proyek)
+export function runAll(lng, opts = {}) {
+  if (lng) lang.cur = lng
+  const S = loadDesign(), P = opts.P || projLoad()
   const mods = MODS.map((m) => {
-    const cmb = S.cmb[m.id]
     try {
-      const out = m.run(S.m[m.id], { ...sc, cmbOpts: { SDS: sc.sp.SDS, wpFrac: cmb.wp, ortho: cmb.ortho, enabled: cmb.en, factors: cmb.fx } })
-      const g = govern(out.checks), bad = out.checks.filter((c) => !c.ok && !c.info)
-      const st = out.settle && out.settle.r.res ? { s: out.settle.r.res.s_life * 1000, allow: out.settle.r.allow } : null
-      return { id: m.id, icon: m.icon, title: m.title(), sub: out.sub, nChk: out.checks.filter((c) => !c.info).length, nBad: bad.length, gov: g, ok: !bad.length, settle: st, nCmb: out.combos.length }
-    } catch (e) { return { id: m.id, icon: m.icon, title: m.title(), error: e.message } }
+      const out = m.run(S.m[m.id], designCtx(S, P, S.cmb[m.id]))
+      return { m, out }
+    } catch (e) { console.error(e); return { m, error: e.message } }
   })
-  return { project: S.project, site: S.site, sp: sc.sp, units: units.sys, mods }
+  return { S, P, mods }
+}
+export function dashboard(lng) {
+  const { S, P, mods } = runAll(lng)
+  const sc = designCtx(S, P, CMB0())
+  return { project: P.info, site: S.site, sp: sc.sp, ss: sc.ss, units: units.sys, mods: mods.map(({ m, out, error }) => {
+    if (error) return { id: m.id, icon: m.icon, title: m.title(), error }
+    const g = govern(out.checks), bad = out.checks.filter((c) => !c.ok && !c.info)
+    const st = out.settle && out.settle.s != null ? { s: out.settle.s, allow: out.settle.allow, kind: out.settle.kind } : null
+    return { id: m.id, icon: m.icon, title: m.title(), sub: out.sub, nChk: out.checks.filter((c) => !c.info).length, nBad: bad.length, gov: g, ok: !bad.length, settle: st, nCmb: out.combos.length, fdType: out.fdType }
+  }) }
 }
 
+let PJ = null
 export function mountDesain(root, ctx, sub) {
   lang.cur = ctx.lang
-  const S = loadState(defaults)
-  for (const m of MODS) S.cmb[m.id] = { ...CMB0(), ...(S.cmb[m.id] || {}) }
-  units.sys = S.units === "t" ? "t" : "si"
+  const S = loadDesign()
+  PJ = projLoad()
   const mod = MODS.find((m) => m.id === sub)
   root.textContent = ""
   if (!mod) hub(root, S)
-  else page(root, S, mod)
+  else { root.append(stepper("desain", PJ)); page(root, S, mod) }
   reveal(root)
 }
 
@@ -64,25 +91,24 @@ let projOpen = false
 function projectCard(S, onChange) {
   const d = el("details", "dz-sec dz-in on"); d.open = projOpen
   d.addEventListener("toggle", () => { projOpen = d.open })
-  const sm = el("summary"); sm.append(el("span", "dz-ico", "📁"), el("span", "dz-st", L("Data proyek & lokasi (angin, gempa)", "Project & site data (wind, seismic)")))
-  const sp = seismicParams(S.site.Ss, S.site.S1, S.site.cls)
+  const sm = el("summary"); sm.append(el("span", "dz-ico", "📁"), el("span", "dz-st", L("Data proyek, angin, gempa & tanah", "Project, wind, seismic & soil data")))
+  const ss = seisSite(PJ), sp = ss.sp
   sm.append(el("span", "dz-badge", `V ${nf(S.site.V, 0)} m/s · SDS ${nf(sp.SDS, 3)}`))
   d.append(sm)
-  const P = S.project, g1 = el("div", "dz-grid")
+  const P = PJ.info, g1 = el("div", "dz-grid"), savePJ = () => { projSave(PJ); onChange(false) }
   ;[["name", L("Nama proyek", "Project name")], ["client", L("Klien", "Client")], ["doc", L("No. dokumen", "Document no.")], ["rev", "Rev."], ["eng", L("Dihitung oleh", "Prepared by")], ["chk", L("Diperiksa oleh", "Checked by")]]
-    .forEach(([k, lab]) => g1.append(field({ k, lab, type: "txt", obj: P }, S, () => onChange(false))))
+    .forEach(([k, lab]) => g1.append(field({ k, lab, type: "txt", obj: P }, S, savePJ)))
   d.append(el("div", "dz-sub", L("Proyek (muncul di kepala laporan Excel/PDF)", "Project (shown in the Excel/PDF report header)")), g1)
   const st = S.site, g2 = el("div", "dz-grid"), oc = (x) => onChange(x)
   g2.append(field({ k: "V", lab: L("Kecepatan angin dasar V (3 detik)", "Basic wind speed V (3-s gust)"), u: "m/s", lo: 10, hi: 90, obj: st, help: L("SNI 1727:2020 Gambar 26.5-1 / data meteorologi lokasi.", "SNI 1727:2020 Fig. 26.5-1 / site meteorological data.") }, S, oc))
   g2.append(field({ k: "exp", type: "seg", lab: L("Kategori eksposur", "Exposure category"), opts: { B: "B", C: "C", D: "D" }, obj: st }, S, oc))
   g2.append(field({ k: "Kzt", lab: "Kzt", u: "", lo: 1, hi: 3, obj: st }, S, oc), field({ k: "Kd", lab: "Kd", u: "", lo: 0.85, hi: 1, obj: st, help: L("0,95 tangki/silinder; 0,85 struktur lain.", "0.95 tanks/cylinders; 0.85 other structures.") }, S, oc))
-  const g3 = el("div", "dz-grid")
-  g3.append(field({ k: "Ss", lab: "Ss (g)", u: "", lo: 0, hi: 3, obj: st, help: L("Peta gempa SNI 1726:2019 / puskim.", "SNI 1726:2019 hazard map / puskim.") }, S, oc), field({ k: "S1", lab: "S1 (g)", u: "", lo: 0, hi: 1.5, obj: st }, S, oc))
-  g3.append(field({ k: "cls", type: "seg", lab: L("Kelas situs", "Site class"), opts: Object.fromEntries(SITES.map((s) => [s, s])), obj: st }, S, oc), field({ k: "TL", lab: "TL (s)", u: "s", lo: 2, hi: 20, obj: st }, S, oc))
-  d.append(el("div", "dz-sub", L("Angin — SNI 1727:2020 (ASCE 7-16)", "Wind — SNI 1727:2020 (ASCE 7-16)")), g2, el("div", "dz-sub", L("Gempa — SNI 1726:2019", "Seismic — SNI 1726:2019")), g3)
-  const info = el("div", "dz-chips")
-  ;[["Fa", sp.Fa, 2], ["Fv", sp.Fv, 2], ["SMS", sp.SMS, 3], ["SM1", sp.SM1, 3], ["SDS", sp.SDS, 3], ["SD1", sp.SD1, 3], ["Ts", sp.Ts, 3]].forEach(([k, v, dd]) => info.append(el("span", "dz-chip", `${k} = ${nf(v, dd)}`)))
-  d.append(info)
+  d.append(el("div", "dz-sub", L("Angin — SNI 1727:2020 (ASCE 7-16)", "Wind — SNI 1727:2020 (ASCE 7-16)")), g2)
+  const link = (href, ic, b, t) => { const a = el("a", "pj-link"); a.href = href; a.append(el("span", "pj-link-ic", ic)); const x = el("span"); x.append(el("b", null, b), el("small", null, t)); a.append(x, el("span", "pj-go", "→")); return a }
+  const ds = soilDS(PJ), lk = el("div", "pj-links")
+  lk.append(link("#/gempa", "🌐", L("Gempa — tab Gempa (SNI 1726:2019)", "Seismic — Seismic tab (SNI 1726:2019)"), `Ss ${nf(ss.Ss, 3)} · S1 ${nf(ss.S1, 3)} · ${L("kelas", "class")} ${ss.cls}${ss.auto ? " (" + L("otomatis", "auto") + ")" : ""} · SDS ${nf(sp.SDS, 3)} · SD1 ${nf(sp.SD1, 3)} · KDS ${ss.SDC}`),
+    link("#/tanah", "🧱", L("Tanah — tab Tanah", "Soil — Soil tab"), `${PJ.soil.name} · ${PJ.soil.test === "cpt" ? "CPT" : "N-SPT"} · ${ds.layers.length} ${L("lapis", "layers")} · MAT ${nf(ds.gwt, 1)} m · qa: ${QA_METHOD()[PJ.bear.method]}`))
+  d.append(el("div", "dz-sub", L("Gempa & tanah (dari tab Gempa / Tanah — ubah di sana)", "Seismic & soil (from the Seismic / Soil tabs — edit there)")), lk)
   return d
 }
 
@@ -92,8 +118,8 @@ function hub(root, S) {
   hero.innerHTML = `<div class="dz-hero-bg" aria-hidden="true"><i></i><i></i><i></i></div>`
   const h = el("div", "dz-hero-tx")
   h.append(el("span", "dz-kicker", L("Desain pondasi fasilitas migas", "Oil & gas facility foundation design")), el("h1", null, L("Desain Pondasi · Paket Lengkap", "Foundation Design · Complete Package")),
-    el("p", null, L("Lima kalkulator desain dengan input beban, kombinasi SNI 1727/ASCE 7 + PIP otomatis, pemeriksaan geoteknik & struktur (SNI 2847/ACI 318, AISC 360, API 650, ACI 351.3R), dan ekspor laporan Excel & PDF. Semua berjalan offline di iPad.",
-      "Five design calculators with load input, automatic SNI 1727/ASCE 7 + PIP combinations, geotechnical & structural checks (SNI 2847/ACI 318, AISC 360, API 650, ACI 351.3R), and Excel & PDF report export. Everything runs offline on the iPad.")))
+    el("p", null, L("Lima kalkulator desain. Pondasi peralatan bisa DANGKAL (telapak/mat, qa dari tab Tanah: N-SPT, CPT atau Vesic) atau DALAM (tiang pipa/bor, kapasitas dari tab Tanah). Gempa dari tab Gempa, penurunan otomatis ke tab Penurunan, kombinasi SNI 1727/ASCE 7 + PIP, pemeriksaan SNI 2847/ACI 318, AISC 360, API 650, ACI 351.3R, ekspor Excel & PDF — offline di iPad.",
+      "Five design calculators. Equipment foundations can be SHALLOW (footing/mat, qa from the Soil tab: N-SPT, CPT or Vesic) or DEEP (pipe/bored piles, capacity from the Soil tab). Seismic from the Seismic tab, settlement feeds the Settlement tab, SNI 1727/ASCE 7 + PIP combinations, SNI 2847/ACI 318, AISC 360, API 650, ACI 351.3R checks, Excel & PDF export — offline on the iPad.")))
   const chips = el("div", "dz-chips")
   ;["SNI 1726 · 1727 · 2847 · 8460", "AISC 360-16", "ACI 318M · 351.3R", "API 650 · RP 2GEO", "PIP", "Excel · PDF"].forEach((c) => chips.append(el("span", "dz-chip", c)))
   h.append(chips)
@@ -109,19 +135,19 @@ function hub(root, S) {
     grid.append(a)
   })
   const save = (x) => { saveState(S); if (x) { root.textContent = ""; hub(root, S); reveal(root) } }
-  root.append(hero, bar, grid, projectCard(S, save), footer())
+  root.append(stepper("desain", PJ), hero, bar, grid, projectCard(S, save), footer())
 }
 function settleCard(sb) {
   const c = el("div", "dz-settle dz-in")
   const h = el("div", "dz-settle-h")
   h.append(el("span", "dz-settle-ic", "📉"), el("div"))
-  h.lastChild.append(el("b", null, L("Penurunan pondasi", "Foundation settlement")), el("span", "hint", L(" · terhubung ke tab Penurunan (profil tanah, konsolidasi, batas izin)", " · linked to the Settlement tab (soil profile, consolidation, limit)")))
+  h.lastChild.append(el("b", null, sb.kind === "deep" ? L("Penurunan kelompok tiang", "Pile group settlement") : L("Penurunan pondasi dangkal", "Shallow foundation settlement")), el("span", "hint", L(" · data tab Tanah, kriteria tab Penurunan", " · Soil tab data, Settlement tab criteria")))
   c.append(h)
-  if (sb.r.error) c.append(el("p", "dz-note", sb.r.error))
+  if (sb.error) c.append(el("p", "dz-note", sb.error))
   else {
-    const x = sb.r.res, tot = x.s_life * 1000, ur = tot / sb.r.allow
+    const tot = sb.s, ur = tot / sb.allow
     const g = el("div", "dz-settle-g")
-    ;[[L("Segera si", "Immediate si"), x.si * 1000], [L("Konsolidasi sc", "Consolidation sc"), x.sc * 1000], [L(`Total ${nf(sb.r.life, 0)} th`, `Total ${nf(sb.r.life, 0)} yr`), tot], [L("Izin", "Allowable"), sb.r.allow]]
+    ;[[sb.kind === "deep" ? L("Segera + elastis", "Immediate + elastic") : L("Segera si", "Immediate si"), sb.si], [L("Konsolidasi sc", "Consolidation sc"), sb.sc], [L(`Total ${nf(sb.life, 0)} th`, `Total ${nf(sb.life, 0)} yr`), tot], [L("Izin", "Allowable"), sb.allow]]
       .forEach(([k, v]) => { const m = el("div", "dz-sm"); m.append(el("span", null, k), el("b", null, `${nf(v, 1)} mm`)); g.append(m) })
     c.append(g)
     const bar = el("div", "dz-bar"), fill = el("i", urClass(ur)), mk = el("b"); mk.style.left = `${100 / 1.2}%`
@@ -129,8 +155,8 @@ function settleCard(sb) {
     requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.transform = `scaleX(${Math.min(ur, 1.2) / 1.2})` }))
   }
   const btn = el("button", "dz-btn ghost dz-settle-go"); btn.type = "button"
-  btn.innerHTML = `<span class="ic">↗</span><span><b>${L("Buka di tab Penurunan", "Open in Settlement tab")}</b><small>${L("kirim B, L, Df, q dari desain ini", "send B, L, Df, q from this design")}</small></span>`
-  btn.onclick = () => { sb.send(); location.hash = "#/penurunan" }
+  btn.innerHTML = `<span class="ic">↗</span><span><b>${L("Buka di tab Penurunan", "Open in Settlement tab")}</b><small>${L("rincian segera, konsolidasi, kurva waktu", "immediate, consolidation, time curve details")}</small></span>`
+  btn.onclick = () => { PJ.settle.sel = "mod:" + sb.mod; projSave(PJ); location.hash = "#/penurunan" }
   c.append(btn)
   return c
 }
@@ -162,10 +188,7 @@ function page(root, S, mod) {
   root.append(head, status, tools, projBox, formBox, cmbWrap, resBox, expBox, footer())
 
   let last = null, timer = 0, onlyBad = false, drawIx = 0
-  const ctx = () => {
-    const sc = siteCtx(S.site)
-    return { ...sc, cmbOpts: { SDS: sc.sp.SDS, wpFrac: cmb.wp, ortho: cmb.ortho, enabled: cmb.en, factors: cmb.fx } }
-  }
+  const ctx = () => designCtx(S, PJ, cmb)
   const changed = (structural) => {
     saveState(S)
     if (structural) drawForm()
@@ -263,7 +286,7 @@ function page(root, S, mod) {
     resBox.append(kvd)
     const nt = el("div", "dz-notes dz-in"); nt.append(el("b", null, L("Dasar perhitungan & batasan", "Basis & limitations"))); const ul = el("ul"); out.notes.forEach((n) => ul.append(el("li", null, n))); nt.append(ul)
     resBox.append(nt)
-    exportBar(expBox, () => last, S)
+    exportBar(expBox, () => last, { ...S, project: PJ.info })
   }
   drawForm(); compute(true)
 }

@@ -3,6 +3,7 @@
 // beban dongkrak saat instalasi (tumpu & pons, SNI 2847 §22.8/§22.6), penahan geser trafo. Desain telapak & plinth memakai footing.js.
 import { L, chk, windOnBody, cfSquare, seismicCoef } from "./core.js"
 import { analyzeFooting } from "./footing.js"
+import { pileLayout } from "./deep.js"
 import { phiBearing, vcTwo } from "./rc.js"
 
 export const PRESET = { mva: 30, W: 520, Voil: 14000, Lt: 5.2, Bt: 3.2, Ht: 4.0, hcg: 1.9, Bp: 4.2, Lp: 6.0, hp: 0.5, B: 7.0, Lf: 9.0, t: 0.6, Df: 1.0,
@@ -21,6 +22,7 @@ export function trafoCases(I) {
 
 export function analyzeTrafo(I, combos, meta) {
   const m = { shape: "rect", B: I.Lf, L: I.B, t: I.t, Df: I.Df, gs: I.gs, peds: [{ x: 0, y: 0, shape: "rect", bx: I.Lp, by: I.Bp, h: I.hp }], pedKind: "plinth" }
+  if (I.fdType === "deep") { m.piles = pileLayout("rect", m.B, m.L, I.psx, I.pce); m.pileD = I.pD / 1000 }
   const r = analyzeFooting(m, combos, { qa: I.qa, mu: I.muB }, I.crit, { fc: I.fc, fy: I.fy, cover: I.cover, db: I.db }, { fc: I.fc, fy: I.fy, n: I.nBars, db: I.dbP, cover: 50, tie: 10 })
   const checks = [...r.checks]
   const gO = L("Bak oli & instalasi", "Oil pit & installation")
