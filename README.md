@@ -40,6 +40,17 @@ Alur ini tampil sebagai langkah 1–5 di atas setiap tab dan di Beranda.
 
 Dua bahasa (Indonesia dan Inggris), tema terang, gelap, atau otomatis. Ikon antarmuka berupa SVG garis yang seragam (`js/icons.js`).
 
+### Antarmuka (sistem desain v2)
+
+Tampilan memakai permukaan netral, satu warna aksen, garis tipis, dan gerak pegas. Arah visual dan pola interaksinya mengacu pada Arc (token, tipografi, radius konsentris), beUI (dock, palet perintah, lembar bawah, transisi tema), dan Bencho (interaksi mikro per gestur dan suara antarmuka). Aplikasi ini tetap JavaScript murni tanpa pustaka, jadi polanya ditulis ulang, bukan disalin dari komponen React mereka.
+
+- **Dock navigasi** mengambang di bawah layar dengan pil aktif yang meluncur antar menu. Dock menepi saat papan ketik layar muncul.
+- **Palet perintah**: `⌘K` / `Ctrl+K` atau `/`. Cari halaman, kalkulator, dan tindakan (tema, aksen, bahasa, cetak). Angka `1`–`7` langsung pindah halaman.
+- **Pengaturan** (tombol kanan atas): tema, 7 warna aksen, bahasa, kepadatan nyaman/ringkas, suara antarmuka, dan animasi. Di layar sempit tampil sebagai lembar bawah yang bisa ditarik turun.
+- **Suara antarmuka** disintesis dengan WebAudio (tanpa berkas audio), bisa dimatikan.
+- **Beranda** berupa dashboard bento: cincin kalkulator yang memenuhi, angka yang menghitung naik, konteks proyek, alur proyek, dan kartu tiap kalkulator.
+- Semua animasi mati saat perangkat meminta gerak dikurangi atau saat "Animasi" dimatikan di pengaturan.
+
 ## Edisi kode desain
 
 Dipilih di Desain → *Data proyek, edisi kode…* (berlaku untuk semua kalkulator dan laporan):
@@ -91,7 +102,7 @@ python3 -m http.server 8610
 
 ## Struktur
 
-- `index.html`, `css/app.css`, `js/app.js`: kerangka (menu, bahasa, tema, offline). `js/home.js` + `css/home.css`: beranda & dashboard. `icons/logo.svg`: logo YMD-CAL. `js/icons.js`: set ikon SVG. `js/voice.js`: narasi suara Alur Migas (rekaman alami + suara perangkat).
+- `index.html`, `css/app.css` (token & komponen dasar), `js/app.js` (rute, bahasa, tema, offline), `js/shell.js` (dock, palet perintah, pengaturan, toast, suara). `js/home.js` + `css/home.css`: beranda & dashboard. `icons/logo.svg`: logo YMD-CAL. `js/icons.js`: set ikon SVG. `js/voice.js`: narasi suara Alur Migas (rekaman alami + suara perangkat).
 - `js/project.js`: data proyek bersama (info, tanah, gempa, metode daya dukung, kriteria penurunan), kelas situs → parameter gempa, KDS, spektrum, dan komponen alur proyek. `js/pj_ui.js` + `css/proyek.css`: komponen tab proyek.
 - `js/tanah_ui.js` (Tanah), `js/gempa_ui.js` (Gempa), `js/penurunan_ui.js` (Penurunan, memakai mesin `js/penurunan.js`), `js/laporan_ui.js` (Laporan gabungan).
 - `js/desain_ui.js` + `css/desain.css`: halaman Desain. Di `js/desain/`: `core.js` (satuan, angin, gempa, kombinasi beban), `soil.js` (korelasi tanah, daya dukung, kapasitas tiang, kelas situs, penurunan dangkal & kelompok), `deep.js` (pilihan dangkal/dalam: tiang tunggal acuan, jumlah tiang & ukuran/tebal cap otomatis, telapak otomatis, susunan grid & radial, panel alur perhitungan, tata letak tiang, kelompok tiang di bawah cap, pelat tangki di atas tiang, kekakuan tiang, tabel & gambar), `rc.js`, `steel.js`, `footing.js` (tekanan tanah atau reaksi tiang + desain telapak/pile cap & pedestal), `pile.js`, `tank.js`, `vessel.js`, `dynamic.js`, `trafo.js`, `settle.js`, `m_*.js` (formulir & laporan tiap modul), `ui.js` (formulir, hasil, ekspor; laporan berbab), `draw.js`, `chart.js` (grafik garis), `sketch.js`, `steps.js`, `xlsx.js`, `pdf.js`.

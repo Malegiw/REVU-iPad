@@ -1,4 +1,5 @@
 // Kerangka app: menu (hash), bahasa Indonesia/Inggris, tema terang/gelap/otomatis, pemasangan offline (service worker). Tiap alat dimuat saat dibuka.
+import { createShell } from "./shell.js"
 const $ = (s) => document.querySelector(s)
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e }
 const store = {
@@ -15,7 +16,7 @@ const SHELL = {
   desain: { id: "Desain Pondasi", en: "Foundation Design" }, tanah: { id: "Data Tanah", en: "Soil Data" }, gempa: { id: "Parameter Gempa", en: "Seismic Parameters" }, laporan: { id: "Laporan Proyek", en: "Project Report" },
   nHome: { id: "Beranda", en: "Home" }, nPenurunan: { id: "Penurunan", en: "Settlement" }, nAlur: { id: "Alur Migas", en: "Oil & Gas Flow" }, nDesain: { id: "Desain", en: "Design" },
   nTanah: { id: "Tanah", en: "Soil" }, nGempa: { id: "Gempa", en: "Seismic" }, nLaporan: { id: "Laporan", en: "Report" },
-  offlineOk: { id: "✓ Siap offline", en: "✓ Offline ready" }, newVer: { id: "Versi baru siap.", en: "A new version is ready." }, reload: { id: "Muat ulang", en: "Reload" },
+  offlineOk: { id: "Siap offline", en: "Offline ready" }, offNow: { id: "Tanpa internet", en: "No connection" }, newVer: { id: "Versi baru siap.", en: "A new version is ready." }, reload: { id: "Muat ulang", en: "Reload" },
   load: { id: "Memuat…", en: "Loading…" }, fail: { id: "Gagal memuat. Periksa sambungan lalu coba lagi.", en: "Could not load. Check the connection and try again." },
   themeTip: { id: "Tema: otomatis / terang / gelap", en: "Theme: auto / light / dark" },
   disc: { id: "Alat bantu desain & pembanding; angka bawaan hanya contoh umum. Ikuti Design Basis dan kode yang berlaku.", en: "Design aid & cross-check; default values are general examples. Follow the Design Basis and governing codes." },
@@ -32,9 +33,7 @@ let theme = store.get("ymd.theme", "auto")                 // auto | light | dar
 const dark = () => theme === "dark" || (theme === "auto" && matchMedia("(prefers-color-scheme: dark)").matches)
 function applyTheme() {
   document.documentElement.dataset.theme = dark() ? "dark" : "light"
-  $("#btnTheme").textContent = theme === "auto" ? "◐" : theme === "dark" ? "🌙" : "☀️"
-  $("#btnTheme").title = S("themeTip")
-  const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = dark() ? "#0B2229" : "#27323F"
+  const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = dark() ? "#0B0C0F" : "#F4F4F1"
 }
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (theme === "auto") { applyTheme(); route() } })
 
@@ -44,22 +43,29 @@ const PAGES = { tanah: ["./tanah_ui.js", "mountTanah"], gempa: ["./gempa_ui.js",
 const rawRoute = () => (location.hash.replace(/^#\/?/, "") || "home").split("/")
 const current = () => { const r = rawRoute()[0]; return ROUTES.includes(r) ? r : "home" }
 const subRoute = () => rawRoute()[1] || ""
-let token = 0
+let token = 0, lastRoute = ""
 
-function drawNav() {
-  const nav = $("#nav"); nav.textContent = ""
-  ROUTES.forEach((r) => { const a = el("a", current() === r ? "on" : "", S("n" + r[0].toUpperCase() + r.slice(1))); a.title = S(r); a.href = "#/" + (r === "home" ? "" : r); nav.append(a) })
-  $("#btnLang").textContent = lang === "id" ? "ID" : "EN"
-  $("#sub").textContent = S("sub")
-  document.documentElement.lang = lang
-}
+const NAV_SHORT = { alur: { id: "Alur", en: "Flow" }, penurunan: { id: "Turun", en: "Settle" } }
+const NAV_ICO = { home: "home", alur: "flow", tanah: "soil", gempa: "seismic", desain: "design", penurunan: "settle", laporan: "report" }
+const shell = createShell({
+  routes: ROUTES.map((r) => ({ id: r, icon: NAV_ICO[r], label: () => S("n" + r[0].toUpperCase() + r.slice(1)), short: () => (NAV_SHORT[r] || {})[lang] || S("n" + r[0].toUpperCase() + r.slice(1)), title: () => S(r) })),
+  mods: [["tiang", "pile", "Tiang Pipa Baja & Helical", "Steel Pipe & Helical Piles", "pile tiang helical pipa"], ["tangki", "tank", "Pondasi Tangki", "Tank Foundation", "tank tangki ring wall"],
+    ["vessel", "vessel", "Pondasi Vessel (Gas Boot, Separator, IA Receiver)", "Vessel Foundation (Gas Boot, Separator, IA Receiver)", "vessel separator gas boot receiver"],
+    ["dinamis", "pump", "Pondasi Peralatan Dinamis", "Dynamic Equipment Foundation", "pump pompa compressor kompresor dynamic dinamis"], ["trafo", "trafo", "Pondasi Trafo", "Transformer Foundation", "transformer trafo oil pit"]]
+    .map(([id, icon, a, b, keys]) => ({ id, icon, keys, title: () => (lang === "en" ? b : a) })),
+  current: () => current(), getLang: () => lang, getTheme: () => theme,
+  setLang: (v) => { lang = v; store.set("ymd.lang", lang); return route() },
+  setTheme: (v) => { theme = v; store.set("ymd.theme", theme); applyTheme(); return route() },
+})
+function drawNav() { document.documentElement.lang = lang; shell.drawNav() }
 
 async function route() {
   const my = ++token, r = current(), app = $("#app")
   try { if (self.speechSynthesis) speechSynthesis.cancel() } catch (e) { /* abaikan */ }
   drawNav(); applyTheme()
   document.title = (r === "home" ? "YMD-CAL" : S(r) + " · YMD-CAL")
-  if (r !== "home") scrollTo(0, 0)
+  if (r !== lastRoute) scrollTo(0, 0)
+  lastRoute = r
   app.textContent = ""
   if (r === "home") return home(app, my)
   app.append(el("p", "hint", S("load")))
@@ -103,39 +109,35 @@ async function home(app, my) {
     const mod = await import("./home.js")
     if (my !== token) return
     app.textContent = ""
-    mod.mountHome(app, { lang, dark: dark() })
+    mod.mountHome(app, { lang, dark: dark(), shell })
   } catch (e) { if (my === token) { app.textContent = ""; app.append(el("div", "err", S("fail") + " (" + e.message + ")")) } }
 }
 
-// ---------------------------------------------------------------- tombol
-$("#btnLang").onclick = () => { lang = lang === "id" ? "en" : "id"; store.set("ymd.lang", lang); route() }
-$("#btnTheme").onclick = () => { theme = { auto: "light", light: "dark", dark: "auto" }[theme]; store.set("ymd.theme", theme); route() }
+// ---------------------------------------------------------------- tinggi bilah atas (untuk bilah status lengket) & status sambungan
 addEventListener("hashchange", route)
-const setHH = () => document.documentElement.style.setProperty("--hh", ($(".top") ? $(".top").offsetHeight : 64) + "px")
-if (self.ResizeObserver) new ResizeObserver(setHH).observe($(".top")); else addEventListener("resize", setHH)
+const setHH = () => document.documentElement.style.setProperty("--hh", ($(".ui-top") ? $(".ui-top").offsetHeight : 60) + "px")
+if (self.ResizeObserver) new ResizeObserver(setHH).observe($(".ui-top")); else addEventListener("resize", setHH)
 setHH()
+let swReady = false
+const netState = () => { if (!navigator.onLine) shell.setOffline(S("offNow"), true); else if (swReady) shell.setOffline(S("offlineOk")); else $("#offline").hidden = true }
+addEventListener("online", netState); addEventListener("offline", netState)
 
 // ---------------------------------------------------------------- offline (service worker)
-function toast(msg, action, fn) {
-  const tt = $("#toast"); tt.textContent = msg; tt.hidden = false
-  if (action) { const b = el("button", null, action); b.onclick = fn; tt.append(b) } else setTimeout(() => { tt.hidden = true }, 4000)
-}
 if ("serviceWorker" in navigator && location.search.includes("nosw")) {         // pengembangan: ?nosw mematikan penyimpanan offline dan menghapus yang lama
   navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister()))
   if (self.caches) caches.keys().then((ks) => ks.forEach((k) => caches.delete(k)))
 } else if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
   navigator.serviceWorker.register("sw.js").then((reg) => {
-    const ready = () => { const c = $("#offline"); c.textContent = S("offlineOk"); c.hidden = false }
-    navigator.serviceWorker.ready.then(ready)
+    navigator.serviceWorker.ready.then(() => { swReady = true; netState() })
     reg.addEventListener("updatefound", () => {
       const w = reg.installing
       w && w.addEventListener("statechange", () => {
         if (w.state === "installed" && navigator.serviceWorker.controller) {
-          toast(S("newVer"), S("reload"), () => { navigator.serviceWorker.addEventListener("controllerchange", () => location.reload(), { once: true }); w.postMessage({ type: "skip" }) })
+          shell.toast(S("newVer"), { action: S("reload"), onAction: () => { navigator.serviceWorker.addEventListener("controllerchange", () => location.reload(), { once: true }); w.postMessage({ type: "skip" }) } })
         }
       })
     })
   }).catch(() => { /* tanpa service worker: app tetap jalan saat online */ })
 }
 
-route()
+route().then(netState)

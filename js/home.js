@@ -5,82 +5,108 @@ const svgNS = "http://www.w3.org/2000/svg"
 const sv = (tag, a) => { const e = document.createElementNS(svgNS, tag); for (const k in a) e.setAttribute(k, a[k]); return e }
 const nf = (x, d = 1) => (x == null || !isFinite(x) ? "–" : Number(x).toFixed(d))
 
+// angka yang menghitung naik ke nilainya (lebar stabil lewat tabular-nums)
+function countUp(node, to, fmt) {
+  if (!isFinite(to) || document.documentElement.dataset.motion === "off" || matchMedia("(prefers-reduced-motion: reduce)").matches) { node.textContent = fmt(to); return }
+  const t0 = performance.now(), dur = 900
+  const step = (t) => { const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 4); node.textContent = fmt(to * e); if (k < 1 && node.isConnected) requestAnimationFrame(step); else node.textContent = fmt(to) }
+  requestAnimationFrame(step)
+}
+
 export function mountHome(app, ctx) {
   const L = (id, en) => (ctx.lang === "en" ? en : id)
   app.textContent = ""
-  // ---- hero
-  const hero = el("section", "hm-hero")
-  hero.innerHTML = `<div class="hm-orbs" aria-hidden="true"><i></i><i></i></div>`
-  const logo = el("div", "hm-logo"); logo.innerHTML = document.querySelector(".brand .logo").innerHTML
-  const tx = el("div", "hm-tx")
-  const h1 = el("h1"); h1.innerHTML = `YMD<i>-CAL</i>`
-  tx.append(el("span", "hm-kicker", L("Kalkulator desain sipil migas · offline", "Oil & gas civil design calculator · offline")), h1,
-    el("p", null, L("Satu proyek, satu alur: data tanah (N-SPT/CPT) → parameter gempa → desain pondasi dangkal atau dalam (tiang, tangki, vessel, peralatan dinamis, trafo) → penurunan → laporan Excel & PDF.",
-      "One project, one flow: soil data (SPT/CPT) → seismic parameters → shallow or deep foundation design (piles, tanks, vessels, dynamic equipment, transformers) → settlement → Excel & PDF report.")))
-  const cta = el("div", "hm-cta")
-  const a1 = el("a", "hm-btn pri", L("Mulai dari data tanah →", "Start with soil data →")); a1.href = "#/tanah"
-  const a3 = el("a", "hm-btn", L("Desain", "Design")); a3.href = "#/desain"
-  const a2 = el("a", "hm-btn", L("Alur produksi migas", "Oil & gas flow")); a2.href = "#/alur"
-  cta.append(a1, a3, a2); tx.append(cta)
-  hero.append(logo, tx)
-  app.append(hero)
-  // ---- alur proyek
-  const wf = el("div", "hm-sech"); wf.append(el("h2", null, L("Alur proyek", "Project workflow")), el("span", "hm-meta", L("Tanah → Gempa → Desain → Penurunan → Laporan", "Soil → Seismic → Design → Settlement → Report")))
-  const wfBox = el("div", "hm-wf")
-  app.append(wf, wfBox)
+  const bento = el("div", "bento")
+  const bn = (cls, tag = "section") => { const e = el(tag, "bn " + cls); e.style.setProperty("--i", bento.children.length); bento.append(e); return e }
 
-  // ---- dashboard
-  const dh = el("div", "hm-sech"); dh.append(el("h2", null, L("Dashboard", "Dashboard")), el("span", "hm-meta", L("dihitung dari masukan terakhir", "computed from your latest inputs")))
-  const stats = el("div", "hm-stats"), grid = el("div", "hm-grid")
-  for (let i = 0; i < 3; i++) stats.append(el("div", "hm-stat sk"))
-  for (let i = 0; i < 6; i++) grid.append(el("div", "hm-tile sk"))
-  app.append(dh, stats, grid)
+  // ---- hero
+  const hero = bn("bn-hero")
+  hero.innerHTML = `<div class="bn-grid" aria-hidden="true"></div>`
+  const tx = el("div", "bn-hero-tx")
+  const mark = el("div", "bn-mark"); const lg = document.querySelector(".ui-brand .logo"); if (lg) mark.innerHTML = lg.innerHTML
+  tx.append(mark, el("h1", null, L("Desain pondasi migas, dari data tanah sampai laporan.", "Oil & gas foundation design, from soil data to report.")),
+    el("p", null, L("Satu proyek, satu alur: tanah (N-SPT/CPT), gempa, pondasi dangkal atau dalam, penurunan, lalu laporan Excel dan PDF. Semua berjalan offline di iPad.",
+      "One project, one flow: soil (SPT/CPT), seismic, shallow or deep foundations, settlement, then Excel and PDF reports. Everything runs offline on iPad.")))
+  const cta = el("div", "bn-cta")
+  const a1 = el("a", "btn", L("Mulai dari data tanah", "Start with soil data")); a1.href = "#/tanah"; a1.append(ico("arrow"))
+  const a2 = el("button", "ghost"); a2.type = "button"; a2.dataset.snd = "1"; a2.append(ico("search"), el("span", null, L("Cari atau lompat", "Search or jump"))); a2.onclick = () => ctx.shell && ctx.shell.openPalette()
+  cta.append(a1, a2); tx.append(cta)
+  hero.append(tx)
+
+  // ---- skor & statistik (diisi setelah perhitungan)
+  const score = bn("bn-score sk"), st1 = bn("bn-stat sk"), st2 = bn("bn-stat sk")
+  const ctxT = bn("bn-ctx sk")
+
+  // ---- alur proyek
+  const wf = bn("bn-wf")
+  const wfH = el("div", "bn-h"); wfH.append(el("h2", null, L("Alur proyek", "Project workflow")), el("span", "bn-meta", L("Lima langkah berurutan, data mengalir otomatis antar tab.", "Five steps in order; data flows between tabs automatically.")))
+  const wfBox = el("div", "hm-wf"); wf.append(wfH, wfBox)
+
+  // ---- kalkulator
+  const dh = el("div", "bn-sec"); dh.append(el("h2", null, L("Kalkulator desain", "Design calculators")), el("span", "bn-meta", L("Dihitung dari masukan terakhir Anda.", "Computed from your latest inputs.")))
+  bento.append(dh)
+  const tiles = []
+  for (let i = 0; i < 6; i++) tiles.push(bn("hm-tile sk", "div"))
 
   // ---- alur migas
-  const fl = el("a", "hm-flow"); fl.href = "#/alur"
-  const ft = el("div", "hm-flow-tx")
-  ft.append(el("span", "hm-kicker", L("Referensi proses", "Process reference")), el("h2", null, L("Alur Produksi Migas", "Oil & Gas Production Flow")),
-    el("p", null, L("Dari sumur sampai gathering station: PFD, dua P&ID bergerak, 12 animasi alat dengan narasi suara (play/pause), dan catatan sipil/struktur — langsung terhubung ke kalkulator desain tiap peralatan.",
-      "From the well to the gathering station: PFD, two animated P&IDs, 12 equipment animations with voice narration (play/pause), and civil/structural notes — linked straight to each equipment's design calculator.")),
-    el("span", "hm-go", L("Jelajahi alur →", "Explore the flow →")))
-  const img = el("img", "hm-flow-img"); img.alt = L("Ilustrasi alur produksi migas", "Oil & gas production flow illustration"); img.loading = "lazy"
+  const fl = bn("bn-flow", "a"); fl.href = "#/alur"
+  const ft = el("div", "bn-flow-tx")
+  ft.append(el("h2", null, L("Alur Produksi Migas", "Oil & Gas Production Flow")),
+    el("p", null, L("Dari sumur sampai gathering station: PFD, dua P&ID bergerak, 12 animasi alat dengan narasi suara, dan catatan sipil yang terhubung ke kalkulator tiap peralatan.",
+      "From the well to the gathering station: PFD, two animated P&IDs, 12 equipment animations with voice narration, and civil notes linked to each equipment's calculator.")))
+  const go = el("span", "bn-go", L("Jelajahi alur", "Explore the flow")); go.append(ico("arrow")); ft.append(go)
+  const img = el("img", "bn-flow-img"); img.alt = L("Ilustrasi alur produksi migas", "Oil & gas production flow illustration"); img.loading = "lazy"
   img.src = `assets/hero_${ctx.dark ? "dark" : "cloud"}${ctx.lang === "en" ? "_en" : ""}.svg`
   fl.append(ft, img)
-  app.append(fl)
 
-  // ---- pasang & kaki
-  const ins = el("details", "hm-install")
-  ins.append(el("summary", null, L("📲 Pasang di iPad (offline)", "📲 Install on iPad (offline)")))
+  // ---- pasang di iPad
+  const ins = bn("bn-ins")
+  const insH = el("div", "bn-ins-h"); insH.append(ico("device"), el("h2", null, L("Pasang di iPad", "Install on iPad")))
   const ol = el("ol")
-  ;[L("Buka alamat ini di Safari sekali saat ada internet.", "Open this address in Safari once while online."), L("Ketuk Bagikan → Tambah ke Layar Utama.", "Tap Share → Add to Home Screen."),
-    L("Buka dari ikon YMD-CAL: layar penuh dan jalan tanpa internet. Saat ada versi baru, ketuk Muat ulang.", "Open from the YMD-CAL icon: full screen and works offline. When a new version arrives, tap Reload.")].forEach((x) => ol.append(el("li", null, x)))
-  ins.append(ol)
-  app.append(ins, el("p", "hm-foot", `© Yan Malegi Diardi · YMD-CAL · ${L("alat bantu desain; ikuti Design Basis & kode yang berlaku", "design aid; follow the Design Basis & governing codes")}`))
+  ;[L("Buka alamat ini di Safari sekali saat ada internet.", "Open this address in Safari once while online."), L("Ketuk Bagikan, lalu Tambah ke Layar Utama.", "Tap Share, then Add to Home Screen."),
+    L("Buka dari ikon YMD-CAL: layar penuh dan jalan tanpa internet.", "Open from the YMD-CAL icon: full screen and works offline.")].forEach((x) => ol.append(el("li", null, x)))
+  ins.append(insH, ol)
+
+  app.append(bento, el("p", "hm-foot", `© Yan Malegi Diardi · YMD-CAL · ${L("alat bantu desain; ikuti Design Basis & kode yang berlaku", "design aid; follow the Design Basis & governing codes")}`))
 
   // isi dashboard setelah halaman tampil (perhitungan semua modul ± 0,3 detik)
   setTimeout(async () => {
-    let D, PJ
+    let D
     try {
       const [dm, pj] = await Promise.all([import("./desain_ui.js"), import("./project.js")])
-      D = dm.dashboard(ctx.lang); PJ = pj
-      wfBox.append(pj.stepper("", pj.projLoad()))
-    } catch (e) { grid.textContent = ""; grid.append(el("div", "err", e.message)); return }
+      D = dm.dashboard(ctx.lang)
+      const sp = pj.stepper("", pj.projLoad()); sp.classList.add("on"); wfBox.append(sp)
+    } catch (e) { tiles.forEach((t) => t.remove()); const er = el("div", "err", e.message); er.style.gridColumn = "1 / -1"; dh.after(er); return }
     if (!app.isConnected) return
     const okMods = D.mods.filter((m) => m.ok).length, nChk = D.mods.reduce((a, m) => a + (m.nChk || 0), 0), nBad = D.mods.reduce((a, m) => a + (m.nBad || 0), 0)
     const sMax = D.mods.filter((m) => m.settle).reduce((a, m) => (!a || m.settle.s > a.settle.s ? m : a), null)
-    stats.textContent = ""
-    const stat = (lab, val, sub, cls) => { const c = el("div", "hm-stat " + (cls || "")); c.append(el("span", null, lab), el("b", null, val), el("small", null, sub)); return c }
-    stats.append(stat(L("Kalkulator memenuhi", "Calculators passing"), `${okMods} / ${D.mods.length}`, L("semua pemeriksaan OK", "all checks OK"), okMods === D.mods.length ? "ok" : "bad"),
-      stat(L("Pemeriksaan", "Checks"), `${nChk - nBad} / ${nChk}`, nBad ? `${nBad} ${L("tidak OK", "not OK")}` : L("tanpa kegagalan", "no failures"), nBad ? "bad" : "ok"),
-      stat(L("Penurunan terbesar", "Largest settlement"), sMax ? `${nf(sMax.settle.s, 1)} mm` : "–", sMax ? sMax.title.split(" (")[0] : "", sMax && sMax.settle.s > sMax.settle.allow ? "bad" : "ok"))
-    const chips = el("div", "hm-chips")
-    ;[[L("Proyek", "Project"), D.project.name || "–"], ["Doc", D.project.doc || "–"], ["V", `${nf(D.site.V, 0)} m/s · ${D.site.exp}`], [L("Kelas situs", "Site class"), D.ss.cls], ["SDS", nf(D.sp.SDS, 3)], [L("Kode", "Codes"), D.codes], [L("Satuan", "Units"), D.units === "t" ? "ton · t/m²" : "kN · kPa"]]
-      .forEach(([k, v]) => chips.append(el("span", null, `${k}: ${v}`)))
-    stats.append(chips)
-    grid.textContent = ""
-    D.mods.forEach((m, i) => grid.append(tile(m, i, L)))
-    // tile penurunan (semua pondasi dari modul Desain)
-    const t = el("a", "hm-tile in"); t.href = "#/penurunan"; t.style.setProperty("--i", D.mods.length)
+    const allOk = okMods === D.mods.length
+    // skor: cincin besar kalkulator yang memenuhi
+    score.classList.remove("sk")
+    const ring = sv("svg", { viewBox: "0 0 120 120", class: "bn-ring" }), R = 52, C = 2 * Math.PI * R
+    ring.append(sv("circle", { cx: 60, cy: 60, r: R, class: "hm-ring-bg" }))
+    const arc = sv("circle", { cx: 60, cy: 60, r: R, class: "hm-ring-fg " + (allOk ? "ok" : "bad"), "stroke-dasharray": `${C} ${C}`, "stroke-dashoffset": C, transform: "rotate(-90 60 60)" })
+    ring.append(arc); requestAnimationFrame(() => requestAnimationFrame(() => arc.setAttribute("stroke-dashoffset", C * (1 - okMods / Math.max(1, D.mods.length)))))
+    const rw = el("div", "bn-ring-w"), rn = el("div", "bn-ring-n"), big = el("b", null, "0")
+    rn.append(big, el("span", null, `/ ${D.mods.length}`)); rw.append(ring, rn)
+    countUp(big, okMods, (v) => String(Math.round(v)))
+    const sx = el("div", "bn-score-tx")
+    sx.append(el("span", "hm-pill " + (allOk ? "ok" : "bad"), allOk ? L("Semua memenuhi", "All passing") : `${D.mods.length - okMods} ${L("perlu ditinjau", "need review")}`),
+      el("b", null, L("Kalkulator memenuhi", "Calculators passing")), el("small", null, L("Setiap kalkulator lulus bila seluruh pemeriksaannya OK.", "A calculator passes when every one of its checks is OK.")))
+    score.append(rw, sx)
+    const stat = (box, lab, to, fmt, sub, cls) => { box.classList.remove("sk"); box.classList.add(cls); const b = el("b"); box.append(el("span", null, lab), b, el("small", null, sub)); countUp(b, to, fmt) }
+    stat(st1, L("Pemeriksaan lolos", "Checks passed"), nChk - nBad, (v) => `${Math.round(v)} / ${nChk}`, nBad ? `${nBad} ${L("tidak OK", "not OK")}` : L("Tanpa kegagalan", "No failures"), nBad ? "bad" : "ok")
+    if (sMax) stat(st2, L("Penurunan terbesar", "Largest settlement"), sMax.settle.s, (v) => `${nf(v, 1)} mm`, sMax.title.split(" (")[0], sMax.settle.s > sMax.settle.allow ? "bad" : "ok")
+    else stat(st2, L("Penurunan terbesar", "Largest settlement"), NaN, () => "–", L("Belum ada hasil", "No results yet"), "")
+    // konteks proyek
+    ctxT.classList.remove("sk")
+    ;[[L("Proyek", "Project"), D.project.name || "–"], [L("Dokumen", "Document"), D.project.doc || "–"], [L("Angin", "Wind"), `${nf(D.site.V, 0)} m/s · ${D.site.exp}`], [L("Kelas situs", "Site class"), D.ss.cls], ["SDS", nf(D.sp.SDS, 3)],
+      [L("Kode", "Codes"), D.codes], [L("Satuan", "Units"), D.units === "t" ? "ton · t/m²" : "kN · kPa"]]
+      .forEach(([k, v]) => { const c = el("div", "bn-kv"); c.append(el("span", null, k), el("b", null, String(v))); ctxT.append(c) })
+    // kalkulator
+    tiles.forEach((x) => x.remove())
+    D.mods.forEach((m, i) => fl.before(tile(m, i, L)))
+    const t = el("a", "bn hm-tile in"); t.href = "#/penurunan"; t.style.setProperty("--i", D.mods.length)
     const top = el("div", "hm-tile-top"); const icS = el("span", "hm-ic"); icS.append(ico("settle")); top.append(icS, el("b", null, L("Penurunan Pondasi", "Foundation Settlement")))
     t.append(top)
     const st = D.mods.filter((m) => m.settle)
@@ -88,22 +114,22 @@ export function mountHome(app, ctx) {
     else {
       const w = st.reduce((a, m) => (!a || m.settle.s / m.settle.allow > a.settle.s / a.settle.allow ? m : a), null), ok = w.settle.s <= w.settle.allow
       t.append(el("p", "hm-sub", `${st.length} ${L("pondasi", "foundations")} · ${st.filter((m) => m.settle.kind === "deep").length} ${L("tiang", "piled")} · ${L("penentu", "governing")}: ${w.title.split(" (")[0]}`))
-      t.append(gauge(w.settle.s / w.settle.allow, `${nf(w.settle.s, 1)} / ${nf(w.settle.allow, 0)} mm`, ok, ok ? "✓ OK" : L("✕ melebihi izin", "✕ exceeds limit"), L("segera + konsolidasi vs izin", "immediate + consolidation vs limit")))
+      t.append(gauge(w.settle.s / w.settle.allow, `${nf(w.settle.s, 1)} / ${nf(w.settle.allow, 0)} mm`, ok, ok ? "OK" : L("Melebihi izin", "Exceeds limit"), L("segera + konsolidasi vs izin", "immediate + consolidation vs limit")))
     }
-    t.append(el("span", "hm-open", L("Buka →", "Open →")))
-    grid.append(t)
+    const op = el("span", "hm-open", L("Buka", "Open")); op.append(ico("arrow")); t.append(op)
+    fl.before(t)
   }, 60)
 }
 
 function tile(m, i, L) {
-  const a = el("a", "hm-tile in"); a.href = "#/desain/" + m.id; a.style.setProperty("--i", i)
+  const a = el("a", "bn hm-tile in"); a.href = "#/desain/" + m.id; a.style.setProperty("--i", i)
   const top = el("div", "hm-tile-top"); const icM = el("span", "hm-ic"); icM.append(ico(MOD_ICO[m.id])); top.append(icM, el("b", null, m.title))
   a.append(top)
   if (m.error) { a.append(el("p", "hm-sub", m.error)); return a }
   a.append(el("p", "hm-sub", m.sub))
-  if (m.fdType) a.append(el("span", "hm-fd " + m.fdType, m.fdType === "deep" ? L("DALAM · tiang", "DEEP · piles") : L("DANGKAL", "SHALLOW")))
-  a.append(gauge(m.gov ? m.gov.ur : 0, m.gov ? `UR ${isFinite(m.gov.ur) ? m.gov.ur.toFixed(3) : "∞"}` : "", m.ok, m.ok ? L("✓ OK", "✓ OK") : `✕ ${m.nBad} ${L("tidak OK", "not OK")}`, m.gov ? m.gov.item : ""))
-  a.append(el("span", "hm-open", `${m.nCmb} ${L("kombinasi", "combinations")} · ${L("Buka →", "Open →")}`))
+  if (m.fdType) top.append(el("span", "hm-fd " + m.fdType, m.fdType === "deep" ? L("Dalam", "Deep") : L("Dangkal", "Shallow")))
+  a.append(gauge(m.gov ? m.gov.ur : 0, m.gov ? `UR ${isFinite(m.gov.ur) ? m.gov.ur.toFixed(3) : "∞"}` : "", m.ok, m.ok ? "OK" : `${m.nBad} ${L("tidak OK", "not OK")}`, m.gov ? m.gov.item : ""))
+  const op = el("span", "hm-open", `${m.nCmb} ${L("kombinasi", "combinations")}`); op.append(ico("arrow")); a.append(op)
   return a
 }
 function gauge(ur, label, ok, pill, item) {

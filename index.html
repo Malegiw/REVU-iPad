@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>YMD-CAL</title>
 <meta name="description" content="YMD-CAL — kalkulator desain pondasi & sipil migas (tiang, tangki, vessel, peralatan dinamis, trafo, penurunan), berjalan offline di iPad.">
-<meta name="theme-color" content="#27323F">
+<meta name="theme-color" content="#F4F4F1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="YMD-CAL">
@@ -14,6 +15,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" type="image/svg+xml" href="icons/logo.svg">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
+<script>try{var d=document.documentElement,g=function(k){return localStorage.getItem(k)},t=g("ymd.theme")||"auto";d.dataset.theme=t==="dark"||(t==="auto"&&matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";d.dataset.accent=g("ymd.accent")||"teal";d.dataset.density=g("ymd.density")||"comfortable";if(g("ymd.motion")==="off")d.dataset.motion="off"}catch(e){}</script>
 <link rel="stylesheet" href="css/app.css">
 <link rel="stylesheet" href="css/flow.css">
 <link rel="stylesheet" href="css/desain.css">
@@ -21,8 +23,8 @@
 <link rel="stylesheet" href="css/proyek.css">
 </head>
 <body>
-<header class="top">
-  <a class="brand" href="#/" aria-label="YMD-CAL">
+<header class="ui-top">
+  <a class="ui-brand" href="#/" aria-label="YMD-CAL">
     <span class="logo"><svg viewBox="0 0 64 64" aria-hidden="true">
   <defs>
     <linearGradient id="ymdcal-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3B5874"/><stop offset=".55" stop-color="#27323F"/><stop offset="1" stop-color="#1F808D"/></linearGradient>
@@ -37,17 +39,18 @@
     <rect x="29.4" y="40" width="5.2" height="16" rx="1.6" fill="#fff" opacity=".92"/>
     <rect x="42.3" y="40" width="5.2" height="16" rx="1.6" fill="#fff" opacity=".92"/>
   </g>
-</svg></span><span class="bt"><b>YMD<i>-CAL</i></b><small id="sub"></small></span>
+</svg></span><span class="ui-word">YMD<i>-CAL</i></span>
   </a>
-  <nav id="nav" class="nav" aria-label="Menu"></nav>
-  <div class="tools">
-    <span id="offline" class="chip" hidden></span>
-    <button id="btnLang" class="tb" type="button" aria-label="Bahasa / Language"></button>
-    <button id="btnTheme" class="tb" type="button" aria-label="Tema / Theme"></button>
+  <span id="crumb" class="ui-crumb"></span>
+  <div class="ui-top-r">
+    <span id="offline" class="ui-status" hidden><i></i><span></span></span>
+    <button id="btnSearch" class="ui-search" type="button"></button>
+    <button id="btnSet" class="ui-icb" type="button"></button>
   </div>
 </header>
 <main id="app" tabindex="-1"></main>
-<div id="toast" class="toast" role="status" hidden></div>
+<nav id="dock" class="ui-dock" aria-label="Menu"></nav>
+<div id="toasts" class="ui-toasts" role="status" aria-live="polite"></div>
 <noscript><p style="padding:24px">Aplikasi ini membutuhkan JavaScript.</p></noscript>
 <script type="module" src="js/app.js"></script>
 </body>
