@@ -208,6 +208,17 @@ export function stripRepeating(pages) {
     return (cnt.get(key(l)) || 0) < lim
   }))
 }
+// teks klasifikasi / penafian / tabel pengesahan / nama perusahaan di sampul & kop halaman — bukan judul dokumen
+// (mis. "Intended for internal use PHR or other area as per guidance or permit", "CONFIDENTIAL", "PT PERTAMINA HULU ROKAN", "Prepared by")
+const CO = new Set(["pt", "pertamina", "hulu", "rokan", "chevron", "pacific", "indonesia", "persero", "tbk", "regional", "ep", "phr", "cpi", "zona", "zone", "energi", "energy", "company", "limited", "ltd", "inc"])
+export function isBoilerplate(l) {
+  const t = String(l ?? "").trim()
+  if (!t) return true
+  if (/\b(intended for|internal use|for internal|confidential|proprietary|rahasia|terbatas|uncontrolled|controlled copy|printed cop|copyright|all rights reserved|hak cipta|property of|do not (copy|distribute)|as per guidance|for information only|disclaimer)\b/i.test(t)) return true
+  if (/^(prepared|checked|reviewed|approved|endorsed|disetujui|diperiksa|dibuat|date|tanggal|signature|tanda tangan|name|nama|position|jabatan|issued for|revision (history|log|record|status)|record of revision|riwayat revisi|description|keterangan|table of contents|contents|daftar isi)\b/i.test(t)) return true
+  const ws = fold(t).split(/[^a-z0-9]+/).filter(Boolean)
+  return ws.length > 0 && ws.every((w) => CO.has(w) || w.length < 2)
+}
 // Nomor dokumen: cari pola "RTS-…" dulu, lalu kode umum "ABC-DEF-123" di halaman awal; jika tidak ada pakai nama berkas
 export function detectDocMeta(pages, fileName = "") {
   const head = pages.slice(0, 2).flat().slice(0, 80).join("\n")
@@ -216,12 +227,30 @@ export function detectDocMeta(pages, fileName = "") {
   const gen = head.match(/\b[A-Z]{2,6}(?:-[A-Z0-9]{1,8}){2,5}\b/)
   const docNo = (rts ? rts[0] : gen ? gen[0] : base).replace(/_/g, "-").replace(/\s+/g, " ").trim()
   const rev = (head.match(/\bRev(?:isi|ision)?\.?\s*[:#]?\s*([0-9A-Z]{1,3})\b/i) || [])[1] || ""
-  // judul: baris huruf besar/pendek di 25 baris pertama yang bukan nomor dokumen dan bukan kalimat
+  // judul: baris huruf besar / Huruf Judul di 25 baris pertama yang bukan nomor dokumen, bukan kalimat, dan bukan teks klasifikasi/kop perusahaan
   // segmen baris (kolom kepala halaman dipisah ≥ 3 spasi) dari halaman pertama + kepala halaman kedua
   const segs = (p, n) => (p || []).slice(0, n).flatMap((l) => l.replace(/^\u00A7\u00A7[^\t]*\t/, "").split(/ {3,}|\t| \| /)).map((l) => l.trim())
   const p2 = new Set(segs(pages[1], 6).map((l) => fold(l)))
-  const cand = segs(pages[0], 25).filter((l) => l.length >= 8 && l.length <= 120 && !/^(rev|page|halaman|date|tanggal|doc|no\.?|document)\b/i.test(l) && !/^(table of )?contents$|^daftar isi$/i.test(l) && !l.includes(docNo) && /[A-Za-z]{4}/.test(l))
-  const score = (l) => { const lt = l.replace(/[^A-Za-z]/g, ""), up = lt.replace(/[^A-Z]/g, "").length / Math.max(1, lt.length); return up * 80 + Math.min(l.length, 60) * 0.5 + (p2.has(fold(l)) ? 12 : 0) - (/[.;:]$/.test(l) ? 30 : 0) - (/\b(shall|harus|must|should)\b/i.test(l) ? 30 : 0) - (/\d{3,}/.test(l) ? 15 : 0) - (/^\d/.test(l) ? 25 : 0) }
+  const s1 = segs(pages[0], 25)
+  const bonus = new Map()
+  const LAB = /^(?:document\s+)?(?:title|judul)(?:\s+dokumen)?\s*[:：]?\s*/i
+  s1.forEach((l, i) => {
+    const m = l.match(LAB)
+    if (!m) return
+    const rest = l.slice(m[0].length).trim()
+    if (rest.length >= 6) bonus.set(rest, 100)                               // "Title: Foundation Design Criteria"
+    else if (s1[i + 1]) bonus.set(s1[i + 1], 60)                              // "TITLE" lalu judul di baris berikutnya
+  })
+  const ok = (l) => l.length >= 8 && l.length <= 120 && !/^(rev|page|halaman|date|tanggal|doc|no\.?|document)\b/i.test(l) && !l.includes(docNo) && /[A-Za-z]{4}/.test(l) && !isBoilerplate(l)
+  const cand = [...s1, ...bonus.keys()].filter(ok)
+  // sisa nama berkas setelah nomor dokumen ("PHR-CIV-PRC-104841 Foundation Design.pdf" → "Foundation Design")
+  const fromFile = base.replace(docNo.replace(/ /g, "[-_ ]"), "").replace(/[_]+/g, " ").replace(/^[\s\-–·.]+|[\s\-–·.]+$/g, "").trim()
+  if (fromFile.split(/\s+/).filter((w) => /[A-Za-z]{3}/.test(w)).length >= 2 && ok(fromFile)) { cand.push(fromFile); bonus.set(fromFile, (bonus.get(fromFile) || 0) + 20) }
+  const score = (l) => {
+    const lt = l.replace(/[^A-Za-z]/g, ""), up = lt.replace(/[^A-Z]/g, "").length / Math.max(1, lt.length)
+    const ws = l.split(/\s+/).filter((w) => /^[A-Za-z]{4,}/.test(w)), capR = ws.length >= 2 ? ws.filter((w) => /^[A-Z]/.test(w)).length / ws.length : 0
+    return up * 80 + capR * 30 + Math.min(l.length, 60) * 0.5 + (p2.has(fold(l)) ? 12 : 0) + (bonus.get(l) || 0) - (/[.;:]$/.test(l) ? 30 : 0) - (/\b(shall|harus|must|should)\b/i.test(l) ? 30 : 0) - (/\d{3,}/.test(l) ? 15 : 0) - (/^\d/.test(l) ? 25 : 0)
+  }
   const title = cand.sort((a, b) => score(b) - score(a))[0] || base
   return { docNo, rev, title }
 }

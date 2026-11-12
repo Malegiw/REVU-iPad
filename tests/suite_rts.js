@@ -53,6 +53,14 @@ export async function run({ check }) {
   ]
   const meta = R.detectDocMeta(pages, "x.pdf")
   eq("nomor dokumen, revisi, judul", [meta.docNo, meta.rev, meta.title], ["RTS-CIV-901", "1", "SAMPLE CONCRETE SPECIFICATION"])
+  // judul bukan teks klasifikasi / kop perusahaan / tabel pengesahan (sampul fiktif bergaya dokumen standar perusahaan)
+  const cls = "Intended for internal use XYZ or other area as per guidance or permit"
+  const cover = (title, extra = []) => [[cls, "PT PERTAMINA HULU ROKAN", ...extra, title, "Document No. ABC-CIV-PRC-900001", "Rev. xx", "Prepared by   Checked by   Approved by"], [cls, "ABC-CIV-PRC-900001   Rev. xx", "REVISION HISTORY"], [cls, "TABLE OF CONTENTS"]]
+  truthy("teks klasifikasi, nama perusahaan & tabel pengesahan = bukan judul", R.isBoilerplate(cls) && R.isBoilerplate("PT PERTAMINA HULU ROKAN") && R.isBoilerplate("Prepared by") && !R.isBoilerplate("Work Permit Procedure") && !R.isBoilerplate("Pertamina Pipeline Design Standard"))
+  eq("judul Huruf Judul di sampul, bukan baris klasifikasi yang berulang", R.detectDocMeta(cover("Sample Concrete Works Procedure"), "a.pdf").title, "Sample Concrete Works Procedure")
+  eq("judul huruf besar di sampul", [R.detectDocMeta(cover("SAMPLE DESIGN CRITERIA"), "a.pdf").docNo, R.detectDocMeta(cover("SAMPLE DESIGN CRITERIA"), "a.pdf").rev, R.detectDocMeta(cover("SAMPLE DESIGN CRITERIA"), "a.pdf").title], ["ABC-CIV-PRC-900001", "xx", "SAMPLE DESIGN CRITERIA"])
+  eq("baris 'Title: …' diutamakan", R.detectDocMeta(cover("", ["Title: Sample Steel Fabrication"]), "a.pdf").title, "Sample Steel Fabrication")
+  eq("tanpa judul di sampul → sisa nama berkas setelah nomor dokumen", R.detectDocMeta(cover(""), "ABC-CIV-PRC-900001 Sample Earthwork Spec.pdf").title, "Sample Earthwork Spec")
   const secs = R.splitSections(pages)
   eq("pasal terbaca berurutan", secs.map((s) => s.no), ["1", "2.1", "3.1", "3.2", "4"])
   truthy("kepala/kaki halaman berulang dibuang", !secs.some((s) => /Page \d|SAMPLE CONCRETE|RTS-CIV-901/.test(s.text)))

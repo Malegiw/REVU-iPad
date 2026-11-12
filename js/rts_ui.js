@@ -10,8 +10,9 @@ import { el, sv, exportBar, reveal } from "./desain/ui.js"
 import { projLoad } from "./project.js"
 import { initUnits, footer } from "./pj_ui.js"
 import { ico } from "./icons.js"
-import { buildIndex, search, findParam, PARAMS, PARAM_GROUPS, extractValues, parseQuery, termSpans, complianceRows, pinNumber, fold } from "./rts.js"
+import { buildIndex, search, findParam, PARAMS, PARAM_GROUPS, extractValues, parseQuery, termSpans, complianceRows, pinNumber, fold, isBoilerplate, detectDocMeta } from "./rts.js"
 import * as store from "./rts_store.js"
+import { openPdf, shareFile } from "./rts_viewer.js"
 
 const KEY = "ymd.rts.v1"
 const DEF = () => ({ pins: {}, recent: [], q: "", doc: "", tab: "cari", pf: "all", view: "rel" })
@@ -20,14 +21,18 @@ const saveSt = (S) => { try { localStorage.setItem(KEY, JSON.stringify(S)) } cat
 export const rtsPins = () => loadSt().pins
 
 let DOCS = null, IX = null     // cache selama app terbuka
+let FILES = new Set()          // id dokumen yang berkas aslinya tersimpan
+const fileCache = new Map()    // berkas asli yang sudah dibaca (agar Bagikan bisa langsung dari ketukan)
 let keyHandler = null          // pintasan papan ketik (dilepas saat tab dipasang ulang)
 const kb = (n) => (n > 1048576 ? `${nf(n / 1048576, 1)} MB` : `${nf(n / 1024, 0)} kB`)
 const refOf = (doc, sec) => `${doc.docNo}${doc.rev ? " Rev." + doc.rev : ""}${sec ? ` · ${sec.no ? "§" + sec.no + " " : ""}${sec.title || ""}${sec.page ? ` · ${L("hal.", "p.")} ${sec.page}` : ""}` : ""}`.trim()
-const docTitle = (doc) => doc.title || doc.fileName || ""
+// judul dokumen untuk tampilan: teks klasifikasi/kop ("Intended for internal use …") atau nomor dokumen diganti nama berkas
+const docTitle = (doc) => { const t = String(doc.title || "").trim(); if (t && t !== doc.docNo && !isBoilerplate(t)) return t; const f = String(doc.fileName || "").replace(/\.[^.]+$/, "").replace(/_/g, " ").trim(); return f && f !== doc.docNo ? f : "" }
 // baris dokumen sumber: nomor RTS + judul dokumen + revisi (supaya jelas pasal ini dari dokumen apa)
 function docLine(doc, cls = "rt-docl") {
   const d = el("span", cls)
-  d.append(el("span", "rt-badge", doc.docNo), el("span", "rt-docl-t", docTitle(doc) || "–"))
+  d.append(el("span", "rt-badge", doc.docNo))
+  if (docTitle(doc)) d.append(el("span", "rt-docl-t", docTitle(doc)))
   if (doc.rev) d.append(el("small", null, "Rev." + doc.rev))
   d.title = `${doc.docNo}${doc.rev ? " Rev." + doc.rev : ""} — ${docTitle(doc)}`
   return d
@@ -182,8 +187,51 @@ export function mountRts(box, ctx) {
   async function loadDocs(force) {
     if (DOCS && !force) return DOCS
     try { DOCS = (await store.listDocs()).sort((a, b) => fold(a.docNo).localeCompare(fold(b.docNo))) } catch (e) { DOCS = []; DOCS.err = e.message }
+    try { FILES = await store.fileIds() } catch (e) { FILES = new Set() }
     IX = null
     return DOCS
+  }
+  // berkas asli: dibaca lebih dulu (saat baris/pasal dibuka) supaya Bagikan dipanggil langsung dari ketukan
+  function prefetch(id) {
+    if (!FILES.has(id) || fileCache.has(id)) return
+    store.getFile(id).then((f) => { if (!f) return; fileCache.set(id, f); if (fileCache.size > 6) fileCache.delete(fileCache.keys().next().value) }).catch(() => null)
+  }
+  async function openOriginal(doc, sec, groups) {
+    const f = fileCache.get(doc.id) || (FILES.has(doc.id) ? await store.getFile(doc.id).catch(() => null) : null)
+    if (!f) { toast(L("Berkas asli dokumen ini tidak tersimpan (mis. diimpor dari paket .json). Impor ulang berkasnya untuk melihatnya.", "This document's original file is not stored (e.g. imported from a .json pack). Re-import the file to view it.")); return }
+    if (doc.type === "pdf") openPdf({ blob: f.blob, name: f.name || doc.fileName, type: f.type || "application/pdf", title: `${doc.docNo}${docTitle(doc) ? " · " + docTitle(doc) : ""}`, page: sec ? sec.page : 1, groups: groups || null, heading: sec ? sec.title : "" })
+    else shareFile(f.blob, f.name || doc.fileName, f.type)
+  }
+  function origBtn(doc, sec, groups) {
+    if (!FILES.has(doc.id)) return null
+    const pdf = doc.type === "pdf"
+    const b = btn("rt-btn", pdf ? (sec ? L(`Lihat PDF asli (hal. ${sec.page})`, `View original PDF (p. ${sec.page})`) : L("Lihat PDF asli", "View original PDF")) : L("Bagikan / simpan berkas asli", "Share / save original"), pdf ? "book" : "upload")
+    b.onclick = () => openOriginal(doc, sec, groups)
+    prefetch(doc.id)
+    return b
+  }
+  // perbaiki judul dokumen lama yang terbaca dari teks klasifikasi/kop: baca ulang 3 halaman pertama PDF asli dengan deteksi baru
+  let repairing = false
+  async function repairTitles() {
+    if (repairing) return
+    const docs = DOCS || [], same = new Map()
+    docs.forEach((d) => { const k = fold(d.title || ""); same.set(k, (same.get(k) || 0) + 1) })
+    const todo = docs.filter((d) => d.type === "pdf" && !d.titleManual && !d.titleFix && FILES.has(d.id) && (!d.title || d.title === d.docNo || isBoilerplate(d.title) || same.get(fold(d.title)) >= 3))
+    if (!todo.length) return
+    repairing = true
+    let n = 0
+    for (const d of todo) {
+      if (!box.isConnected) break
+      try {
+        const f = await store.getFile(d.id); if (!f) continue
+        const m = detectDocMeta(await store.pdfHeadPages(f.blob, 3), d.fileName)
+        d.titleFix = 1
+        if (m.title && m.title !== d.docNo && !isBoilerplate(m.title) && m.title !== d.title) { d.title = m.title; n++ }
+        await store.putDoc(d)
+      } catch (e) { /* lewati dokumen ini */ }
+    }
+    repairing = false
+    if (n && box.isConnected) { IX = null; drawAll(); toast(`✓ ${L("Judul dokumen diperbaiki", "Document titles fixed")}: ${n}`) }
   }
   const index = () => { if (!IX) IX = buildIndex(DOCS || []); return IX }
   const candsOf = (p) => { const ix = (DOCS || []).length ? index() : null; if (!ix) return []; if (!ix.pc) ix.pc = {}; return (ix.pc[p.id] ||= findParam(ix, p, 3)) }
@@ -215,7 +263,7 @@ export function mountRts(box, ctx) {
       importList = [...r.done.map((d) => ({ name: d.fileName || d.docNo, type: d.type, ok: d.warn !== "scan", note: d.warn === "scan" ? L("scan tanpa teks", "scan, no text") : d.docNo })), ...r.errs.map((e) => ({ name: e.name, type: (e.name.match(/\.(\w+)$/) || [])[1] || "?", ok: false, note: e.msg }))]
       importMsg = ptx.textContent = `✓ ${L("Selesai", "Done")}: ${r.done.length} ${L("dokumen", "documents")}${r.errs.length ? ` · ${r.errs.length} ${L("gagal", "failed")}` : ""}${scan.length ? ` · ⚠️ ${scan.length} ${L("PDF hasil scan tanpa teks (perlu OCR di komputer dulu)", "scanned PDFs without text (OCR them on a computer first)")}` : ""}`
       bar.style.width = "100%"
-      drawAll()
+      drawAll(); repairTitles()
     }
     inp.onchange = () => doImport([...inp.files])
     drop.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; drop.classList.add("over") })
@@ -229,6 +277,7 @@ export function mountRts(box, ctx) {
     c.append(el("i", "t-" + String(f.type).toLowerCase(), String(f.type).toUpperCase()), el("span", null, f.name), el("b", null, f.ok ? "✓" : "!"))
     return c
   }
+  const openDocs = new Set()
   function drawLib() {
     libBox.textContent = ""
     const docs = DOCS || [], nSec = docs.reduce((a, d) => a + d.secs.length, 0)
@@ -247,32 +296,41 @@ export function mountRts(box, ctx) {
     if (!docs.length) return
     const list = el("div", "rt-docs")
     docs.forEach((d) => {
-      const row = el("details", "rt-doc")
+      const row = el("details", "rt-doc"); row.open = openDocs.has(d.id)
+      row.addEventListener("toggle", () => { if (row.open) { openDocs.add(d.id); prefetch(d.id) } else openDocs.delete(d.id) })
       const sm = el("summary")
       const tx = el("span", "rt-doc-tx")
-      tx.append(el("b", null, d.docNo + (d.rev ? ` · Rev.${d.rev}` : "")), el("span", null, d.title || d.fileName), el("small", null, `${d.pages} ${L("hal.", "pp.")} · ${d.secs.length} ${L("pasal", "clauses")}${d.size ? " · " + kb(d.size) : ""}${d.warn === "scan" ? " · ⚠️ " + L("scan, teks kosong", "scanned, no text") : ""}`))
+      tx.append(el("b", null, d.docNo + (d.rev ? ` · Rev.${d.rev}` : "")), el("span", null, docTitle(d) || d.fileName || "–"), el("small", null, `${d.pages} ${L("hal.", "pp.")} · ${d.secs.length} ${L("pasal", "clauses")}${d.size ? " · " + kb(d.size) : ""}${FILES.has(d.id) ? "" : " · " + L("tanpa berkas asli", "no original file")}${d.warn === "scan" ? " · ⚠️ " + L("scan, teks kosong", "scanned, no text") : ""}`))
       const chev = el("span", "rt-chev"); chev.append(ico("chevR"))
       sm.append(el("span", "rt-type t-" + d.type, d.type.toUpperCase()), tx, chev)
       row.append(sm)
       const acts = el("div", "rt-acts")
       const bFind = btn("rt-btn pri", L("Cari di dokumen ini", "Search this document"), "search")
       bFind.onclick = () => { S.doc = d.id; saveSt(S); drawSearch(); setTab("cari", true); if (qInput) qInput.focus() }
-      const bOpen = btn("rt-btn", L("Buka berkas asli", "Open original"), "open")
-      bOpen.onclick = async () => { const f = await store.getFile(d.id).catch(() => null); if (!f) { bOpen.lastChild.textContent = L("Berkas asli tidak disimpan", "Original not stored"); return } window.open(URL.createObjectURL(f.blob), "_blank") }
+      const bOpen = origBtn(d, null, null)
+      // ubah judul (bila judul otomatis keliru)
+      const bRen = btn("rt-btn", L("Ubah judul", "Rename"), "edit")
+      const ren = el("form", "rt-ren"); ren.hidden = true
+      const ri = el("input"); ri.type = "text"; ri.value = docTitle(d); ri.placeholder = L("Judul dokumen", "Document title"); ri.setAttribute("aria-label", L("Judul dokumen", "Document title"))
+      const rs = btn("rt-btn pri", L("Simpan", "Save"), "check"); rs.type = "submit"
+      const rc = btn("rt-btn", L("Batal", "Cancel")); rc.onclick = () => { ren.hidden = true }
+      ren.append(ri, rs, rc)
+      bRen.onclick = () => { ren.hidden = !ren.hidden; if (!ren.hidden) { ri.focus(); ri.select() } }
+      ren.onsubmit = async (e) => { e.preventDefault(); const v = ri.value.trim(); if (!v) return; d.title = v; d.titleManual = true; await store.putDoc(d); await loadDocs(true); drawAll(); toast(`✓ ${d.docNo}: ${v}`) }
       const bDel = btn("rt-btn danger", L("Hapus", "Delete"), "trash")
       inlineConfirm(bDel, L("Ketuk lagi untuk menghapus", "Tap again to delete"), async () => {
         const f = await store.getFile(d.id).catch(() => null)
         await store.delDoc(d.id); if (S.doc === d.id) { S.doc = ""; saveSt(S) } await loadDocs(true); drawAll()
         toast(`${L("Dihapus", "Deleted")}: ${d.docNo}`, async () => { await store.putDoc(d); if (f) await store.putFile(d.id, f.blob, f.name, f.type).catch(() => null); await loadDocs(true); drawAll() })
       })
-      acts.append(bFind, bOpen, bDel)
+      acts.append(...[bFind, bOpen, bRen, bDel].filter(Boolean))
       // daftar pasal dengan penyaring
       const heads = d.secs.filter((s) => s.title && !(s.part > 1)).slice(0, 400)
       const toc = el("ol", "rt-toc")
       const fil = el("input", "rt-tocf"); fil.type = "search"; fil.placeholder = L(`Saring ${heads.length} pasal…`, `Filter ${heads.length} clauses…`); fil.autocapitalize = "off"
       heads.forEach((s) => { const li = el("li"); const a = el("button", "rt-toc-a"); a.type = "button"; a.append(el("b", null, s.no || "•"), el("span", null, s.title), el("small", null, `${L("hal.", "p.")} ${s.page}`)); a.onclick = () => openSection(d, s); li.dataset.f = fold(`${s.no} ${s.title}`); li.append(a); toc.append(li) })
       fil.oninput = () => { const q = fold(fil.value.trim()); toc.querySelectorAll("li").forEach((li) => { li.hidden = q && !li.dataset.f.includes(q) }) }
-      const inner = el("div", "rt-doc-b"); inner.append(acts)
+      const inner = el("div", "rt-doc-b"); inner.append(acts, ren)
       if (heads.length) inner.append(fil, toc)
       row.append(inner)
       list.append(row)
@@ -368,8 +426,7 @@ export function mountRts(box, ctx) {
     const acts = el("div", "rt-acts rt-pan-f")
     const bc = btn("rt-btn", L("Salin kutipan + referensi", "Copy quote + reference"), "copy")
     bc.onclick = () => copyTo(bc, `${full.trim()}\n\n— ${refOf(doc, sec)}${docTitle(doc) ? " (" + docTitle(doc) + ")" : ""}`)
-    const bo = btn("rt-btn", L("Buka berkas asli", "Open original"), "open")
-    bo.onclick = async () => { const f = await store.getFile(doc.id).catch(() => null); if (!f) { bo.lastChild.textContent = L("Berkas asli tidak disimpan", "Original not stored"); return } window.open(URL.createObjectURL(f.blob) + (doc.type === "pdf" ? `#page=${sec.page}` : ""), "_blank") }
+    const bo = origBtn(doc, sec, groups)
     const nav = el("div", "rt-pnav")
     const bp = btn("rt-btn icon", null, "chevL"), bn = btn("rt-btn icon", null, "chevR")
     bp.setAttribute("aria-label", L("Pasal sebelumnya", "Previous clause")); bn.setAttribute("aria-label", L("Pasal berikutnya", "Next clause"))
@@ -377,7 +434,7 @@ export function mountRts(box, ctx) {
     bp.disabled = hi <= 0; bn.disabled = hi < 0 || hi >= heads.length - 1
     bp.onclick = () => openSection(doc, heads[hi - 1], groups, pinFor); bn.onclick = () => openSection(doc, heads[hi + 1], groups, pinFor)
     nav.append(bp, el("small", null, hi >= 0 ? `${hi + 1} / ${heads.length}` : ""), bn)
-    acts.append(bc, bo, nav)
+    acts.append(...[bc, bo, nav].filter(Boolean))
     pan.append(el("p", "rt-tip", L("Ketuk nilai bergaris (mis. 28 MPa) untuk menetapkannya sebagai nilai RTS sebuah parameter.", "Tap an underlined value (e.g. 28 MPa) to pin it as an RTS value for a parameter.")), bodyTx, acts)
   }
 
@@ -773,6 +830,7 @@ export function mountRts(box, ctx) {
   if (keyHandler) removeEventListener("keydown", keyHandler)
   keyHandler = (e) => {
     if (!box.isConnected) { removeEventListener("keydown", keyHandler); keyHandler = null; return }
+    if (document.querySelector(".rt-viewer")) return
     if (e.key === "Escape" && !sheet.hidden) { killSheet(); e.preventDefault(); return }
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "") || document.activeElement?.isContentEditable
     if (!sheet.hidden) return
@@ -790,5 +848,5 @@ export function mountRts(box, ctx) {
   searchBox.append(el("p", "rt-shimmer rt-loading", L("Memuat pustaka RTS…", "Loading RTS library…")))
   for (let i = 0; i < 3; i++) searchBox.append(el("div", "rt-skel sk"))
   setTab(tab)
-  loadDocs().then(() => { if (!box.isConnected) return; Object.values(tiles).forEach((T) => T.t.classList.remove("sk")); searchBox.textContent = ""; drawAll() })
+  loadDocs().then(() => { if (!box.isConnected) return; Object.values(tiles).forEach((T) => T.t.classList.remove("sk")); searchBox.textContent = ""; drawAll(); repairTitles() })
 }
