@@ -3,6 +3,8 @@
 // dan cek kepatuhan masukan modul Desain terhadap nilai RTS tersebut. Mesin: js/rts.js; penyimpanan & impor: js/rts_store.js.
 // Tata letak: ringkasan bento (dokumen, parameter, saran, kepatuhan) → tab bersegmen Cari · Parameter · Kepatuhan · Pustaka (satu bagian tampil
 // sekaligus) → panel geser bawah untuk pasal lengkap & detail parameter. Pintasan: "/" atau ⌘K = cari, ↑/↓ = pindah hasil, Esc = tutup/hapus.
+// Interaksi mikro (pola bencho.dev): jelly tabs, rolling counter, edge light, inline confirm + urungkan, copy field, upload dropzone (seret berkas),
+// progress ticks (satu garis per parameter), shimmer text saat memuat.
 import { L, lang, nf } from "./desain/core.js"
 import { el, sv, exportBar, reveal } from "./desain/ui.js"
 import { projLoad } from "./project.js"
@@ -32,12 +34,39 @@ function docLine(doc, cls = "rt-docl") {
 }
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches
 const btn = (cls, label, icon) => { const b = el("button", cls); b.type = "button"; if (icon) b.append(ico(icon)); if (label != null) b.append(el("span", null, label)); return b }
-// angka naik bertahap (count-up) untuk ringkasan
-function countUp(node, to, fmt = (x) => String(Math.round(x))) {
-  if (reduced() || !isFinite(to) || to <= 0) { node.textContent = fmt(to); return }
-  const t0 = performance.now(), dur = 650
-  const step = (t) => { const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3); node.textContent = fmt(to * e); if (k < 1 && node.isConnected) requestAnimationFrame(step) }
-  requestAnimationFrame(step)
+// rolling counter: tiap digit bergulir vertikal ke nilai barunya (karakter lain langsung diganti)
+function roll(node, text) {
+  text = String(text)
+  node.setAttribute("aria-label", text)
+  const cols = [...node.children]
+  const same = cols.length === text.length && cols.every((c, i) => (c.dataset.d != null) === /\d/.test(text[i]))
+  if (!same) {
+    node.textContent = ""
+    for (const ch of text) {
+      if (/\d/.test(ch)) { const c = el("span", "rt-rd"); c.dataset.d = "0"; c.setAttribute("aria-hidden", "true"); const st = el("span", "rt-rs"); for (let k = 0; k < 10; k++) st.append(el("span", null, String(k))); c.append(st); node.append(c) }
+      else { const c = el("span", "rt-rc", ch); c.setAttribute("aria-hidden", "true"); node.append(c) }
+    }
+  }
+  const apply = () => [...node.children].forEach((c, i) => { if (c.dataset.d != null) { c.dataset.d = text[i]; c.firstChild.style.transform = `translateY(${-Number(text[i]) * 10}%)` } else c.textContent = text[i] })
+  if (!same && !reduced()) requestAnimationFrame(() => requestAnimationFrame(apply)); else apply()
+}
+// pill terpilih "membengkak" seperti jelly (sekali, saat dipilih)
+const jelly = (n) => { if (!n || reduced()) return; n.classList.remove("pop"); void n.offsetWidth; n.classList.add("pop") }
+// tombol yang menjadi konfirmasinya sendiri: ketuk sekali → "ketuk lagi", ketuk kedua dalam 3 detik → jalankan
+function inlineConfirm(b, armLabel, run) {
+  let t = 0
+  const lab = b.lastChild, orig = lab.textContent
+  b.onclick = async () => {
+    if (!b.classList.contains("arm")) { b.classList.add("arm"); lab.textContent = armLabel; clearTimeout(t); t = setTimeout(() => { b.classList.remove("arm"); lab.textContent = orig }, 3000); return }
+    clearTimeout(t); b.classList.remove("arm"); b.disabled = true; lab.textContent = orig
+    try { await run() } finally { b.disabled = false }
+  }
+}
+// copy field: ikon salin berubah jadi centang sebentar
+async function copyTo(b, text) {
+  const ic = b.firstChild, lab = b.lastChild && b.lastChild !== ic ? b.lastChild : null, orig = lab ? lab.textContent : ""
+  try { await navigator.clipboard.writeText(text); b.classList.add("done"); ic.replaceWith(ico("check")); if (lab) lab.textContent = L("Tersalin", "Copied") } catch (e) { if (lab) lab.textContent = L("Gagal menyalin", "Copy failed"); return }
+  setTimeout(() => { if (!b.isConnected) return; b.classList.remove("done"); b.firstChild.replaceWith(ico("copy")); if (lab) lab.textContent = orig }, 1800)
 }
 
 export function mountRts(box, ctx) {
@@ -70,9 +99,9 @@ export function mountRts(box, ctx) {
   heroT.append(hx)
   const tiles = {}
   const mkTile = (id, icon, label, go) => {
-    const t = btn("rt-tile"); t.dataset.k = id
+    const t = btn("rt-tile rt-edge"); t.dataset.k = id
     const top = el("span", "rt-tile-top"); top.append(ico(icon), el("span", null, label))
-    const v = el("b", "rt-tile-v", "–"), s = el("small", "rt-tile-s", "")
+    const v = el("b", "rt-tile-v rt-roll", "–"), s = el("small", "rt-tile-s", "")
     t.append(top, v, s)
     t.onclick = go
     tiles[id] = { t, v, s }
@@ -114,12 +143,27 @@ export function mountRts(box, ctx) {
   const expBox = el("div", "dz-expbox rt-exp")
   box.append(bento, tabWrap, ...Object.values(panels), footer())
 
+  // edge light: tepi kartu menangkap cahaya di arah penunjuk
+  box.addEventListener("pointermove", (e) => {
+    if (e.pointerType !== "mouse") return
+    const c = e.target.closest(".rt-edge"); if (!c) return
+    const r = c.getBoundingClientRect()
+    c.style.setProperty("--mx", `${e.clientX - r.left}px`); c.style.setProperty("--my", `${e.clientY - r.top}px`)
+  })
+  // seret berkas dari Files/Finder ke mana saja di halaman → kotak impor menyala
+  let dragN = 0
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files")
+  box.addEventListener("dragenter", (e) => { if (!hasFiles(e)) return; dragN++; box.classList.add("rt-dragging") })
+  box.addEventListener("dragleave", () => { if (--dragN <= 0) { dragN = 0; box.classList.remove("rt-dragging") } })
+  box.addEventListener("drop", () => { dragN = 0; box.classList.remove("rt-dragging") })
+  box.addEventListener("dragover", (e) => { if (hasFiles(e) && !e.target.closest(".rt-drop")) e.preventDefault() })
   function moveInd() {
     const b = tabBtn[tab]; if (!b || !b.offsetWidth) return
     ind.style.width = b.offsetWidth + "px"; ind.style.transform = `translateX(${b.offsetLeft}px)`
   }
   if (self.ResizeObserver) new ResizeObserver(moveInd).observe(tabBar)
   function setTab(id, user) {
+    if (user && id !== tab) jelly(ind)
     tab = id; S.tab = id; saveSt(S)
     for (const t of TABS) { const on = t.id === id; tabBtn[t.id].classList.toggle("on", on); tabBtn[t.id].setAttribute("aria-selected", on); tabBtn[t.id].tabIndex = on ? 0 : -1; panels[t.id].hidden = !on }
     moveInd()
@@ -144,34 +188,46 @@ export function mountRts(box, ctx) {
   const index = () => { if (!IX) IX = buildIndex(DOCS || []); return IX }
   const candsOf = (p) => { const ix = (DOCS || []).length ? index() : null; if (!ix) return []; if (!ix.pc) ix.pc = {}; return (ix.pc[p.id] ||= findParam(ix, p, 3)) }
 
-  let importMsg = ""
-  // kotak impor (dipakai di Pustaka dan di keadaan kosong)
+  let importMsg = "", importList = []
+  // kotak impor (dipakai di Pustaka dan di keadaan kosong): ketuk untuk memilih, atau seret berkas ke kotak
   function makeDrop(big) {
     const wrap = el("div", "rt-dropw")
     const drop = el("label", "rt-drop" + (big ? " big" : ""))
     const inp = el("input"); inp.type = "file"; inp.multiple = true; inp.accept = store.ACCEPT
     const icD = el("span", "rt-drop-ic"); icD.append(ico("upload"))
     const dt = el("span", "rt-drop-tx")
-    dt.append(el("b", null, L("Impor dokumen RTS", "Import RTS documents")), el("small", null, L("PDF, DOCX, XLSX atau TXT dari Files / iCloud Drive (boleh banyak sekaligus), atau paket .json dari perangkat lain.", "PDF, DOCX, XLSX or TXT from Files / iCloud Drive (many at once), or a .json pack from another device.")))
+    dt.append(el("b", null, L("Impor dokumen RTS", "Import RTS documents")), el("small", null, L("Ketuk untuk memilih, atau seret berkas ke sini. PDF, DOCX, XLSX, TXT (boleh banyak sekaligus), atau paket .json dari perangkat lain.", "Tap to choose, or drag files here. PDF, DOCX, XLSX, TXT (many at once), or a .json pack from another device.")))
     drop.append(inp, icD, dt, el("span", "rt-drop-go", L("Pilih berkas", "Choose files")))
     const prog = el("div", "rt-prog"); prog.hidden = !importMsg
     const bar = el("i"), ptx = el("span", null, importMsg); prog.append(bar, ptx)
     prog.setAttribute("role", "status")
     if (importMsg) bar.style.width = "100%"
-    inp.onchange = async () => {
-      const files = [...inp.files]; if (!files.length) return
-      prog.hidden = false; drop.classList.add("busy")
+    const chips = el("div", "rt-fchips")
+    importList.forEach((f) => chips.append(fileChip(f)))
+    const doImport = async (files) => {
+      files = files.filter((f) => f && f.name); if (!files.length) return
+      prog.hidden = false; drop.classList.add("busy"); ptx.classList.add("rt-shimmer"); chips.textContent = ""
       store.persist()
-      const r = await store.importFiles(files, (i, n, fr, note, name) => { bar.style.width = `${Math.round(((i - 1 + fr) / n) * 100)}%`; ptx.textContent = `${i}/${n} · ${name}${note ? " · " + L("hal.", "p.") + " " + note : ""}` })
-      drop.classList.remove("busy"); inp.value = ""
+      const r = await store.importFiles(files, (i, n, fr, note, name) => { bar.style.width = `${Math.round(((i - 1 + fr) / n) * 100)}%`; ptx.textContent = `${L("Membaca", "Reading")} ${i}/${n} · ${name}${note ? " · " + L("hal.", "p.") + " " + note : ""}` })
+      drop.classList.remove("busy"); inp.value = ""; ptx.classList.remove("rt-shimmer")
       await loadDocs(true)
       const scan = r.done.filter((d) => d.warn === "scan")
-      importMsg = ptx.textContent = `✓ ${L("Selesai", "Done")}: ${r.done.length} ${L("dokumen", "documents")}${r.errs.length ? ` · ${r.errs.length} ${L("gagal", "failed")}: ${r.errs.map((e) => `${e.name} (${e.msg})`).join("; ")}` : ""}${scan.length ? ` · ⚠️ ${scan.length} ${L("PDF hasil scan tanpa teks (perlu OCR di komputer dulu)", "scanned PDFs without text (OCR them on a computer first)")}` : ""}`
+      importList = [...r.done.map((d) => ({ name: d.fileName || d.docNo, type: d.type, ok: d.warn !== "scan", note: d.warn === "scan" ? L("scan tanpa teks", "scan, no text") : d.docNo })), ...r.errs.map((e) => ({ name: e.name, type: (e.name.match(/\.(\w+)$/) || [])[1] || "?", ok: false, note: e.msg }))]
+      importMsg = ptx.textContent = `✓ ${L("Selesai", "Done")}: ${r.done.length} ${L("dokumen", "documents")}${r.errs.length ? ` · ${r.errs.length} ${L("gagal", "failed")}` : ""}${scan.length ? ` · ⚠️ ${scan.length} ${L("PDF hasil scan tanpa teks (perlu OCR di komputer dulu)", "scanned PDFs without text (OCR them on a computer first)")}` : ""}`
       bar.style.width = "100%"
       drawAll()
     }
-    wrap.append(drop, prog)
+    inp.onchange = () => doImport([...inp.files])
+    drop.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; drop.classList.add("over") })
+    drop.addEventListener("dragleave", (e) => { if (!drop.contains(e.relatedTarget)) drop.classList.remove("over") })
+    drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); doImport([...(e.dataTransfer?.files || [])]) })
+    wrap.append(drop, prog, chips)
     return wrap
+  }
+  function fileChip(f) {
+    const c = el("span", "rt-fchip" + (f.ok ? "" : " bad")); c.title = f.note || ""
+    c.append(el("i", "t-" + String(f.type).toLowerCase(), String(f.type).toUpperCase()), el("span", null, f.name), el("b", null, f.ok ? "✓" : "!"))
+    return c
   }
   function drawLib() {
     libBox.textContent = ""
@@ -204,7 +260,11 @@ export function mountRts(box, ctx) {
       const bOpen = btn("rt-btn", L("Buka berkas asli", "Open original"), "open")
       bOpen.onclick = async () => { const f = await store.getFile(d.id).catch(() => null); if (!f) { bOpen.lastChild.textContent = L("Berkas asli tidak disimpan", "Original not stored"); return } window.open(URL.createObjectURL(f.blob), "_blank") }
       const bDel = btn("rt-btn danger", L("Hapus", "Delete"), "trash")
-      bDel.onclick = async () => { if (!confirm(L(`Hapus ${d.docNo} dari perangkat ini?`, `Delete ${d.docNo} from this device?`))) return; await store.delDoc(d.id); if (S.doc === d.id) { S.doc = ""; saveSt(S) } await loadDocs(true); drawAll() }
+      inlineConfirm(bDel, L("Ketuk lagi untuk menghapus", "Tap again to delete"), async () => {
+        const f = await store.getFile(d.id).catch(() => null)
+        await store.delDoc(d.id); if (S.doc === d.id) { S.doc = ""; saveSt(S) } await loadDocs(true); drawAll()
+        toast(`${L("Dihapus", "Deleted")}: ${d.docNo}`, async () => { await store.putDoc(d); if (f) await store.putFile(d.id, f.blob, f.name, f.type).catch(() => null); await loadDocs(true); drawAll() })
+      })
       acts.append(bFind, bOpen, bDel)
       // daftar pasal dengan penyaring
       const heads = d.secs.filter((s) => s.title && !(s.part > 1)).slice(0, 400)
@@ -222,7 +282,11 @@ export function mountRts(box, ctx) {
     const bPack = btn("rt-btn", L("Ekspor paket (.json)", "Export pack (.json)"), "download")
     bPack.onclick = () => { const a = el("a"); a.href = URL.createObjectURL(new Blob([store.makePack(docs)], { type: "application/json" })); a.download = `RTS_pack_${new Date().toISOString().slice(0, 10)}.json`; document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove() }, 1500) }
     const bClr = btn("rt-btn danger ghosty", L("Hapus semua dokumen", "Delete all documents"), "trash")
-    bClr.onclick = async () => { if (!confirm(L("Hapus semua dokumen RTS dari perangkat ini?", "Delete all RTS documents from this device?"))) return; await store.clearAll(); S.doc = ""; saveSt(S); await loadDocs(true); drawAll() }
+    inlineConfirm(bClr, L(`Ketuk lagi: hapus ${docs.length} dokumen`, `Tap again: delete ${docs.length} documents`), async () => {
+      const keep = await Promise.all(docs.map(async (d) => [d, await store.getFile(d.id).catch(() => null)]))
+      await store.clearAll(); const prevDoc = S.doc; S.doc = ""; saveSt(S); await loadDocs(true); drawAll()
+      toast(`${L("Semua dokumen dihapus", "All documents deleted")} (${keep.length})`, async () => { for (const [d, f] of keep) { await store.putDoc(d); if (f) await store.putFile(d.id, f.blob, f.name, f.type).catch(() => null) } S.doc = prevDoc; saveSt(S); await loadDocs(true); drawAll() })
+    })
     tools.append(bPack, bClr)
     libBox.append(tools, el("p", "dz-note", L("Pindah perangkat tanpa impor ulang: ekspor paket lalu impor paket itu di perangkat lain.", "Move devices without re-importing: export a pack and import it on the other device.")))
   }
@@ -303,7 +367,7 @@ export function mountRts(box, ctx) {
     full.split(/\n{2,}/).forEach((para) => bodyTx.append(marked(para, groups, { cls: "rt-para", onVal: pinFor ? (v) => { pinFor(v, doc, sec); killSheet() } : (v) => quickPin(v, doc, sec) })))
     const acts = el("div", "rt-acts rt-pan-f")
     const bc = btn("rt-btn", L("Salin kutipan + referensi", "Copy quote + reference"), "copy")
-    bc.onclick = async () => { try { await navigator.clipboard.writeText(`${full.trim()}\n\n— ${refOf(doc, sec)}`); bc.lastChild.textContent = L("Tersalin", "Copied"); bc.classList.add("done") } catch (e) { bc.lastChild.textContent = L("Gagal menyalin", "Copy failed") } }
+    bc.onclick = () => copyTo(bc, `${full.trim()}\n\n— ${refOf(doc, sec)}${docTitle(doc) ? " (" + docTitle(doc) + ")" : ""}`)
     const bo = btn("rt-btn", L("Buka berkas asli", "Open original"), "open")
     bo.onclick = async () => { const f = await store.getFile(doc.id).catch(() => null); if (!f) { bo.lastChild.textContent = L("Berkas asli tidak disimpan", "Original not stored"); return } window.open(URL.createObjectURL(f.blob) + (doc.type === "pdf" ? `#page=${sec.page}` : ""), "_blank") }
     const nav = el("div", "rt-pnav")
@@ -368,7 +432,7 @@ export function mountRts(box, ctx) {
       b.setAttribute("aria-pressed", S.doc === id)
       const d = id && docs.find((x) => x.id === id); if (d) b.title = `${d.docNo} — ${docTitle(d)}`
       if (n != null) b.append(el("i", null, String(n)))
-      b.onclick = () => { S.doc = S.doc === id && id ? "" : id; saveSt(S); shown = PAGE; run(false) }
+      b.onclick = () => { S.doc = S.doc === id && id ? "" : id; saveSt(S); shown = PAGE; run(false); jelly(facetBox.querySelector(".rt-facet.on")) }
       facetBox.append(b)
     }
     chip("", L("Semua dokumen", "All documents"), counts ? total : null)
@@ -397,7 +461,7 @@ export function mountRts(box, ctx) {
     const ht = el("div")
     ht.append(el("b", null, rs.length ? `${rs.length}${rs.length === 50 ? "+" : ""} ${L("pasal relevan", "relevant clauses")} · ${nDoc} ${L("dokumen", nDoc === 1 ? "document" : "documents")}` : L("Tidak ada yang cocok", "No match")), el("small", null, `${groups.map((g) => g.raw).join(" · ")} · ${nf(ms, 0)} ms`))
     const view = el("div", "rt-view"); view.setAttribute("role", "group"); view.setAttribute("aria-label", L("Tampilan hasil", "Result view"))
-    ;[["rel", L("Relevansi", "Relevance")], ["doc", L("Per dokumen", "By document")]].forEach(([k, lab]) => { const b = btn("rt-viewb" + ((S.view || "rel") === k ? " on" : ""), lab); b.setAttribute("aria-pressed", (S.view || "rel") === k); b.onclick = () => { S.view = k; saveSt(S); run(false) }; view.append(b) })
+    ;[["rel", L("Relevansi", "Relevance")], ["doc", L("Per dokumen", "By document")]].forEach(([k, lab]) => { const b = btn("rt-viewb" + ((S.view || "rel") === k ? " on" : ""), lab); b.setAttribute("aria-pressed", (S.view || "rel") === k); b.onclick = () => { S.view = k; saveSt(S); run(false); jelly(resBox.querySelector(".rt-viewb.on")) }; view.append(b) })
     head.append(ht, view)
     resBox.append(head)
     if (rs.length) { const leg = el("div", "rt-legend"); leg.append(el("mark", "rt-hl", L("kata dicari", "query word")), el("mark", "rt-val", L("nilai · ketuk untuk menetapkan", "value · tap to pin"))); resBox.append(leg) }
@@ -409,8 +473,11 @@ export function mountRts(box, ctx) {
     // jawaban cepat: kalimat terbaik hasil teratas yang memuat nilai
     const top = rs.find((r) => r.values && r.values.length && r.hit === r.of) || null
     if (top) {
-      const ans = el("div", "rt-ans rt-nav"); ans.tabIndex = 0; ans.setAttribute("role", "button")
+      const ans = el("div", "rt-ans rt-nav rt-edge"); ans.tabIndex = 0; ans.setAttribute("role", "button")
       const k = el("span", "rt-ans-k"); k.append(ico("spark"), el("span", null, L("Jawaban cepat", "Quick answer")))
+      const cp = btn("rt-copy", L("Salin", "Copy"), "copy"); cp.title = L("Salin jawaban + referensi dokumen", "Copy answer + document reference")
+      cp.onclick = (e) => { e.stopPropagation(); copyTo(cp, `${top.best}\n— ${refOf(top.doc, top.sec)}${docTitle(top.doc) ? " (" + docTitle(top.doc) + ")" : ""}`) }
+      k.append(cp)
       const src = el("div", "rt-ans-src")
       src.append(el("small", null, L("Sumber", "Source")), docLine(top.doc), el("small", null, `${top.sec.no ? "§" + top.sec.no + " " : ""}${top.sec.title || ""} · ${L("hal.", "p.")} ${top.sec.page} · ${L("verifikasi di dokumen sumber", "verify in the source document")}`))
       ans.append(k, marked(top.best, groups, { cls: "rt-ans-tx", onVal: (v) => quickPin(v, top.doc, top.sec) }), src)
@@ -418,7 +485,7 @@ export function mountRts(box, ctx) {
       resBox.append(ans)
     }
     const hit = (r, i, withDoc) => {
-      const it = el("article", "rt-hit rt-nav"); it.style.setProperty("--i", Math.min(i, 10)); it.tabIndex = 0; it.setAttribute("role", "button")
+      const it = el("article", "rt-hit rt-nav rt-edge"); it.style.setProperty("--i", Math.min(i, 10)); it.tabIndex = 0; it.setAttribute("role", "button")
       const cov = el("span", "rt-cov" + (r.hit === r.of ? " full" : "")); cov.textContent = `${r.hit}/${r.of}`; cov.title = L("kata kueri yang cocok", "query words matched")
       const pg = el("small", "rt-pg", `${L("hal.", "p.")} ${r.sec.page}`)
       const tt = el("b", "rt-hit-t", `${r.sec.no ? "§" + r.sec.no + " " : ""}${r.sec.title || L("(tanpa judul)", "(untitled)")}`)
@@ -533,10 +600,12 @@ export function mountRts(box, ctx) {
     if (!PF().some(([k]) => k === S.pf)) S.pf = "all"
     const head = el("div", "rt-ph")
     head.append(el("h2", null, L("Parameter kunci desain", "Key design parameters")), el("small", null, `${cnt.pinned}/${PARAMS.length} ${L("ditetapkan", "pinned")}`))
-    const prog = el("div", "rt-progress"); const pb = el("i"); pb.style.width = `${(cnt.pinned / PARAMS.length) * 100}%`; prog.append(pb)
-    prog.setAttribute("role", "progressbar"); prog.setAttribute("aria-valuemin", 0); prog.setAttribute("aria-valuemax", PARAMS.length); prog.setAttribute("aria-valuenow", cnt.pinned)
+    // progress ticks: satu garis per parameter (hijau = ditetapkan, garis aksen = ada saran); ketuk garis untuk membuka parameternya
+    const prog = el("div", "rt-ticks")
+    prog.setAttribute("role", "progressbar"); prog.setAttribute("aria-valuemin", 0); prog.setAttribute("aria-valuemax", PARAMS.length); prog.setAttribute("aria-valuenow", cnt.pinned); prog.setAttribute("aria-label", L("Parameter ditetapkan", "Pinned parameters"))
+    PARAMS.forEach((p, i) => { const tk = el("button", "rt-tick s-" + st[p.id]); tk.type = "button"; tk.tabIndex = -1; tk.style.setProperty("--i", i); tk.title = `${L(...p.lab)}${S.pins[p.id] ? " = " + S.pins[p.id].txt : ""}`; tk.onclick = () => openParam(p); prog.append(tk) })
     const seg = el("div", "rt-seg"); seg.setAttribute("role", "group"); seg.setAttribute("aria-label", L("Saring parameter", "Filter parameters"))
-    PF().forEach(([k, lab]) => { const b = btn("rt-segb" + (S.pf === k ? " on" : ""), lab); b.append(el("i", null, String(cnt[k]))); b.setAttribute("aria-pressed", S.pf === k); b.onclick = () => { S.pf = k; saveSt(S); drawParams() }; seg.append(b) })
+    PF().forEach(([k, lab]) => { const b = btn("rt-segb" + (S.pf === k ? " on" : ""), lab); b.append(el("i", null, String(cnt[k]))); b.setAttribute("aria-pressed", S.pf === k); b.onclick = () => { S.pf = k; saveSt(S); drawParams(); jelly(paramBox.querySelector(".rt-segb.on")) }; seg.append(b) })
     paramBox.append(head, prog, seg, el("p", "dz-note", docs.length
       ? L("Ketuk baris untuk melihat kandidat & pasal sumbernya, atau ketuk nilai saran untuk langsung menetapkannya. Nilai saran adalah kandidat — selalu baca pasalnya.", "Tap a row to see candidates & their source clause, or tap a suggested value to pin it right away. Suggestions are candidates — always read the clause.")
       : L("Impor dokumen RTS di tab Pustaka agar nilai dicari otomatis. Nilai juga bisa diisi manual.", "Import RTS documents in the Library tab for automatic suggestions. Values can also be typed in.")))
@@ -669,7 +738,7 @@ export function mountRts(box, ctx) {
   function drawStats() {
     const docs = DOCS || [], nSec = docs.reduce((a, d) => a + d.secs.length, 0)
     const nPin = PARAMS.filter((p) => S.pins[p.id]).length, nSug = docs.length ? PARAMS.filter((p) => !S.pins[p.id] && candsOf(p).length).length : 0
-    const set = (k, v, s, fmt) => { const T = tiles[k]; if (T.v.dataset.v !== String(v)) { T.v.dataset.v = String(v); typeof v === "number" ? countUp(T.v, v, fmt) : (T.v.textContent = v) } T.s.textContent = s }
+    const set = (k, v, s) => { const T = tiles[k]; if (T.v.dataset.v !== String(v)) { T.v.dataset.v = String(v); roll(T.v, v) } T.s.textContent = s }
     set("docs", docs.length, docs.length ? `${nSec} ${L("pasal terindeks", "clauses indexed")}` : L("ketuk untuk impor", "tap to import"))
     set("pins", nPin, `${L("dari", "of")} ${PARAMS.length} ${L("parameter", "parameters")}`)
     ring.lastChild.setAttribute("stroke-dasharray", `${(nPin / PARAMS.length) * 100} 100`); ring.lastChild.style.opacity = nPin ? 1 : 0
@@ -718,6 +787,7 @@ export function mountRts(box, ctx) {
   function drawAll() { drawSearch(); drawParams(); drawCompliance(); drawLib(); exportBar(expBox, out, { project: projLoad().info }); drawStats(); setTab(tab); reveal(box) }
   // kerangka sementara saat pustaka dimuat
   Object.values(tiles).forEach((T) => T.t.classList.add("sk"))
+  searchBox.append(el("p", "rt-shimmer rt-loading", L("Memuat pustaka RTS…", "Loading RTS library…")))
   for (let i = 0; i < 3; i++) searchBox.append(el("div", "rt-skel sk"))
   setTab(tab)
   loadDocs().then(() => { if (!box.isConnected) return; Object.values(tiles).forEach((T) => T.t.classList.remove("sk")); searchBox.textContent = ""; drawAll() })

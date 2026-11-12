@@ -1,5 +1,5 @@
 // Semula dibuat oleh ipad_build.py; daftar berkas & VERSION diperbarui untuk YMD-CAL (lihat README). Menyimpan semua berkas supaya app jalan tanpa internet; versi baru menunggu sampai pengguna menekan Muat ulang.
-const VERSION = "941a30242c"
+const VERSION = "b27d4e055e"
 const CACHE = "ymd-ipad-" + VERSION
 const FILES = [
  "./",
