@@ -37,6 +37,8 @@ export async function listDocs() {
 export const putDoc = (doc) => tx("docs", "readwrite", (s) => s.put(doc))
 export const putFile = (id, blob, name, type) => tx("files", "readwrite", (s) => s.put({ id, blob, name, type }))
 export async function getFile(id) { const d = await db(); return req(d.transaction("files").objectStore("files").get(id)) }
+// id dokumen yang berkas aslinya tersimpan (untuk tombol Lihat / Bagikan berkas asli)
+export async function fileIds() { const d = await db(); return new Set(await req(d.transaction("files").objectStore("files").getAllKeys())) }
 export async function delDoc(id) { await tx("docs", "readwrite", (s) => s.delete(id)); await tx("files", "readwrite", (s) => s.delete(id)) }
 export async function clearAll() { await tx("docs", "readwrite", (s) => s.clear()); await tx("files", "readwrite", (s) => s.clear()) }
 export async function usage() { try { return navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null } catch (e) { return null } }
@@ -46,17 +48,17 @@ export async function persist() { try { return navigator.storage && navigator.st
 const ext = (n) => (String(n).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase() || ""
 export const ACCEPT = ".pdf,.docx,.xlsx,.txt,.md,.csv,.json"
 let pdfjs = null
-async function loadPdfjs() {
+export async function loadPdfjs() {
   if (pdfjs) return pdfjs
   pdfjs = await import("./vendor/pdf.min.mjs")
   pdfjs.GlobalWorkerOptions.workerSrc = new URL("./vendor/pdf.worker.min.mjs", import.meta.url).href
   return pdfjs
 }
-async function pdfPages(buf, onProg) {
+async function pdfPages(buf, onProg, max = Infinity) {
   const lib = await loadPdfjs()
   const doc = await lib.getDocument({ data: new Uint8Array(buf), isEvalSupported: false, useSystemFonts: true }).promise
   const pages = []
-  for (let i = 1; i <= doc.numPages; i++) {
+  for (let i = 1; i <= Math.min(doc.numPages, max); i++) {
     const pg = await doc.getPage(i)
     const tc = await pg.getTextContent()
     pages.push(pdfItemsToLines(tc.items))
@@ -66,6 +68,8 @@ async function pdfPages(buf, onProg) {
   await doc.destroy()
   return pages
 }
+// baris beberapa halaman pertama PDF tersimpan (untuk memperbaiki judul dokumen yang sudah diimpor)
+export const pdfHeadPages = async (blob, n = 3) => pdfPages(await blob.arrayBuffer(), null, n)
 // ZIP (DOCX/XLSX): direktori pusat → isi berkas; deflate dibuka dengan DecompressionStream("deflate-raw")
 export async function unzip(buf, want) {
   const u8 = new Uint8Array(buf), dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength)
