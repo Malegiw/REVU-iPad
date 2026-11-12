@@ -2,7 +2,7 @@
 // judul pasal, pembuangan kepala/kaki halaman, penyambungan baris PDF, nomor dokumen, peringkat BM25, cuplikan, parameter kunci,
 // cek kepatuhan, baris dari item teks PDF, DOCX/XLSX, dan paket JSON. Dokumen uji di sini fiktif (bukan isi RTS sebenarnya).
 import * as R from "../js/rts.js"
-import { docxLines, xlsxPages, parsePack, makePack, unzip } from "../js/rts_store.js"
+import { docxLines, xlsxPages, parsePack, makePack, unzip, packDiscs, customDiscs, saveCustomDiscs, allDiscs } from "../js/rts_store.js"
 import { zipStore } from "../js/desain/xlsx.js"
 
 export async function run({ check }) {
@@ -68,6 +68,14 @@ export async function run({ check }) {
   eq("tanpa petunjuk → other; 'SPARE' bukan kode SP", [R.detectCategory("RTS-901", "Concrete", "x.pdf"), R.detectCategory("ABC-SPARE-1", "", "")], ["other", "other"])
   eq("detectDocMeta menyertakan jenis (PRC pada sampul fiktif)", R.detectDocMeta(cover("SAMPLE DESIGN CRITERIA"), "a.pdf").cat, "proc")
   eq("label jenis", [R.catLab("spec")[0], R.catLab("proc")[0], R.catLab("other")[0]], ["Specification", "Procedure", "Lainnya"])
+  // disiplin (Civil, …): dari kode pada nomor dokumen, lalu judul / nama berkas; disiplin tambahan pengguna dari kodenya
+  eq("disiplin dari kode nomor dokumen: CIV dan CI = Civil", [R.detectDiscipline("ABC-CIV-PRC-104841", "", ""), R.detectDiscipline("ABC-SP-CI-GG-002", "", "")], ["civil", "civil"])
+  eq("tanpa kode → disiplin dari judul / nama berkas; tidak dikenali → other", [R.detectDiscipline("RTS-901", "Civil Works Specification", ""), R.detectDiscipline("RTS-901", "", "Pekerjaan Sipil.pdf"), R.detectDiscipline("ABC-MEC-PRC-1", "Pump", "x.pdf")], ["civil", "civil", "other"])
+  eq("kode disiplin: huruf kecil, tanpa duplikat; kode jenis dokumen (SP, PRC) dan simbol dilewati", R.normDiscCodes("MEC, ME; mec sp prc x!"), { codes: ["mec", "me"], skipped: ["sp", "prc", "x!"] })
+  const mechD = R.makeDisc({ name: "Mechanical", codes: R.normDiscCodes("MEC, ME").codes }), dl2 = [...R.DISCS, mechD]
+  eq("disiplin tambahan dikenali dari kode nomor dokumen dan dari kata pada judul", [R.detectDiscipline("ABC-MEC-PRC-1", "", "", dl2), R.detectDiscipline("ABC-CIV-PRC-1", "", "", dl2), R.detectDiscipline("RTS-1", "Mechanical Pump Specification", "", dl2), R.detectDiscipline("ABC-MEC-PRC-1", "", "")], ["d-mechanical", "civil", "d-mechanical", "other"])
+  eq("label disiplin (dan 'Lainnya' untuk yang tidak dikenal)", [R.discLab("civil")[0], R.discLab("d-mechanical", dl2)[0], R.discLab("zzz")[0]], ["Civil", "Mechanical", "Lainnya"])
+  eq("detectDocMeta menyertakan disiplin dan jenis (sampul fiktif)", [R.detectDocMeta(cover("SAMPLE DESIGN CRITERIA"), "a.pdf").disc, R.detectDocMeta(cover("SAMPLE DESIGN CRITERIA"), "a.pdf").cat], ["civil", "proc"])
   const secs = R.splitSections(pages)
   eq("pasal terbaca berurutan", secs.map((s) => s.no), ["1", "2.1", "3.1", "3.2", "4"])
   truthy("kepala/kaki halaman berulang dibuang", !secs.some((s) => /Page \d|SAMPLE CONCRETE|RTS-CIV-901/.test(s.text)))
@@ -138,6 +146,16 @@ export async function run({ check }) {
   truthy("paket JSON ekspor → impor utuh", pk.length === 1 && pk[0].docNo === "RTS-CIV-901" && pk[0].secs.length === secs.length && pk[0].secs[1].text === secs[1].text)
   const pk2 = parsePack(makePack([{ id: "b", docNo: "ABC-SP-CI-GG-002", title: "T", secs, fileName: "y.pdf", pages: 1, cat: "proc", catManual: true, titleManual: true }, { id: "c", docNo: "ABC-CIV-PRC-9", title: "U", secs, fileName: "z.pdf", pages: 1 }]))
   eq("paket JSON menyimpan jenis & penanda manual; tanpa jenis → dikenali dari nomor dokumen", [pk2[0].cat, pk2[0].catManual, pk2[0].titleManual, pk2[1].cat, pk2[1].catManual], ["proc", true, true, "proc", undefined])
+  // disiplin di paket JSON (disiplin tambahan disimpan di localStorage; dipulihkan setelah uji agar tidak mengubah pengaturan perangkat)
+  const prevDiscs = customDiscs()
+  try {
+    saveCustomDiscs([{ id: "d-mechanical", name: "Mechanical", codes: ["mec"] }])
+    const txt = makePack([{ id: "e", docNo: "ABC-MEC-PRC-7", title: "T", secs, fileName: "e.pdf", pages: 1, disc: "d-mechanical", discManual: true }, { id: "f", docNo: "ABC-CIV-PRC-8", title: "U", secs, fileName: "f.pdf", pages: 1 }])
+    const pk3 = parsePack(txt)
+    eq("paket JSON menyimpan disiplin & penanda manual; tanpa disiplin → dikenali dari nomor dokumen", [pk3[0].disc, pk3[0].discManual, pk3[1].disc, pk3[1].discManual], ["d-mechanical", true, "civil", undefined])
+    eq("paket JSON membawa definisi disiplin tambahan", packDiscs(txt), [{ id: "d-mechanical", name: "Mechanical", codes: ["mec"] }])
+    eq("allDiscs = Civil bawaan + disiplin tambahan", allDiscs().map((d) => d.id), ["civil", "d-mechanical"])
+  } finally { saveCustomDiscs(prevDiscs) }
   let bad = ""
   try { parsePack('{"x":1}') } catch (e) { bad = e.message }
   truthy("paket tidak sah ditolak", /paket RTS/.test(bad))
