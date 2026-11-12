@@ -1,6 +1,6 @@
 // Penyimpanan & impor dokumen RTS di perangkat: IndexedDB ("ymd-rts"), pembaca PDF (pdf.js, js/vendor), DOCX/XLSX (unzip bawaan peramban),
 // TXT/MD/CSV, dan paket JSON. Tidak ada yang dikirim ke server; isi standar perusahaan tetap di iPad pengguna.
-import { detectDocMeta, splitSections, textToPages, pdfItemsToLines } from "./rts.js"
+import { detectDocMeta, detectCategory, splitSections, textToPages, pdfItemsToLines } from "./rts.js"
 
 const DB = "ymd-rts", VER = 1
 let dbp = null
@@ -130,7 +130,7 @@ export function xlsxPages(files) {
 }
 const uid = () => "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
 
-// berkas → dokumen siap simpan { id, docNo, title, rev, fileName, size, type, pages, secs, addedAt, warn }
+// berkas → dokumen siap simpan { id, docNo, title, rev, cat, fileName, size, type, pages, secs, addedAt, warn }
 export async function parseFile(file, onProg) {
   const e = ext(file.name), buf = await file.arrayBuffer()
   let pages, warn = ""
@@ -150,10 +150,10 @@ export function parsePack(txt) {
   const o = JSON.parse(txt)
   const docs = Array.isArray(o) ? o : o && Array.isArray(o.docs) ? o.docs : null
   if (!docs) throw new Error("bukan paket RTS (butuh { docs: [...] })")
-  return docs.filter((d) => d && Array.isArray(d.secs)).map((d) => ({ id: d.id || uid(), docNo: d.docNo || d.fileName || "RTS", title: d.title || "", rev: d.rev || "", fileName: d.fileName || "", size: d.size || 0, type: d.type || "json", pages: d.pages || 0, chars: d.chars || 0,
+  return docs.filter((d) => d && Array.isArray(d.secs)).map((d) => ({ id: d.id || uid(), docNo: d.docNo || d.fileName || "RTS", title: d.title || "", rev: d.rev || "", fileName: d.fileName || "", size: d.size || 0, type: d.type || "json", pages: d.pages || 0, chars: d.chars || 0, cat: d.cat || detectCategory(d.docNo || d.fileName || "", d.title || "", d.fileName || ""), ...(d.catManual ? { catManual: true } : {}), ...(d.titleManual ? { titleManual: true } : {}),
     secs: d.secs.map((s) => ({ no: String(s.no ?? ""), title: String(s.title ?? ""), page: Number(s.page) || 1, text: String(s.text ?? ""), ...(s.parent ? { parent: String(s.parent) } : {}), ...(s.part ? { part: s.part } : {}) })), addedAt: d.addedAt || Date.now(), warn: d.warn || "", tags: d.tags || [] }))
 }
-export const makePack = (docs) => JSON.stringify({ format: "ymd-rts-pack", v: 1, made: new Date().toISOString(), docs: docs.map(({ id, docNo, title, rev, fileName, size, type, pages, chars, secs, addedAt, warn, tags }) => ({ id, docNo, title, rev, fileName, size, type, pages, chars, secs, addedAt, warn, tags })) })
+export const makePack = (docs) => JSON.stringify({ format: "ymd-rts-pack", v: 1, made: new Date().toISOString(), docs: docs.map(({ id, docNo, title, rev, cat, catManual, titleManual, fileName, size, type, pages, chars, secs, addedAt, warn, tags }) => ({ id, docNo, title, rev, cat, catManual, titleManual, fileName, size, type, pages, chars, secs, addedAt, warn, tags })) })
 
 // impor banyak berkas sekaligus; onProg(i, n, frac, note, name)
 export async function importFiles(files, onProg, keepOriginal = true) {

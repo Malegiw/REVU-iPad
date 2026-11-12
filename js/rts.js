@@ -219,6 +219,28 @@ export function isBoilerplate(l) {
   const ws = fold(t).split(/[^a-z0-9]+/).filter(Boolean)
   return ws.length > 0 && ws.every((w) => CO.has(w) || w.length < 2)
 }
+// ---------------------------------------------------------------- jenis dokumen (Specification, Procedure, …)
+// Pembagian pustaka RTS. Tambah jenis baru cukup menambah satu baris di CATS (id, label, kode pada nomor dokumen, kata pada judul/nama berkas);
+// dokumen yang tidak cocok masuk "Lainnya" (CAT_OTHER) dan jenisnya bisa diatur manual di Pustaka.
+export const CAT_OTHER = "other"
+export const CATS = [
+  { id: "spec", lab: ["Specification", "Specification"], sub: ["Spesifikasi teknis", "Technical specifications"], codes: ["sp", "spc", "spec", "specification", "spesifikasi"], words: /\b(specifications?|spec|spesifikasi)\b/ },
+  { id: "proc", lab: ["Procedure", "Procedure"], sub: ["Prosedur kerja", "Work procedures"], codes: ["prc", "proc", "prd", "procedure", "prosedur"], words: /\b(procedures?|procs?|prosedur)\b/ },
+]
+export const catLab = (id) => (id === CAT_OTHER ? ["Lainnya", "Other"] : (CATS.find((c) => c.id === id) || { lab: ["Lainnya", "Other"] }).lab)
+// jenis dari nomor dokumen (kode pada bagian bernomor, mis. PHR-CIV-PRC-104841 → PRC = Procedure, PHR-SP-CI-GG-002 → SP = Specification),
+// lalu dari judul, lalu dari nama berkas; tidak cocok → "other"
+export function detectCategory(docNo, title, fileName) {
+  const toks = fold(docNo).split(/[^a-z0-9]+/).filter(Boolean)
+  const byCode = CATS.map((c) => ({ id: c.id, at: toks.findIndex((t) => c.codes.includes(t)) })).filter((x) => x.at >= 0).sort((a, b) => a.at - b.at)[0]
+  if (byCode) return byCode.id
+  for (const src of [title, String(fileName ?? "").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ")]) {
+    const t = fold(src)
+    const hit = CATS.map((c) => ({ id: c.id, at: t.search(c.words) })).filter((x) => x.at >= 0).sort((a, b) => a.at - b.at)[0]
+    if (hit) return hit.id
+  }
+  return CAT_OTHER
+}
 // Nomor dokumen: cari pola "RTS-…" dulu, lalu kode umum "ABC-DEF-123" di halaman awal; jika tidak ada pakai nama berkas
 export function detectDocMeta(pages, fileName = "") {
   const head = pages.slice(0, 2).flat().slice(0, 80).join("\n")
@@ -252,7 +274,7 @@ export function detectDocMeta(pages, fileName = "") {
     return up * 80 + capR * 30 + Math.min(l.length, 60) * 0.5 + (p2.has(fold(l)) ? 12 : 0) + (bonus.get(l) || 0) - (/[.;:]$/.test(l) ? 30 : 0) - (/\b(shall|harus|must|should)\b/i.test(l) ? 30 : 0) - (/\d{3,}/.test(l) ? 15 : 0) - (/^\d/.test(l) ? 25 : 0)
   }
   const title = cand.sort((a, b) => score(b) - score(a))[0] || base
-  return { docNo, rev, title }
+  return { docNo, rev, title, cat: detectCategory(docNo, title, fileName) }
 }
 // baris PDF yang terpotong di tengah kalimat disambung lagi; butir daftar, baris tabel & baris kosong tetap baris baru
 const LIST_START = /^(\(?[a-z]\)|\(?[ivx]{1,4}\)|\d{1,2}[.)]|[-•●▪◦–*])\s/i
