@@ -12,9 +12,9 @@ const EN = {}                                   // terjemahan antarmuka lama (al
 const SHELL = {
   sub: { id: "Desain pondasi & sipil migas · offline", en: "O&G foundation & civil design · offline" },
   home: { id: "Beranda", en: "Home" }, penurunan: { id: "Penurunan Pondasi", en: "Foundation Settlement" }, alur: { id: "Alur Produksi Migas", en: "Oil & Gas Production Flow" },
-  desain: { id: "Desain Pondasi", en: "Foundation Design" }, tanah: { id: "Data Tanah", en: "Soil Data" }, gempa: { id: "Parameter Gempa", en: "Seismic Parameters" }, laporan: { id: "Laporan Proyek", en: "Project Report" },
+  desain: { id: "Desain Pondasi", en: "Foundation Design" }, tanah: { id: "Data Tanah", en: "Soil Data" }, gempa: { id: "Parameter Gempa", en: "Seismic Parameters" }, laporan: { id: "Laporan Proyek", en: "Project Report" }, rts: { id: "RTS · Rokan Technical Standard", en: "RTS · Rokan Technical Standard" },
   nHome: { id: "Beranda", en: "Home" }, nPenurunan: { id: "Penurunan", en: "Settlement" }, nAlur: { id: "Alur Migas", en: "Oil & Gas Flow" }, nDesain: { id: "Desain", en: "Design" },
-  nTanah: { id: "Tanah", en: "Soil" }, nGempa: { id: "Gempa", en: "Seismic" }, nLaporan: { id: "Laporan", en: "Report" },
+  nTanah: { id: "Tanah", en: "Soil" }, nGempa: { id: "Gempa", en: "Seismic" }, nLaporan: { id: "Laporan", en: "Report" }, nRts: { id: "RTS", en: "RTS" },
   offlineOk: { id: "✓ Siap offline", en: "✓ Offline ready" }, newVer: { id: "Versi baru siap.", en: "A new version is ready." }, reload: { id: "Muat ulang", en: "Reload" },
   load: { id: "Memuat…", en: "Loading…" }, fail: { id: "Gagal memuat. Periksa sambungan lalu coba lagi.", en: "Could not load. Check the connection and try again." },
   themeTip: { id: "Tema: otomatis / terang / gelap", en: "Theme: auto / light / dark" },
@@ -39,8 +39,8 @@ function applyTheme() {
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (theme === "auto") { applyTheme(); route() } })
 
 // ---------------------------------------------------------------- rute
-const ROUTES = ["home", "alur", "tanah", "gempa", "desain", "penurunan", "laporan"]
-const PAGES = { tanah: ["./tanah_ui.js", "mountTanah"], gempa: ["./gempa_ui.js", "mountGempa"], penurunan: ["./penurunan_ui.js", "mountPenurunan"], laporan: ["./laporan_ui.js", "mountLaporan"] }
+const ROUTES = ["home", "alur", "tanah", "gempa", "desain", "penurunan", "laporan", "rts"]
+const PAGES = { tanah: ["./tanah_ui.js", "mountTanah"], gempa: ["./gempa_ui.js", "mountGempa"], penurunan: ["./penurunan_ui.js", "mountPenurunan"], laporan: ["./laporan_ui.js", "mountLaporan"], rts: ["./rts_ui.js", "mountRts"] }
 const rawRoute = () => (location.hash.replace(/^#\/?/, "") || "home").split("/")
 const current = () => { const r = rawRoute()[0]; return ROUTES.includes(r) ? r : "home" }
 const subRoute = () => rawRoute()[1] || ""

@@ -3,7 +3,7 @@
 
 Dipakai setelah mengubah berkas aplikasi:  python3 tools/build_sw.py
 Berkas yang disimpan untuk offline: assets/* (tanpa subfolder; rekaman suara assets/voice/ disimpan saat diputar
-atau lewat tombol "Simpan untuk offline"), css/*.css, data/*.json, icons/*, js/*.js, js/desain/*.js, index.html, manifest.
+atau lewat tombol "Simpan untuk offline"), css/*.css, data/*.json, icons/*, js/*.js, js/desain/*.js, js/vendor/*.mjs (pdf.js untuk impor RTS), index.html, manifest.
 VERSION = 10 karakter awal SHA-1 dari isi semua berkas tersebut + kode sw.js sendiri, jadi berubah setiap ada perubahan.
 """
 import glob
@@ -12,7 +12,7 @@ import os
 import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PATTERNS = ["assets/*", "css/*.css", "data/*.json", "icons/*", "js/*.js", "js/desain/*.js", "index.html", "manifest.webmanifest"]
+PATTERNS = ["assets/*", "css/*.css", "data/*.json", "icons/*", "js/*.js", "js/desain/*.js", "js/vendor/*.mjs", "index.html", "manifest.webmanifest"]
 
 
 def main():

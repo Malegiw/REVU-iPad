@@ -21,7 +21,8 @@ export function mountHome(app, ctx) {
   const a1 = el("a", "hm-btn pri", L("Mulai dari data tanah →", "Start with soil data →")); a1.href = "#/tanah"
   const a3 = el("a", "hm-btn", L("Desain", "Design")); a3.href = "#/desain"
   const a2 = el("a", "hm-btn", L("Alur produksi migas", "Oil & gas flow")); a2.href = "#/alur"
-  cta.append(a1, a3, a2); tx.append(cta)
+  const a4 = el("a", "hm-btn", L("Cari RTS", "Search RTS")); a4.href = "#/rts"; a4.title = "Rokan Technical Standard"
+  cta.append(a1, a3, a2, a4); tx.append(cta)
   hero.append(logo, tx)
   app.append(hero)
   // ---- alur proyek
