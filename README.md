@@ -36,9 +36,19 @@ Alur ini tampil sebagai langkah 1–5 di atas setiap tab dan di Beranda.
 | ↳ Trafo (statis) | Plinth + telapak/pile cap, bak oli IEEE 980, dongkrak, stopper gempa. |
 | **Penurunan** | Dibangun ulang: **pondasi dangkal** — penurunan segera (Steinbrenner, tanah berlapis), konsolidasi primer (Terzaghi, NC/OC) + sekunder, total terhadap umur rencana, kurva waktu, Δσ vs σ'v0; **pondasi dalam** — pemendekan elastis tiang + rakit ekuivalen (2L/3, sebaran 1H:4V; di ujung untuk tiang dukung ujung), pembanding Vesic. Daftar pondasi otomatis dari semua modul Desain + kasus manual. Kriteria (umur, batas dangkal/tiang, Boussinesq/2:1, kekakuan) berlaku untuk modul Desain. |
 | **Laporan** | Data proyek (kepala laporan), status alur, pilihan isi (lengkap/ringkas, gambar, modul), lalu **laporan proyek gabungan** PDF (bab A Tanah, B Gempa, C Ringkasan desain, D… tiap modul, terakhir Penurunan) dan Excel. |
+| **RTS** | Pencarian **Rokan Technical Standard** di iPad. Dokumen RTS (PDF, DOCX, XLSX, TXT, atau paket .json) **diimpor langsung di iPad** lalu dibaca & diindeks tanpa internet; disimpan hanya di perangkat (IndexedDB), tidak pernah masuk repo/server. Tanya bebas dalam bahasa Indonesia atau Inggris ("beton pondasi pakai mutu berapa?", "selimut beton", "baut angkur") — sinonim istilah sipil ID ↔ EN (beton = concrete, selimut = cover, lantai kerja = lean concrete/blinding, pemadatan = compaction …). Hasil: **jawaban cepat** (kalimat terbaik + nilai), daftar pasal (nomor dokumen, §pasal, halaman, cuplikan bersorot, nilai MPa/mm/%/ASTM/K-xxx/BJTS bergaris), panel pasal lengkap (salin kutipan + referensi, buka PDF asli di halamannya). **Parameter kunci desain** (fc', lean concrete, selimut, fy, semen, w/c, agregat, slump, curing, grout, baut angkur, elevasi atas pondasi, baja, galvanis, cat, tiang, uji tiang, FS daya dukung, penurunan izin, kedalaman, pemadatan, angin, gempa) dicari otomatis dan nilainya ditetapkan dengan mengetuk angkanya. **Cek kepatuhan**: fc', fy, selimut, baut angkur, FS, penurunan izin, dan kecepatan angin di modul Desain/Tanah/Penurunan dibandingkan dengan nilai RTS (OK / tidak sesuai). Ekspor Excel/PDF parameter & kepatuhan. |
 | **Alur Migas** | (Menu kedua, di samping Beranda.) Alur minyak dan gas dari sumur sampai gathering station, dengan tombol ke kalkulator desain tiap peralatan. **Narasi suara** tiap tahap: tombol Putar/Jeda/Berhenti, sorotan kalimat yang sedang dibacakan, lanjut otomatis ke tahap berikutnya, pilihan kecepatan & suara. Bahasa Indonesia memakai **suara wanita** (mis. *Damayanti* di iPad), bahasa Inggris memakai **suara pria** (mis. *Daniel*/*Aaron*/*Arthur*). Sumber suara: **rekaman alami ElevenLabs** (bila sudah dibuat, lihat *Suara alami* di bawah; tombol *Simpan untuk offline*) atau **suara perangkat** (Web Speech API, offline). Suara perangkat dipilih otomatis yang paling natural (Premium/Enhanced/Natural) dan menghindari suara robotik; untuk hasil terbaik unduh *Damayanti (Enhanced)* / *Daniel (Enhanced)* di Pengaturan → Aksesibilitas → Konten Lisan → Suara. |
 
 Dua bahasa (Indonesia dan Inggris), tema terang, gelap, atau otomatis. Ikon antarmuka berupa SVG garis yang seragam (`js/icons.js`).
+
+## RTS (Rokan Technical Standard)
+
+1. Simpan berkas RTS (PDF/DOCX/XLSX) ke app **Files** / iCloud Drive di iPad.
+2. Buka tab **RTS** → kartu *Pustaka dokumen RTS* → **Impor dokumen RTS**, pilih semua berkas sekaligus. Teks dibaca di iPad (PDF memakai pdf.js di `js/vendor/`), kepala/kaki halaman berulang dan baris daftar isi dibuang, pasal dikenali dari penomoran ("5.2.1 Concrete Strength", "SECTION 3", gaya *Heading* DOCX), nomor dokumen dari pola `RTS-…`.
+3. Ketik pertanyaan di *Cari di RTS*, atau buka *Parameter kunci desain* dan ketuk nilai bergaris (mis. **28 MPa**) untuk menetapkannya. *Cek kepatuhan* langsung membandingkan masukan Desain dengan nilai itu.
+4. Pindah perangkat tanpa impor ulang: *Ekspor paket (.json)* lalu impor paket itu di perangkat lain.
+
+Catatan: PDF hasil pindai (gambar tanpa teks) perlu OCR dulu di komputer. Konversi yang dipakai pada cek kepatuhan: K-xxx → fc' ≈ 0,083·K MPa; ASTM Grade N (ksi) ≈ 6,895·N MPa; psi, kg/cm², inci ke MPa/mm. Nilai hasil pencarian adalah **kandidat** — selalu baca pasal sumbernya. Repo ini publik, jadi **jangan commit isi dokumen RTS** ke repo; impor saja di perangkat.
 
 ## Edisi kode desain
 
@@ -74,19 +84,21 @@ Lewat komputer: `ELEVENLABS_API_KEY=… node tools/tts_elevenlabs.mjs` (opsi `--
 2. Ketuk **Bagikan → Tambah ke Layar Utama**. Ikonnya bernama **YMD-CAL**.
 3. Sejak itu app terbuka dari ikonnya, layar penuh, dan jalan tanpa internet. Setelah ada versi baru, buka sekali saat online lalu ketuk **Muat ulang**.
 
-Masukan tersimpan di perangkat (localStorage: `ymd.project.v1` untuk data proyek/tanah/gempa/penurunan, `ymd.desain.v1` untuk modul Desain), tidak dikirim ke mana pun. Tidak ada server, akun, atau pelacakan.
+Masukan tersimpan di perangkat (localStorage: `ymd.project.v1` untuk data proyek/tanah/gempa/penurunan, `ymd.desain.v1` untuk modul Desain, `ymd.rts.v1` untuk nilai RTS; IndexedDB `ymd-rts` untuk dokumen RTS yang diimpor), tidak dikirim ke mana pun. Tidak ada server, akun, atau pelacakan.
 
 ## Keakuratan
 
-`tests/run.html` menjalankan tiga kelompok uji (`tests/suite_*.js`):
+`tests/run.html` menjalankan empat kelompok uji (`tests/suite_*.js`):
 
 - **penurunan**: `js/penurunan.js` dibandingkan dengan hasil versi Python di aplikasi utama (`tests/penurunan_cases.json`, toleransi relatif 1e-9), ditambah nilai acuan teori.
 - **desain**: `js/desain/*.js` terhadap nilai acuan teori/rumus tertutup (Matlock–Reese, Hetenyi, Broms, API RP 2GEO, AC358, API 650 Annex E, SNI 1726/1727 & ASCE 7-22, ACI 318-14 & 318-19, AISC 360, Richart–Whitman, XLSX/PDF), ditambah alur desain baru (tiang tunggal Qa = min(Qu/FS; Pa), grid & susunan radial tangki, jumlah tiang/pile cap/telapak otomatis dengan semua pemeriksaan OK di keempat modul) dan hash rekaman suara (FNV-1a).
 - **tanah**: 44 uji untuk data tanah & pondasi dalam — korelasi (N60, φ, cu, e0, Cc), kelas situs SNI 1726, Nc/Nq/Nγ, Meyerhof N-SPT/CPT, Skempton, kapasitas tiang (α/β sama dengan `pile.js`, N-SPT Meyerhof, CPT LCPC), penurunan dangkal = `analyze()` langsung, rakit ekuivalen, keseimbangan reaksi tiang, momen pile cap dari reaksi titik, KDS & spektrum.
 
+- **rts**: 52 uji mesin pencari RTS dengan dokumen fiktif — token & sinonim ID ↔ EN, nilai teknis & konversi (psi, inci, K-xxx, ASTM Grade, BJTS), judul pasal vs butir daftar, kepala/kaki halaman, penyambungan baris PDF, nomor dokumen, peringkat BM25, cuplikan, parameter kunci, cek kepatuhan, item teks PDF, DOCX/XLSX/ZIP deflate, paket JSON.
+
 ```bash
 python3 -m http.server 8610
-# lalu buka http://127.0.0.1:8610/tests/run.html  (judul tab: "LOLOS 222/222")
+# lalu buka http://127.0.0.1:8610/tests/run.html  (judul tab: "LOLOS 274/274")
 ```
 
 ## Struktur
@@ -94,11 +106,12 @@ python3 -m http.server 8610
 - `index.html`, `css/app.css`, `js/app.js`: kerangka (menu, bahasa, tema, offline). `js/home.js` + `css/home.css`: beranda & dashboard. `icons/logo.svg`: logo YMD-CAL. `js/icons.js`: set ikon SVG. `js/voice.js`: narasi suara Alur Migas (rekaman alami + suara perangkat).
 - `js/project.js`: data proyek bersama (info, tanah, gempa, metode daya dukung, kriteria penurunan), kelas situs → parameter gempa, KDS, spektrum, dan komponen alur proyek. `js/pj_ui.js` + `css/proyek.css`: komponen tab proyek.
 - `js/tanah_ui.js` (Tanah), `js/gempa_ui.js` (Gempa), `js/penurunan_ui.js` (Penurunan, memakai mesin `js/penurunan.js`), `js/laporan_ui.js` (Laporan gabungan).
+- `js/rts_ui.js` + `css/rts.css` (tab RTS), `js/rts.js` (mesin: sinonim, nilai teknis, pemecah pasal, indeks BM25, parameter kunci, kepatuhan; fungsi murni), `js/rts_store.js` (IndexedDB `ymd-rts`, impor PDF/DOCX/XLSX/TXT/paket JSON), `js/vendor/pdf*.mjs` (pdf.js 4.10.38 legacy, Apache-2.0, `LICENSE-pdfjs.txt`). Nilai RTS yang ditetapkan disimpan di localStorage `ymd.rts.v1`.
 - `js/desain_ui.js` + `css/desain.css`: halaman Desain. Di `js/desain/`: `core.js` (satuan, angin, gempa, kombinasi beban), `soil.js` (korelasi tanah, daya dukung, kapasitas tiang, kelas situs, penurunan dangkal & kelompok), `deep.js` (pilihan dangkal/dalam: tiang tunggal acuan, jumlah tiang & ukuran/tebal cap otomatis, telapak otomatis, susunan grid & radial, panel alur perhitungan, tata letak tiang, kelompok tiang di bawah cap, pelat tangki di atas tiang, kekakuan tiang, tabel & gambar), `rc.js`, `steel.js`, `footing.js` (tekanan tanah atau reaksi tiang + desain telapak/pile cap & pedestal), `pile.js`, `tank.js`, `vessel.js`, `dynamic.js`, `trafo.js`, `settle.js`, `m_*.js` (formulir & laporan tiap modul), `ui.js` (formulir, hasil, ekspor; laporan berbab), `draw.js`, `chart.js` (grafik garis), `sketch.js`, `steps.js`, `xlsx.js`, `pdf.js`.
 - `data/` (teks Alur Migas), `assets/` (gambar SVG), `icons/`, `manifest.webmanifest`.
 - `sw.js`: service worker yang menyimpan semua berkas untuk offline (daftar berkas dan `VERSION`); rekaman suara `assets/voice/` disimpan di cache terpisah saat diputar.
 - `tools/build_sw.py`: memperbarui daftar berkas & `VERSION` di `sw.js` (`python3 tools/build_sw.py`). `tools/tts_elevenlabs.mjs` + `.github/workflows/voice.yml`: pembuat rekaman suara alami.
 
-`data/`, `assets/`, `js/flow.js`, `css/flow.css`, dan `sw.js` semula dibuat oleh skrip `ipad_build.py` di aplikasi utama (privat). Daftar berkas dan `VERSION` di `sw.js` kini dibuat oleh `tools/build_sw.py` (semua `assets/*` tanpa subfolder, `css/*.css`, `data/*.json`, `icons/*`, `js/*.js`, `js/desain/*.js`, `index.html`, manifest; VERSION = 10 karakter awal SHA-1 isi berkas + kode `sw.js`), jadi sesuaikan skrip lama itu sebelum membuat ulang `sw.js`. Teks dua bahasa tab baru ditulis langsung di kode (`L(id, en)`); `data/en_penurunan.json` lama tidak dipakai lagi dan dihapus. Tombol kalkulator di Alur Migas dipetakan ke modul Desain di `js/app.js` (`FLOW_CALC`).
+`data/`, `assets/`, `js/flow.js`, `css/flow.css`, dan `sw.js` semula dibuat oleh skrip `ipad_build.py` di aplikasi utama (privat). Daftar berkas dan `VERSION` di `sw.js` kini dibuat oleh `tools/build_sw.py` (semua `assets/*` tanpa subfolder, `css/*.css`, `data/*.json`, `icons/*`, `js/*.js`, `js/desain/*.js`, `js/vendor/*.mjs`, `index.html`, manifest; VERSION = 10 karakter awal SHA-1 isi berkas + kode `sw.js`), jadi sesuaikan skrip lama itu sebelum membuat ulang `sw.js`. Teks dua bahasa tab baru ditulis langsung di kode (`L(id, en)`); `data/en_penurunan.json` lama tidak dipakai lagi dan dihapus. Tombol kalkulator di Alur Migas dipetakan ke modul Desain di `js/app.js` (`FLOW_CALC`).
 
 Untuk mencoba tanpa penyimpanan offline: tambahkan `?nosw=1` pada alamat saat pengembangan.
