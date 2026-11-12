@@ -241,6 +241,39 @@ export function detectCategory(docNo, title, fileName) {
   }
   return CAT_OTHER
 }
+// ---------------------------------------------------------------- disiplin (Civil, …)
+// Struktur pustaka: Disiplin → Jenis dokumen. Disiplin dibaca dari kode pada nomor dokumen (PHR-CIV-PRC-104841 → CIV, PHR-SP-CI-GG-002 → CI = Civil),
+// lalu dari judul / nama berkas. DISCS = disiplin bawaan; disiplin lain ditambah pengguna di Pustaka → Disiplin (disimpan di perangkat, lihat makeDisc
+// dan allDiscs di js/rts_store.js). Yang tidak dikenali masuk "Lainnya" (DISC_OTHER) dan bisa ditetapkan manual.
+export const DISC_OTHER = "other"
+export const DISCS = [
+  { id: "civil", lab: ["Civil", "Civil"], sub: ["Pekerjaan sipil", "Civil works"], codes: ["civ", "ci", "cvl", "civil", "sipil"], words: /\b(civil|sipil)\b/ },
+]
+const TYPE_CODES = new Set(CATS.flatMap((c) => c.codes))
+// "mec, ME; sp" → { codes: ["mec", "me"], skipped: ["sp"] }: kode pada nomor dokumen; kode jenis dokumen (SP, PRC …) tidak boleh dipakai
+export function normDiscCodes(str) {
+  const codes = [], skipped = []
+  for (const c of fold(str).split(/[\s,;]+/).filter(Boolean)) { if (!/^[a-z0-9]{1,8}$/.test(c) || TYPE_CODES.has(c)) skipped.push(c); else if (!codes.includes(c)) codes.push(c) }
+  return { codes, skipped }
+}
+export const discSlug = (s) => fold(s).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+// disiplin tambahan pengguna: { id, name, codes } → bentuk yang sama dengan DISCS
+export function makeDisc({ id, name, codes }) {
+  const nm = String(name ?? "").trim(), key = fold(nm).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return { id: id || "d-" + discSlug(nm), lab: [nm, nm], sub: ["Disiplin tambahan", "Added discipline"], codes: Array.isArray(codes) ? codes : [], words: new RegExp("\\b" + key + "\\b"), custom: true }
+}
+export const discLab = (id, list = DISCS) => { const d = list.find((x) => x.id === id); return d ? d.lab : ["Lainnya", "Other"] }
+export function detectDiscipline(docNo, title, fileName, list = DISCS) {
+  const toks = fold(docNo).split(/[^a-z0-9]+/).filter(Boolean)
+  const byCode = list.map((d) => ({ id: d.id, at: toks.findIndex((t) => d.codes.includes(t)) })).filter((x) => x.at >= 0).sort((a, b) => a.at - b.at)[0]
+  if (byCode) return byCode.id
+  for (const src of [title, String(fileName ?? "").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ")]) {
+    const t = fold(src)
+    const hit = list.map((d) => ({ id: d.id, at: t.search(d.words) })).filter((x) => x.at >= 0).sort((a, b) => a.at - b.at)[0]
+    if (hit) return hit.id
+  }
+  return DISC_OTHER
+}
 // Nomor dokumen: cari pola "RTS-…" dulu, lalu kode umum "ABC-DEF-123" di halaman awal; jika tidak ada pakai nama berkas
 export function detectDocMeta(pages, fileName = "") {
   const head = pages.slice(0, 2).flat().slice(0, 80).join("\n")
@@ -274,7 +307,7 @@ export function detectDocMeta(pages, fileName = "") {
     return up * 80 + capR * 30 + Math.min(l.length, 60) * 0.5 + (p2.has(fold(l)) ? 12 : 0) + (bonus.get(l) || 0) - (/[.;:]$/.test(l) ? 30 : 0) - (/\b(shall|harus|must|should)\b/i.test(l) ? 30 : 0) - (/\d{3,}/.test(l) ? 15 : 0) - (/^\d/.test(l) ? 25 : 0)
   }
   const title = cand.sort((a, b) => score(b) - score(a))[0] || base
-  return { docNo, rev, title, cat: detectCategory(docNo, title, fileName) }
+  return { docNo, rev, title, cat: detectCategory(docNo, title, fileName), disc: detectDiscipline(docNo, title, fileName) }
 }
 // baris PDF yang terpotong di tengah kalimat disambung lagi; butir daftar, baris tabel & baris kosong tetap baris baru
 const LIST_START = /^(\(?[a-z]\)|\(?[ivx]{1,4}\)|\d{1,2}[.)]|[-•●▪◦–*])\s/i

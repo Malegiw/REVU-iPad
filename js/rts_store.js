@@ -1,6 +1,6 @@
 // Penyimpanan & impor dokumen RTS di perangkat: IndexedDB ("ymd-rts"), pembaca PDF (pdf.js, js/vendor), DOCX/XLSX (unzip bawaan peramban),
 // TXT/MD/CSV, dan paket JSON. Tidak ada yang dikirim ke server; isi standar perusahaan tetap di iPad pengguna.
-import { detectDocMeta, detectCategory, splitSections, textToPages, pdfItemsToLines } from "./rts.js"
+import { detectDocMeta, detectCategory, detectDiscipline, DISCS, makeDisc, splitSections, textToPages, pdfItemsToLines } from "./rts.js"
 
 const DB = "ymd-rts", VER = 1
 let dbp = null
@@ -43,6 +43,19 @@ export async function delDoc(id) { await tx("docs", "readwrite", (s) => s.delete
 export async function clearAll() { await tx("docs", "readwrite", (s) => s.clear()); await tx("files", "readwrite", (s) => s.clear()) }
 export async function usage() { try { return navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null } catch (e) { return null } }
 export async function persist() { try { return navigator.storage && navigator.storage.persist ? await navigator.storage.persist() : false } catch (e) { return false } }
+
+// ---------------------------------------------------------------- disiplin tambahan pengguna (di perangkat ini, localStorage)
+const DKEY = "ymd.rts.discs.v1"
+let discCache = null, allCache = null
+// [{ id, name, codes }]
+export function customDiscs() {
+  if (discCache) return discCache
+  try { const a = JSON.parse(localStorage.getItem(DKEY) || "[]"); discCache = (Array.isArray(a) ? a : []).filter((d) => d && d.id && d.name).map((d) => ({ id: String(d.id), name: String(d.name), codes: Array.isArray(d.codes) ? d.codes.map(String) : [] })) } catch (e) { discCache = [] }
+  return discCache
+}
+export function saveCustomDiscs(list) { discCache = list; allCache = null; try { localStorage.setItem(DKEY, JSON.stringify(list)) } catch (e) { /* tanpa penyimpanan */ } }
+// semua disiplin: bawaan (Civil) lalu tambahan pengguna, bentuk seragam untuk deteksi & tampilan
+export function allDiscs() { if (!allCache) allCache = [...DISCS, ...customDiscs().map(makeDisc)]; return allCache }
 
 // ---------------------------------------------------------------- pembaca berkas
 const ext = (n) => (String(n).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase() || ""
@@ -143,17 +156,21 @@ export async function parseFile(file, onProg) {
   if (e === "pdf" && chars < 40 * pages.length) warn = "scan"            // PDF hasil pindai tanpa lapisan teks
   const meta = detectDocMeta(pages, file.name)
   const secs = splitSections(pages)
-  return { id: uid(), ...meta, fileName: file.name, size: file.size, type: e, pages: pages.length, chars, secs, addedAt: Date.now(), warn }
+  return { id: uid(), ...meta, disc: detectDiscipline(meta.docNo, meta.title, file.name, allDiscs()), fileName: file.name, size: file.size, type: e, pages: pages.length, chars, secs, addedAt: Date.now(), warn }
 }
 // paket JSON (ekspor dari perangkat lain / hasil tools): { format: "ymd-rts-pack", docs: [...] }
 export function parsePack(txt) {
   const o = JSON.parse(txt)
   const docs = Array.isArray(o) ? o : o && Array.isArray(o.docs) ? o.docs : null
   if (!docs) throw new Error("bukan paket RTS (butuh { docs: [...] })")
-  return docs.filter((d) => d && Array.isArray(d.secs)).map((d) => ({ id: d.id || uid(), docNo: d.docNo || d.fileName || "RTS", title: d.title || "", rev: d.rev || "", fileName: d.fileName || "", size: d.size || 0, type: d.type || "json", pages: d.pages || 0, chars: d.chars || 0, cat: d.cat || detectCategory(d.docNo || d.fileName || "", d.title || "", d.fileName || ""), ...(d.catManual ? { catManual: true } : {}), ...(d.titleManual ? { titleManual: true } : {}),
+  return docs.filter((d) => d && Array.isArray(d.secs)).map((d) => ({ id: d.id || uid(), docNo: d.docNo || d.fileName || "RTS", title: d.title || "", rev: d.rev || "", fileName: d.fileName || "", size: d.size || 0, type: d.type || "json", pages: d.pages || 0, chars: d.chars || 0, cat: d.cat || detectCategory(d.docNo || d.fileName || "", d.title || "", d.fileName || ""), disc: d.disc || detectDiscipline(d.docNo || d.fileName || "", d.title || "", d.fileName || "", allDiscs()), ...(d.catManual ? { catManual: true } : {}), ...(d.discManual ? { discManual: true } : {}), ...(d.titleManual ? { titleManual: true } : {}),
     secs: d.secs.map((s) => ({ no: String(s.no ?? ""), title: String(s.title ?? ""), page: Number(s.page) || 1, text: String(s.text ?? ""), ...(s.parent ? { parent: String(s.parent) } : {}), ...(s.part ? { part: s.part } : {}) })), addedAt: d.addedAt || Date.now(), warn: d.warn || "", tags: d.tags || [] }))
 }
-export const makePack = (docs) => JSON.stringify({ format: "ymd-rts-pack", v: 1, made: new Date().toISOString(), docs: docs.map(({ id, docNo, title, rev, cat, catManual, titleManual, fileName, size, type, pages, chars, secs, addedAt, warn, tags }) => ({ id, docNo, title, rev, cat, catManual, titleManual, fileName, size, type, pages, chars, secs, addedAt, warn, tags })) })
+export const makePack = (docs) => JSON.stringify({ format: "ymd-rts-pack", v: 1, made: new Date().toISOString(), discs: customDiscs(), docs: docs.map(({ id, docNo, title, rev, cat, catManual, disc, discManual, titleManual, fileName, size, type, pages, chars, secs, addedAt, warn, tags }) => ({ id, docNo, title, rev, cat, catManual, disc, discManual, titleManual, fileName, size, type, pages, chars, secs, addedAt, warn, tags })) })
+// definisi disiplin tambahan di dalam paket (agar disiplin ikut pindah ke perangkat lain)
+export function packDiscs(txt) {
+  try { const o = JSON.parse(txt); return (o && Array.isArray(o.discs) ? o.discs : []).filter((d) => d && d.id && d.name).map((d) => ({ id: String(d.id), name: String(d.name), codes: Array.isArray(d.codes) ? d.codes.map(String) : [] })) } catch (e) { return [] }
+}
 
 // impor banyak berkas sekaligus; onProg(i, n, frac, note, name)
 export async function importFiles(files, onProg, keepOriginal = true) {
@@ -163,7 +180,10 @@ export async function importFiles(files, onProg, keepOriginal = true) {
     i++
     try {
       if (ext(f.name) === "json") {
-        for (const d of parsePack(await f.text())) { await putDoc(d); done.push(d) }
+        const txt = await f.text()
+        const have = customDiscs(), add = packDiscs(txt).filter((x) => !have.some((h) => h.id === x.id) && !DISCS.some((b) => b.id === x.id))
+        if (add.length) saveCustomDiscs([...have, ...add])
+        for (const d of parsePack(txt)) { await putDoc(d); done.push(d) }
       } else {
         const d = await parseFile(f, (fr, note) => onProg && onProg(i, files.length, fr, note, f.name))
         await putDoc(d)

@@ -426,10 +426,11 @@ mark.rt-val[role=button]:hover, mark.rt-val[role=button]:focus-visible { backgro
 @media print { .rt-viewer { display: none !important; } }
 
 /* ---------------------------------------------------------------- jenis dokumen (Specification / Procedure / Lainnya) */
-.rt-scope { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: -2px 2px 14px; }
+.rt-scope { display: grid; gap: 8px; margin: -2px 2px 14px; }
 .rt-scope[hidden] { display: none; }
-.rt-scope > small { color: var(--muted); font-size: .8rem; font-weight: 700; }
-.rt-scope .rt-seg { flex: 1 1 340px; max-width: 560px; }
+.rt-scope-r { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.rt-scope-r > small { flex: none; min-width: 58px; color: var(--muted); font-size: .8rem; font-weight: 700; }
+.rt-scope .rt-seg { flex: 1 1 340px; max-width: 640px; }
 .rt-segb:disabled { opacity: .4; cursor: default; }
 .rt-dotc { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
 .rt-dotc.c-spec { background: var(--accent); } .rt-dotc.c-proc { background: var(--gold, #E3A857); } .rt-dotc.c-other { background: var(--muted); }
@@ -454,3 +455,33 @@ mark.rt-val[role=button]:hover, mark.rt-val[role=button]:focus-visible { backgro
   .rt-seg { flex-wrap: wrap; overflow: visible; border-radius: 18px; }
   .rt-seg .rt-segb { flex: 1 1 auto; padding: 0 10px; }
 }
+
+/* ---------------------------------------------------------------- disiplin (Civil, …) */
+.dh0 { --h: #2E8B6E; } .dh1 { --h: #7A5BD0; } .dh2 { --h: #C2557A; } .dh3 { --h: #D07A2D; } .dh4 { --h: #3A78C2; } .dh5 { --h: #6B7785; } .dhx { --h: var(--muted); }
+.rt-dotc[class*="dh"] { background: var(--h); }
+.rt-dsc { flex: none; display: inline-flex; align-items: center; font-size: .66rem; font-weight: 700; letter-spacing: .01em; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  color: color-mix(in srgb, var(--h) 70%, var(--ink)); background: color-mix(in srgb, var(--h) 14%, transparent); border: 1px solid color-mix(in srgb, var(--h) 40%, transparent); }
+.rt-docl .rt-dsc { align-self: center; }
+.rt-dgrp-h .rt-dsc { display: none; }
+.rt-tile[data-k="docs"] .rt-tile-s { white-space: pre-line; }
+/* judul disiplin di Pustaka (Civil → Specification / Procedure) */
+.rt-disc-w { margin: 22px 2px 0; }
+.rt-disc-w:first-of-type { margin-top: 12px; }
+.rt-disc-h { display: flex; align-items: center; gap: 10px; min-width: 0; padding-bottom: 8px; border-bottom: 2px solid color-mix(in srgb, var(--line) 80%, transparent); }
+.rt-disc-h .rt-dsc { font-size: .86rem; padding: 4px 14px; }
+.rt-disc-h .rt-cgrp-t { color: var(--ink); font-weight: 600; }
+.rt-disc-h > i { flex: none; font-style: normal; color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
+.rt-disc-w + .rt-cgrp-h { margin-top: 12px; }
+.rt-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 0; padding: 10px 12px; border-radius: 14px; background: color-mix(in srgb, var(--gold, #E3A857) 12%, var(--field)); border: 1px dashed color-mix(in srgb, var(--gold, #E3A857) 55%, var(--line)); }
+.rt-bulk small { flex: 1 1 220px; color: var(--muted); font-size: .8rem; line-height: 1.4; }
+.rt-bulk select { flex: 0 1 180px; min-width: 0; min-height: 42px; padding: 6px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--cardsolid); color: var(--ink); font-size: .95rem; }
+/* kelola disiplin */
+.rt-dmgr { margin-top: 26px; }
+.rt-drow { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 6px 16px; border-top: 1px solid var(--line); }
+.rt-drow:first-child { border-top: 0; }
+.rt-drow b { font-weight: 650; }
+.rt-dcodes { flex: 1; min-width: 0; color: var(--muted); font-size: .8rem; letter-spacing: .02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-drow small { color: var(--muted); font-size: .76rem; white-space: nowrap; }
+.rt-dadd { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 6px; }
+.rt-dadd input { flex: 1 1 200px; min-width: 0; min-height: 44px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--field); color: var(--ink); font-size: 1rem; }
+.rt-dadd input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }

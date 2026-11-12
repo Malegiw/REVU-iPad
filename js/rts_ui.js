@@ -5,26 +5,27 @@
 // sekaligus) → panel geser bawah untuk pasal lengkap & detail parameter. Pintasan: "/" atau ⌘K = cari, ↑/↓ = pindah hasil, Esc = tutup/hapus.
 // Interaksi mikro (pola bencho.dev): jelly tabs, rolling counter, edge light, inline confirm + urungkan, copy field, upload dropzone (seret berkas),
 // progress ticks (satu garis per parameter), shimmer text saat memuat.
-// Pembagian jenis dokumen (Specification / Procedure / Lainnya): bilah jenis di bawah tab menyaring Cari, Parameter, dan Pustaka; jenis dikenali otomatis
-// dari nomor dokumen (kode SP / PRC), judul, atau nama berkas dan bisa diatur manual (Ubah judul / jenis). Daftar jenis: CATS di js/rts.js.
+// Pembagian pustaka: Disiplin (Civil, …) → Jenis dokumen (Specification / Procedure / Lainnya). Dua baris pilihan di bawah tab menyaring Cari, Parameter, dan
+// Pustaka. Disiplin & jenis dikenali otomatis dari nomor dokumen (CIV / CI, SP / PRC), judul, atau nama berkas dan bisa diatur manual (Ubah judul / jenis).
+// Disiplin baru ditambah pengguna di Pustaka → Disiplin (nama + kode pada nomor dokumen). Daftar bawaan: DISCS dan CATS di js/rts.js.
 import { L, lang, nf } from "./desain/core.js"
 import { el, sv, exportBar, reveal } from "./desain/ui.js"
 import { projLoad } from "./project.js"
 import { initUnits, footer } from "./pj_ui.js"
 import { ico } from "./icons.js"
-import { buildIndex, search, findParam, PARAMS, PARAM_GROUPS, extractValues, parseQuery, termSpans, complianceRows, pinNumber, fold, isBoilerplate, detectDocMeta, CATS, CAT_OTHER, catLab, detectCategory } from "./rts.js"
+import { buildIndex, search, findParam, PARAMS, PARAM_GROUPS, extractValues, parseQuery, termSpans, complianceRows, pinNumber, fold, isBoilerplate, detectDocMeta, CATS, CAT_OTHER, catLab, detectCategory, DISC_OTHER, discLab, detectDiscipline, normDiscCodes, discSlug } from "./rts.js"
 import * as store from "./rts_store.js"
 import { openPdf, shareFile } from "./rts_viewer.js"
 
 const KEY = "ymd.rts.v1"
-const DEF = () => ({ pins: {}, recent: [], q: "", doc: "", tab: "cari", pf: "all", view: "rel", cat: "all" })
+const DEF = () => ({ pins: {}, recent: [], q: "", doc: "", tab: "cari", pf: "all", view: "rel", cat: "all", disc: "all" })
 const loadSt = () => { try { const o = JSON.parse(localStorage.getItem(KEY) || "null"); return { ...DEF(), ...(o || {}) } } catch (e) { return DEF() } }
 const saveSt = (S) => { try { localStorage.setItem(KEY, JSON.stringify(S)) } catch (e) { /* tanpa penyimpanan */ } }
 export const rtsPins = () => loadSt().pins
 
 let DOCS = null                // cache selama app terbuka
 const IXS = new Map()          // indeks pencarian per jenis dokumen ("all", "spec", "proc", …)
-let SCOPE = "all"              // jenis dokumen yang sedang dipilih (dipakai docLine untuk menampilkan/menyembunyikan penanda jenis)
+let SCOPE = "all", SCOPE_D = "all", MULTI_D = false   // jenis & disiplin terpilih; MULTI_D = ada lebih dari satu disiplin berisi dokumen (dipakai docLine untuk penanda)
 let FILES = new Set()          // id dokumen yang berkas aslinya tersimpan
 const fileCache = new Map()    // berkas asli yang sudah dibaca (agar Bagikan bisa langsung dari ketukan)
 let keyHandler = null          // pintasan papan ketik (dilepas saat tab dipasang ulang)
@@ -33,6 +34,13 @@ const refOf = (doc, sec) => `${doc.docNo}${doc.rev ? " Rev." + doc.rev : ""}${se
 // judul dokumen untuk tampilan: teks klasifikasi/kop ("Intended for internal use …") atau nomor dokumen diganti nama berkas
 const docTitle = (doc) => { const t = String(doc.title || "").trim(); if (t && t !== doc.docNo && !isBoilerplate(t)) return t; const f = String(doc.fileName || "").replace(/\.[^.]+$/, "").replace(/_/g, " ").trim(); return f && f !== doc.docNo ? f : "" }
 const catId = (d) => d.cat || CAT_OTHER
+const discId = (d) => d.disc || DISC_OTHER
+// warna disiplin: urutan pada daftar (Civil = 0); "Lainnya" abu-abu
+const hueOf = (id) => { const i = store.allDiscs().findIndex((d) => d.id === id); return i < 0 ? "x" : i % 6 }
+function discChip(id, always) {
+  if (!always && id === DISC_OTHER) return null
+  const c = el("span", "rt-dsc dh" + hueOf(id)); c.textContent = L(...discLab(id, store.allDiscs())); return c
+}
 // penanda jenis dokumen; "Lainnya" tidak diberi penanda kecuali diminta (always)
 function catChip(id, always) {
   if (!always && id !== "spec" && id !== "proc") return null
@@ -42,6 +50,7 @@ function catChip(id, always) {
 function docLine(doc, cls = "rt-docl") {
   const d = el("span", cls)
   d.append(el("span", "rt-badge", doc.docNo))
+  if (MULTI_D && SCOPE_D === "all") { const c = discChip(discId(doc)); if (c) d.append(c) }
   if (SCOPE === "all") { const c = catChip(catId(doc)); if (c) d.append(c) }
   if (docTitle(doc)) d.append(el("span", "rt-docl-t", docTitle(doc)))
   if (doc.rev) d.append(el("small", null, "Rev." + doc.rev))
@@ -89,7 +98,7 @@ export function mountRts(box, ctx) {
   lang.cur = ctx.lang
   initUnits()
   const S = loadSt()
-  SCOPE = S.cat
+  SCOPE = S.cat; SCOPE_D = S.disc
   box.textContent = ""
   box.classList.add("rt-page")
 
@@ -202,21 +211,37 @@ export function mountRts(box, ctx) {
     if (DOCS && !force) return DOCS
     try { DOCS = (await store.listDocs()).sort((a, b) => fold(a.docNo).localeCompare(fold(b.docNo))) } catch (e) { DOCS = []; DOCS.err = e.message }
     try { FILES = await store.fileIds() } catch (e) { FILES = new Set() }
-    // dokumen yang diimpor sebelum ada pembagian jenis: kenali jenisnya sekali dari nomor dokumen / judul / nama berkas
-    const need = DOCS.filter((d) => !d.cat)
-    need.forEach((d) => { d.cat = detectCategory(d.docNo, d.title, d.fileName) })
-    await Promise.all(need.map((d) => store.putDoc(d).catch(() => null)))
+    // jenis & disiplin dikenali otomatis (nomor dokumen / judul / nama berkas) untuk dokumen yang tidak diatur manual; perubahan disimpan
+    const dl = store.allDiscs(), dirty = []
+    for (const d of DOCS) {
+      let ch = false
+      if (!d.catManual) { const c = detectCategory(d.docNo, d.title, d.fileName); if (c !== d.cat) { d.cat = c; ch = true } }
+      if (!d.discManual) { const v = detectDiscipline(d.docNo, d.title, d.fileName, dl); if (v !== d.disc) { d.disc = v; ch = true } }
+      else if (d.disc !== DISC_OTHER && !dl.some((x) => x.id === d.disc)) { d.disc = DISC_OTHER; delete d.discManual; ch = true }    // disiplin manualnya sudah dihapus
+      if (ch) dirty.push(d)
+    }
+    await Promise.all(dirty.map((d) => store.putDoc(d).catch(() => null)))
     IXS.clear()
     normScope()
     return DOCS
   }
-  // ---------------------------------------------------------------- jenis dokumen (Specification / Procedure / Lainnya)
-  const scopeDocs = () => (S.cat === "all" ? DOCS || [] : (DOCS || []).filter((d) => catId(d) === S.cat))
-  function catCounts() { const c = { all: (DOCS || []).length }; for (const d of DOCS || []) c[catId(d)] = (c[catId(d)] || 0) + 1; return c }
-  // jenis yang dipilih harus punya dokumen; dokumen terpilih harus berada di jenis itu
+  // ---------------------------------------------------------------- disiplin & jenis dokumen (ruang lingkup Cari / Parameter / Pustaka)
+  const inDisc = (d) => S.disc === "all" || discId(d) === S.disc
+  const inCat = (d) => S.cat === "all" || catId(d) === S.cat
+  const scopeDocs = () => (DOCS || []).filter((d) => inDisc(d) && inCat(d))
+  // jumlah dokumen per disiplin / jenis; cross = hanya yang lolos pilihan lainnya (jumlah mengikuti baris pilihan di sebelahnya)
+  function tally(key, filter) { const c = { all: 0 }; for (const d of DOCS || []) if (filter(d)) { c.all++; const k = key(d); c[k] = (c[k] || 0) + 1 } return c }
+  const catCounts = (cross = true) => tally(catId, cross ? inDisc : () => true)
+  const discCounts = (cross = true) => tally(discId, cross ? inCat : () => true)
+  const scoped = () => S.disc !== "all" || S.cat !== "all"
+  const scopeLabel = () => [S.disc === "all" ? "" : L(...discLab(S.disc, store.allDiscs())), S.cat === "all" ? "" : L(...catLab(S.cat))].filter(Boolean).join(" · ")
+  // pilihan harus punya dokumen; dokumen terpilih harus berada di ruang lingkup
   function normScope() {
-    if (S.cat !== "all" && !(DOCS || []).some((d) => catId(d) === S.cat)) S.cat = "all"
-    SCOPE = S.cat
+    const all = DOCS || []
+    if (S.disc !== "all" && !all.some((d) => discId(d) === S.disc)) S.disc = "all"
+    if (S.cat !== "all" && !all.some((d) => catId(d) === S.cat)) S.cat = "all"
+    if (!scopeDocs().length) { S.cat = "all"; if (!scopeDocs().length) S.disc = "all" }               // kombinasi disiplin + jenis tanpa dokumen
+    SCOPE = S.cat; SCOPE_D = S.disc; MULTI_D = new Set(all.map(discId)).size > 1
     if (S.doc && !scopeDocs().some((d) => d.id === S.doc)) S.doc = ""
     saveSt(S)
   }
@@ -224,33 +249,105 @@ export function mountRts(box, ctx) {
   function drawScope() {
     scopeBox.textContent = ""
     syncScope()
-    const cnt = catCounts()
-    if (!cnt.all) return
-    const seg = el("div", "rt-seg"); seg.setAttribute("role", "group"); seg.setAttribute("aria-label", L("Jenis dokumen", "Document type"))
-    const items = [["all", L("Semua", "All")], ...CATS.map((c) => [c.id, L(...c.lab)]), ...(cnt[CAT_OTHER] ? [[CAT_OTHER, L("Lainnya", "Other")]] : [])]
-    items.forEach(([id, lab]) => {
-      const b = btn("rt-segb" + (S.cat === id ? " on" : ""), null)
-      if (id !== "all") b.append(el("span", "rt-dotc c-" + id))
-      b.append(el("span", null, lab), el("i", null, String(cnt[id] || 0)))
-      b.setAttribute("aria-pressed", S.cat === id)
-      b.disabled = id !== "all" && !cnt[id]
-      if (b.disabled) b.title = L("Belum ada dokumen jenis ini", "No documents of this type yet")
-      b.onclick = () => setScope(id)
-      seg.append(b)
-    })
-    scopeBox.append(el("small", null, L("Jenis dokumen", "Document type")), seg)
+    const dt = discCounts(false)
+    if (!dt.all) return
+    const ct = catCounts(false), dc = discCounts(), cc = catCounts(), dl = store.allDiscs()
+    const row = (label, items, cur, cnt, tot, pick, none) => {
+      const r = el("div", "rt-scope-r"), seg = el("div", "rt-seg"); seg.setAttribute("role", "group"); seg.setAttribute("aria-label", label)
+      items.forEach(([id, lab, dot]) => {
+        const b = btn("rt-segb" + (cur === id ? " on" : ""), null)
+        if (dot) b.append(el("span", "rt-dotc " + dot))
+        b.append(el("span", null, lab), el("i", null, String(cnt[id] ?? 0)))
+        b.setAttribute("aria-pressed", cur === id)
+        b.disabled = id !== "all" && !tot[id]
+        if (b.disabled) b.title = none
+        b.onclick = () => pick(id)
+        seg.append(b)
+      })
+      r.append(el("small", null, label), seg); scopeBox.append(r)
+    }
+    row(L("Disiplin", "Discipline"), [["all", L("Semua", "All")], ...dl.map((d) => [d.id, L(...d.lab), "dh" + hueOf(d.id)]), ...(dt[DISC_OTHER] ? [[DISC_OTHER, L("Lainnya", "Other"), "dhx"]] : [])], S.disc, dc, dt, setDisc, L("Belum ada dokumen disiplin ini", "No documents in this discipline yet"))
+    row(L("Jenis", "Type"), [["all", L("Semua", "All")], ...CATS.map((c) => [c.id, L(...c.lab), "c-" + c.id]), ...(ct[CAT_OTHER] ? [[CAT_OTHER, L("Lainnya", "Other"), "c-other"]] : [])], S.cat, cc, ct, setCat, L("Belum ada dokumen jenis ini", "No documents of this type yet"))
   }
-  function setScope(id) {
-    if (S.cat === id) return
-    S.cat = id; normScope(); shown = PAGE
+  function applyScope(rowIx) {
+    normScope(); shown = PAGE
     drawScope(); drawSearch(); drawParams(); drawLib(); drawStats()
-    jelly(scopeBox.querySelector(".rt-segb.on")); reveal(box)
+    jelly(scopeBox.querySelectorAll(".rt-scope-r")[rowIx]?.querySelector(".rt-segb.on")); reveal(box)
   }
-  // judul bagian per jenis (Pustaka & hasil "Per dokumen")
-  function catHead(id, text) {
-    const c = CATS.find((x) => x.id === id), h = el("div", "rt-cgrp-h")
-    h.append(catChip(id, true), el("span", "rt-cgrp-t", c ? L(...c.sub) : L("Belum dikelompokkan · atur lewat Ubah judul / jenis", "Not classified yet · set it via Edit title / type")), el("i", null, text))
+  function setDisc(id) { if (S.disc === id) return; S.disc = id; if (!scopeDocs().length) S.cat = "all"; applyScope(0) }
+  function setCat(id) { if (S.cat === id) return; S.cat = id; if (!scopeDocs().length) S.disc = "all"; applyScope(1) }
+  // judul kelompok (Pustaka & hasil "Per dokumen"): disiplin dan/atau jenis
+  function groupHead(dId, cId, text) {
+    const c = cId && CATS.find((x) => x.id === cId), h = el("div", "rt-cgrp-h")
+    if (dId) h.append(discChip(dId, true))
+    if (cId) h.append(catChip(cId, true))
+    h.append(el("span", "rt-cgrp-t", c ? L(...c.sub) : cId ? L("Belum dikelompokkan · atur lewat Ubah judul / jenis", "Not classified yet · set it via Edit title / type") : ""), el("i", null, text))
     return h
+  }
+  const catHead = (id, text) => groupHead(null, id, text)
+  // judul disiplin di Pustaka; "Lainnya" diberi tombol untuk menetapkan semuanya sekaligus ke satu disiplin
+  function discHead(id, n, group) {
+    const w = el("div", "rt-disc-w"), h = el("div", "rt-disc-h"), d = store.allDiscs().find((x) => x.id === id)
+    h.append(discChip(id, true), el("span", "rt-cgrp-t", d ? L(...d.sub) : L("Belum dikelompokkan", "Not classified yet")), el("i", null, `${n} ${L("dokumen", n === 1 ? "document" : "documents")}`))
+    w.append(h)
+    if (id === DISC_OTHER) {
+      const f = el("div", "rt-bulk"), sel = el("select"); sel.setAttribute("aria-label", L("Disiplin tujuan", "Target discipline"))
+      store.allDiscs().forEach((x) => sel.append(new Option(L(...x.lab), x.id)))
+      const go = btn("rt-btn", L("Tetapkan semua", "Assign all"), "check")
+      go.onclick = async () => {
+        const target = sel.value, prev = group.map((g) => [g, g.disc, !!g.discManual])
+        for (const g of group) { g.disc = target; g.discManual = true; await store.putDoc(g) }
+        IXS.clear(); await loadDocs(true); drawAll()
+        toast(`✓ ${group.length} ${L("dokumen", "documents")} → ${L(...discLab(target, store.allDiscs()))}`, async () => { for (const [g, pd, pm] of prev) { g.disc = pd; if (pm) g.discManual = true; else delete g.discManual; await store.putDoc(g) } IXS.clear(); await loadDocs(true); drawAll() })
+      }
+      f.append(el("small", null, L("Nomor dokumennya tidak memuat kode disiplin. Tetapkan semuanya ke:", "Their numbers carry no discipline code. Assign them all to:")), sel, go)
+      w.append(f)
+    }
+    return w
+  }
+  // kelola disiplin: daftar (bawaan + tambahan) dan formulir tambah (nama + kode pada nomor dokumen)
+  function discMgr() {
+    const dl = store.allDiscs(), cnt = discCounts(false), wrap = el("section", "rt-dmgr")
+    const hd = el("div", "rt-ph"); hd.append(el("h2", null, L("Disiplin", "Disciplines")), el("small", null, L("tambah disiplin baru di sini", "add new disciplines here")))
+    const grp = el("div", "rt-group")
+    dl.forEach((d) => {
+      const r = el("div", "rt-drow")
+      r.append(el("span", "rt-dotc dh" + hueOf(d.id)), el("b", null, L(...d.lab)), el("span", "rt-dcodes", d.codes.length ? d.codes.map((c) => c.toUpperCase()).join(" · ") : L("tanpa kode", "no code")), el("small", null, `${cnt[d.id] || 0} ${L("dokumen", "docs")}`))
+      if (d.custom) {
+        const del = btn("rt-link danger", L("hapus", "remove"), "trash")
+        inlineConfirm(del, L("ketuk lagi", "tap again"), async () => {
+          const manual = (DOCS || []).filter((x) => discId(x) === d.id && x.discManual).map((x) => x.id)
+          store.saveCustomDiscs(store.customDiscs().filter((x) => x.id !== d.id))
+          IXS.clear(); await loadDocs(true); drawAll()
+          toast(`${L("Disiplin dihapus", "Discipline removed")}: ${L(...d.lab)}`, async () => {
+            store.saveCustomDiscs([...store.customDiscs(), { id: d.id, name: d.lab[0], codes: d.codes }])
+            IXS.clear(); await loadDocs(true)
+            for (const id of manual) { const x = (DOCS || []).find((y) => y.id === id); if (x) { x.disc = d.id; x.discManual = true; await store.putDoc(x) } }
+            IXS.clear(); await loadDocs(true); drawAll()
+          })
+        })
+        r.append(del)
+      } else r.append(el("small", "rt-dbuilt", L("bawaan", "built-in")))
+      grp.append(r)
+    })
+    const f = el("form", "rt-dadd")
+    const ni = el("input"); ni.type = "text"; ni.maxLength = 30; ni.placeholder = L("Nama disiplin, mis. Mechanical", "Discipline name, e.g. Mechanical"); ni.setAttribute("aria-label", L("Nama disiplin", "Discipline name"))
+    const ci = el("input"); ci.type = "text"; ci.placeholder = L("Kode pada nomor dokumen, mis. MEC, ME", "Code in the document number, e.g. MEC, ME"); ci.setAttribute("aria-label", L("Kode disiplin", "Discipline code"))
+    const add = btn("rt-btn pri", L("Tambah disiplin", "Add discipline"), "check"); add.type = "submit"
+    f.append(ni, ci, add)
+    f.onsubmit = async (e) => {
+      e.preventDefault()
+      const name = ni.value.trim(), id = "d-" + discSlug(name)
+      if (!name || id === "d-") { ni.focus(); return }
+      if (dl.some((x) => x.id === id || fold(x.lab[0]) === fold(name))) { toast(L("Disiplin itu sudah ada.", "That discipline already exists.")); return }
+      const { codes, skipped } = normDiscCodes(ci.value)
+      store.saveCustomDiscs([...store.customDiscs(), { id, name, codes }])
+      IXS.clear(); await loadDocs(true); drawAll()
+      const n = (DOCS || []).filter((x) => discId(x) === id).length
+      toast(`✓ ${name}${codes.length ? " (" + codes.map((c) => c.toUpperCase()).join(", ") + ")" : ""}: ${n} ${L("dokumen cocok", "documents matched")}${skipped.length ? ` · ${L("dilewati", "skipped")}: ${skipped.join(", ")}` : ""}`)
+    }
+    wrap.append(hd, grp, f, el("p", "dz-note", L("Kode dibaca dari nomor dokumen, mis. CIV pada PHR-CIV-PRC-104841. Dokumen yang cocok masuk ke disiplin ini otomatis; kode SP / PRC dipakai untuk jenis dokumen sehingga tidak bisa jadi kode disiplin. Disiplin tersimpan di perangkat ini dan ikut paket .json.", "Codes are read from the document number, e.g. CIV in PHR-CIV-PRC-104841. Matching documents join the discipline automatically; SP / PRC are used for document types and cannot be discipline codes. Disciplines are stored on this device and travel with the .json pack.")))
+    return wrap
   }
   // berkas asli: dibaca lebih dulu (saat baris/pasal dibuka) supaya Bagikan dipanggil langsung dari ketukan
   function prefetch(id) {
@@ -289,13 +386,14 @@ export function mountRts(box, ctx) {
         d.titleFix = 1
         if (m.title && m.title !== d.docNo && !isBoilerplate(m.title) && m.title !== d.title) { d.title = m.title; n++ }
         if (!d.catManual) d.cat = detectCategory(d.docNo, d.title, d.fileName)
+        if (!d.discManual) d.disc = detectDiscipline(d.docNo, d.title, d.fileName, store.allDiscs())
         await store.putDoc(d)
       } catch (e) { /* lewati dokumen ini */ }
     }
     repairing = false
     if (n && box.isConnected) { IXS.clear(); normScope(); drawAll(); toast(`✓ ${L("Judul dokumen diperbaiki", "Document titles fixed")}: ${n}`) }
   }
-  const index = () => { let ix = IXS.get(S.cat); if (!ix) { ix = buildIndex(scopeDocs()); IXS.set(S.cat, ix) } return ix }
+  const index = () => { const k = `${S.disc}|${S.cat}`; let ix = IXS.get(k); if (!ix) { ix = buildIndex(scopeDocs()); IXS.set(k, ix) } return ix }
   const candsOf = (p) => { const ix = scopeDocs().length ? index() : null; if (!ix) return []; if (!ix.pc) ix.pc = {}; return (ix.pc[p.id] ||= findParam(ix, p, 3)) }
 
   let importMsg = "", importList = []
@@ -355,13 +453,15 @@ export function mountRts(box, ctx) {
     libBox.append(lk)
     store.usage().then((u) => { if (!u || u.usage == null) return; mt.textContent = `${L("Penyimpanan app", "App storage")}: ${kb(u.usage)}${u.quota ? " / " + kb(u.quota) : ""}`; if (u.quota) mb.style.width = `${Math.max(1, Math.min(100, (u.usage / u.quota) * 100))}%`; libBox.insertBefore(meter, lk) })
     if (DOCS && DOCS.err) libBox.append(el("div", "err", DOCS.err))
-    if (!all.length) return
-    // dikelompokkan per jenis (Specification, Procedure, Lainnya), di dalamnya urut nomor dokumen
-    const order = [...CATS.map((c) => c.id), CAT_OTHER], oi = (d) => { const k = order.indexOf(catId(d)); return k < 0 ? order.length : k }
-    const nCat = {}; docs.forEach((d) => { nCat[catId(d)] = (nCat[catId(d)] || 0) + 1 })
-    let curCat = null, list = null
-    docs.slice().sort((a, b) => oi(a) - oi(b) || fold(a.docNo).localeCompare(fold(b.docNo))).forEach((d) => {
-      if (catId(d) !== curCat) { curCat = catId(d); libBox.append(catHead(curCat, `${nCat[curCat]} ${L("dokumen", nCat[curCat] === 1 ? "document" : "documents")}`)); list = el("div", "rt-docs"); libBox.append(list) }
+    if (!all.length) { libBox.append(discMgr()); return }
+    // dikelompokkan per disiplin (Civil, …, Lainnya), di dalamnya per jenis (Specification, Procedure, Lainnya), lalu urut nomor dokumen
+    const dorder = [...store.allDiscs().map((x) => x.id), DISC_OTHER], corder = [...CATS.map((c) => c.id), CAT_OTHER]
+    const ox = (arr, v) => { const k = arr.indexOf(v); return k < 0 ? arr.length : k }
+    const nD = {}, nDC = {}; docs.forEach((d) => { nD[discId(d)] = (nD[discId(d)] || 0) + 1; const k = discId(d) + "|" + catId(d); nDC[k] = (nDC[k] || 0) + 1 })
+    let curD = null, curC = null, list = null
+    docs.slice().sort((a, b) => ox(dorder, discId(a)) - ox(dorder, discId(b)) || ox(corder, catId(a)) - ox(corder, catId(b)) || fold(a.docNo).localeCompare(fold(b.docNo))).forEach((d) => {
+      if (discId(d) !== curD) { curD = discId(d); curC = null; libBox.append(discHead(curD, nD[curD], docs.filter((x) => discId(x) === curD))) }
+      if (catId(d) !== curC) { curC = catId(d); const n = nDC[curD + "|" + curC]; libBox.append(catHead(curC, `${n} ${L("dokumen", n === 1 ? "document" : "documents")}`)); list = el("div", "rt-docs"); libBox.append(list) }
       const row = el("details", "rt-doc"); row.open = openDocs.has(d.id)
       row.addEventListener("toggle", () => { if (row.open) { openDocs.add(d.id); prefetch(d.id) } else openDocs.delete(d.id) })
       const sm = el("summary")
@@ -378,18 +478,22 @@ export function mountRts(box, ctx) {
       const bRen = btn("rt-btn", L("Ubah judul / jenis", "Edit title / type"), "edit")
       const ren = el("form", "rt-ren"); ren.hidden = true
       const ri = el("input"); ri.type = "text"; ri.value = docTitle(d); ri.placeholder = L("Judul dokumen", "Document title"); ri.setAttribute("aria-label", L("Judul dokumen", "Document title"))
+      const dsel = el("select"); dsel.setAttribute("aria-label", L("Disiplin", "Discipline"))
+      dsel.append(new Option(`${L("Otomatis", "Automatic")} (${L(...discLab(detectDiscipline(d.docNo, ri.value || d.title, d.fileName, store.allDiscs()), store.allDiscs()))})`, "auto"), ...store.allDiscs().map((x) => new Option(L(...x.lab), x.id)), new Option(L("Lainnya", "Other"), DISC_OTHER))
+      dsel.value = d.discManual ? discId(d) : "auto"
       const rsel = el("select"); rsel.setAttribute("aria-label", L("Jenis dokumen", "Document type"))
       rsel.append(new Option(`${L("Otomatis", "Automatic")} (${L(...catLab(detectCategory(d.docNo, ri.value || d.title, d.fileName)))})`, "auto"), ...CATS.map((c) => new Option(L(...c.lab), c.id)), new Option(L("Lainnya", "Other"), CAT_OTHER))
       rsel.value = d.catManual ? catId(d) : "auto"
       const rs = btn("rt-btn pri", L("Simpan", "Save"), "check"); rs.type = "submit"
       const rc = btn("rt-btn", L("Batal", "Cancel")); rc.onclick = () => { ren.hidden = true }
-      ren.append(ri, rsel, rs, rc)
+      ren.append(ri, dsel, rsel, rs, rc)
       bRen.onclick = () => { ren.hidden = !ren.hidden; if (!ren.hidden) { ri.focus(); ri.select() } }
       ren.onsubmit = async (e) => {
         e.preventDefault(); const v = ri.value.trim(); if (!v) return
         if (v !== docTitle(d)) { d.title = v; d.titleManual = true }
         if (rsel.value === "auto") { delete d.catManual; d.cat = detectCategory(d.docNo, d.title, d.fileName) } else { d.cat = rsel.value; d.catManual = true }
-        await store.putDoc(d); IXS.clear(); await loadDocs(true); drawAll(); drawScope(); toast(`✓ ${d.docNo}: ${L(...catLab(catId(d)))}`)
+        if (dsel.value === "auto") { delete d.discManual; d.disc = detectDiscipline(d.docNo, d.title, d.fileName, store.allDiscs()) } else { d.disc = dsel.value; d.discManual = true }
+        await store.putDoc(d); IXS.clear(); await loadDocs(true); drawAll(); toast(`✓ ${d.docNo}: ${L(...discLab(discId(d), store.allDiscs()))} · ${L(...catLab(catId(d)))}`)
       }
       const bDel = btn("rt-btn danger", L("Hapus", "Delete"), "trash")
       inlineConfirm(bDel, L("Ketuk lagi untuk menghapus", "Tap again to delete"), async () => {
@@ -409,13 +513,14 @@ export function mountRts(box, ctx) {
       row.append(inner)
       list.append(row)
     })
+    libBox.append(discMgr())
     const tools = el("div", "rt-acts rt-libtools")
     const bPack = btn("rt-btn", L("Ekspor paket (.json)", "Export pack (.json)"), "download")
     bPack.onclick = () => { const a = el("a"); a.href = URL.createObjectURL(new Blob([store.makePack(all)], { type: "application/json" })); a.download = `RTS_pack_${new Date().toISOString().slice(0, 10)}.json`; document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove() }, 1500) }
-    const bClr = btn("rt-btn danger ghosty", S.cat === "all" ? L("Hapus semua dokumen", "Delete all documents") : `${L("Hapus semua", "Delete all")} ${L(...catLab(S.cat))}`, "trash")
+    const bClr = btn("rt-btn danger ghosty", scoped() ? `${L("Hapus semua", "Delete all")} ${scopeLabel()}` : L("Hapus semua dokumen", "Delete all documents"), "trash")
     inlineConfirm(bClr, L(`Ketuk lagi: hapus ${docs.length} dokumen`, `Tap again: delete ${docs.length} documents`), async () => {
       const keep = await Promise.all(docs.map(async (d) => [d, await store.getFile(d.id).catch(() => null)]))
-      if (S.cat === "all") await store.clearAll(); else for (const d of docs) await store.delDoc(d.id)
+      if (!scoped()) await store.clearAll(); else for (const d of docs) await store.delDoc(d.id)
       const prevDoc = S.doc; S.doc = ""; saveSt(S); await loadDocs(true); drawAll()
       toast(`${L("Semua dokumen dihapus", "All documents deleted")} (${keep.length})`, async () => { for (const [d, f] of keep) { await store.putDoc(d); if (f) await store.putFile(d.id, f.blob, f.name, f.type).catch(() => null) } S.doc = prevDoc; saveSt(S); await loadDocs(true); drawAll() })
     })
@@ -566,7 +671,7 @@ export function mountRts(box, ctx) {
       b.onclick = () => { S.doc = S.doc === id && id ? "" : id; saveSt(S); shown = PAGE; run(false); jelly(facetBox.querySelector(".rt-facet.on")) }
       facetBox.append(b)
     }
-    chip("", S.cat === "all" ? L("Semua dokumen", "All documents") : `${L("Semua", "All")} ${L(...catLab(S.cat))}`, counts ? total : null)
+    chip("", scoped() ? `${L("Semua", "All")} ${scopeLabel()}` : L("Semua dokumen", "All documents"), counts ? total : null)
     const list = counts ? docs.filter((d) => counts[d.id] || d.id === S.doc).sort((a, b) => (counts[b.id] || 0) - (counts[a.id] || 0)) : docs
     list.forEach((d) => chip(d.id, d.docNo, counts ? counts[d.id] || 0 : null))
   }
@@ -590,7 +695,7 @@ export function mountRts(box, ctx) {
     const nDoc = new Set(rs.map((r) => r.doc.id)).size
     const head = el("div", "rt-res-h")
     const ht = el("div")
-    ht.append(el("b", null, rs.length ? `${rs.length}${rs.length === 50 ? "+" : ""} ${L("pasal relevan", "relevant clauses")} · ${nDoc} ${L("dokumen", nDoc === 1 ? "document" : "documents")}` : L("Tidak ada yang cocok", "No match")), el("small", null, `${S.cat === "all" ? "" : L(...catLab(S.cat)) + " · "}${groups.map((g) => g.raw).join(" · ")} · ${nf(ms, 0)} ms`))
+    ht.append(el("b", null, rs.length ? `${rs.length}${rs.length === 50 ? "+" : ""} ${L("pasal relevan", "relevant clauses")} · ${nDoc} ${L("dokumen", nDoc === 1 ? "document" : "documents")}` : L("Tidak ada yang cocok", "No match")), el("small", null, `${scoped() ? scopeLabel() + " · " : ""}${groups.map((g) => g.raw).join(" · ")} · ${nf(ms, 0)} ms`))
     const view = el("div", "rt-view"); view.setAttribute("role", "group"); view.setAttribute("aria-label", L("Tampilan hasil", "Result view"))
     ;[["rel", L("Relevansi", "Relevance")], ["doc", L("Per dokumen", "By document")]].forEach(([k, lab]) => { const b = btn("rt-viewb" + ((S.view || "rel") === k ? " on" : ""), lab); b.setAttribute("aria-pressed", (S.view || "rel") === k); b.onclick = () => { S.view = k; saveSt(S); run(false); jelly(resBox.querySelector(".rt-viewb.on")) }; view.append(b) })
     head.append(ht, view)
@@ -633,13 +738,16 @@ export function mountRts(box, ctx) {
       // kelompok per dokumen: judul dokumen RTS sebagai kepala, pasal-pasalnya di bawah (urut relevansi)
       const byDoc = new Map()
       page.forEach((r) => { if (!byDoc.has(r.doc.id)) byDoc.set(r.doc.id, []); byDoc.get(r.doc.id).push(r) })
-      let i = 0, lastCat = null
-      const order = [...CATS.map((c) => c.id), CAT_OTHER], ord = (d) => { const k = order.indexOf(catId(d)); return k < 0 ? order.length : k }
-      const rc = {}; all.forEach((r) => { const k = catId(r.doc); rc[k] = (rc[k] || 0) + 1 })
-      const ents = [...byDoc].sort((a, b) => ord(a[1][0].doc) - ord(b[1][0].doc))
-      const multi = S.cat === "all"                                                                     // semua jenis → beri judul per jenis
+      let i = 0, lastKey = null
+      const showD = S.disc === "all" && MULTI_D, showC = S.cat === "all"                              // judul kelompok: disiplin (bila lebih dari satu) dan/atau jenis
+      const dorder = [...store.allDiscs().map((x) => x.id), DISC_OTHER], corder = [...CATS.map((c) => c.id), CAT_OTHER]
+      const ox = (arr, v) => { const k = arr.indexOf(v); return k < 0 ? arr.length : k }
+      const keyOf = (d) => `${showD ? discId(d) : ""}|${showC ? catId(d) : ""}`
+      const rc = {}; all.forEach((r) => { const k = keyOf(r.doc); rc[k] = (rc[k] || 0) + 1 })
+      const ents = [...byDoc].sort((a, b) => ox(dorder, discId(a[1][0].doc)) - ox(dorder, discId(b[1][0].doc)) || ox(corder, catId(a[1][0].doc)) - ox(corder, catId(b[1][0].doc)))
       for (const [id, arr] of ents) {
-        if (multi && catId(arr[0].doc) !== lastCat) { lastCat = catId(arr[0].doc); resBox.append(catHead(lastCat, `${rc[lastCat]} ${L("pasal", rc[lastCat] === 1 ? "clause" : "clauses")}`)) }
+        const k = keyOf(arr[0].doc)
+        if ((showD || showC) && k !== lastKey) { lastKey = k; resBox.append(groupHead(showD ? discId(arr[0].doc) : null, showC ? catId(arr[0].doc) : null, `${rc[k]} ${L("pasal", rc[k] === 1 ? "clause" : "clauses")}`)) }
         const g = el("section", "rt-dgrp")
         const gh = el("div", "rt-dgrp-h")
         gh.append(docLine(arr[0].doc, "rt-docl big"), el("small", null, `${counts[id]} ${L("pasal", counts[id] === 1 ? "clause" : "clauses")}`))
@@ -745,7 +853,7 @@ export function mountRts(box, ctx) {
     paramBox.append(head, prog, seg, el("p", "dz-note", docs.length
       ? L("Ketuk baris untuk melihat kandidat & pasal sumbernya, atau ketuk nilai saran untuk langsung menetapkannya. Nilai saran adalah kandidat — selalu baca pasalnya.", "Tap a row to see candidates & their source clause, or tap a suggested value to pin it right away. Suggestions are candidates — always read the clause.")
       : L("Impor dokumen RTS di tab Pustaka agar nilai dicari otomatis. Nilai juga bisa diisi manual.", "Import RTS documents in the Library tab for automatic suggestions. Values can also be typed in.")))
-    if (S.cat !== "all") paramBox.append(el("p", "rt-scopenote", L(`Kandidat dicari hanya di dokumen ${L(...catLab(S.cat))}. Pilih “Semua” pada Jenis dokumen untuk mencari di semua jenis.`, `Candidates are searched only in ${L(...catLab(S.cat))} documents. Choose “All” in Document type to search every type.`)))
+    if (scoped()) paramBox.append(el("p", "rt-scopenote", L(`Kandidat dicari hanya di dokumen ${scopeLabel()}. Pilih “Semua” pada Disiplin / Jenis untuk mencari di semuanya.`, `Candidates are searched only in ${scopeLabel()} documents. Choose “All” in Discipline / Type to search everything.`)))
     let any = false
     for (const [g, gl] of Object.entries(PARAM_GROUPS)) {
       const ps = PARAMS.filter((p) => p.grp === g)
@@ -876,13 +984,14 @@ export function mountRts(box, ctx) {
     const docs = DOCS || [], nSec = docs.reduce((a, d) => a + d.secs.length, 0)
     const nPin = PARAMS.filter((p) => S.pins[p.id]).length, nSug = docs.length ? PARAMS.filter((p) => !S.pins[p.id] && candsOf(p).length).length : 0
     const set = (k, v, s) => { const T = tiles[k]; if (T.v.dataset.v !== String(v)) { T.v.dataset.v = String(v); roll(T.v, v) } T.s.textContent = s }
-    const cc = catCounts()
-    const split = [...CATS.map((c) => [c.id, cc[c.id] || 0]), ...(cc[CAT_OTHER] ? [[CAT_OTHER, cc[CAT_OTHER]]] : [])].map(([id, n]) => `${n}\u00A0${L(...catLab(id))}`).join(" · ")
-    set("docs", docs.length, docs.length ? split : L("ketuk untuk impor", "tap to import"))
+    const dcc = discCounts(false), cc = catCounts(false)
+    const dsplit = [...store.allDiscs().map((d) => [d.lab, dcc[d.id] || 0]), [["Lainnya", "Other"], dcc[DISC_OTHER] || 0]].filter(([, n]) => n).map(([lab, n]) => `${n}\u00A0${L(...lab)}`).join(" · ")
+    const csplit = [...CATS.map((c) => [c.lab, cc[c.id] || 0]), [["Lainnya", "Other"], cc[CAT_OTHER] || 0]].filter(([, n]) => n).map(([lab, n]) => `${n}\u00A0${L(...lab)}`).join(" · ")
+    set("docs", docs.length, docs.length ? `${dsplit}\n${csplit}` : L("ketuk untuk impor", "tap to import"))
     tiles.docs.t.title = docs.length ? `${nSec} ${L("pasal terindeks", "clauses indexed")}` : ""
     set("pins", nPin, `${L("dari", "of")} ${PARAMS.length} ${L("parameter", "parameters")}`)
     ring.lastChild.setAttribute("stroke-dasharray", `${(nPin / PARAMS.length) * 100} 100`); ring.lastChild.style.opacity = nPin ? 1 : 0
-    set("sugg", nSug, docs.length ? `${L("parameter punya kandidat nilai", "parameters with candidate values")}${S.cat === "all" ? "" : " · " + L(...catLab(S.cat))}` : L("impor dokumen dulu", "import documents first"))
+    set("sugg", nSug, docs.length ? `${L("parameter punya kandidat nilai", "parameters with candidate values")}${scoped() ? " · " + scopeLabel() : ""}` : L("impor dokumen dulu", "import documents first"))
     const nb = cmpRows.filter((r) => r.ok === false).length
     const T = tiles.cmp
     T.t.classList.toggle("bad", nb > 0); T.t.classList.toggle("ok", cmpReady && cmpRows.length > 0 && !nb)
@@ -896,14 +1005,15 @@ export function mountRts(box, ctx) {
   function out() {
     const rowsP = PARAMS.map((p) => { const v = S.pins[p.id]; return [L(...PARAM_GROUPS[p.grp]), L(...p.lab), v ? v.txt : "–", v ? v.src : L("belum ditetapkan", "not pinned")] })
     const rowsC = cmpRows.map((r) => [L(...r.p.lab), r.s.where, typeof r.s.val === "number" ? `${nf(r.s.val, 2)} ${r.s.unit}` : String(r.s.val), `${r.p.cmp === "min" ? "≥ " : r.p.cmp === "max" ? "≤ " : ""}${typeof r.lim === "number" ? nf(r.lim, 2) + " " + (r.p.unit || "") : r.lim ?? ""}`, r.ok === true ? "OK" : r.ok === false ? "NOT OK" : L("periksa", "check")])
-    const docs = (DOCS || []).slice().sort((a, b) => CATS.findIndex((c) => c.id === catId(a)) - CATS.findIndex((c) => c.id === catId(b)) || fold(a.docNo).localeCompare(fold(b.docNo))).map((d) => [d.docNo, L(...catLab(catId(d))), d.rev || "", docTitle(d), d.fileName || "", d.pages, d.secs.length])
+    const dids = store.allDiscs().map((x) => x.id), dixOf = (d) => { const k = dids.indexOf(discId(d)); return k < 0 ? 99 : k }
+    const docs = (DOCS || []).slice().sort((a, b) => dixOf(a) - dixOf(b) || CATS.findIndex((c) => c.id === catId(a)) - CATS.findIndex((c) => c.id === catId(b)) || fold(a.docNo).localeCompare(fold(b.docNo))).map((d) => [d.docNo, L(...discLab(discId(d), store.allDiscs())), L(...catLab(catId(d))), d.rev || "", docTitle(d), d.fileName || "", d.pages, d.secs.length])
     return {
       file: "RTS_Parameter", suite: "RTS", title: L("Parameter Desain menurut Rokan Technical Standard", "Design Parameters per Rokan Technical Standard"), sub: `${Object.keys(S.pins).length} ${L("parameter ditetapkan", "parameters pinned")} · ${(DOCS || []).length} ${L("dokumen RTS", "RTS documents")}`, refs: "Rokan Technical Standard (RTS)",
       metrics: [{ lab: L("Parameter ditetapkan", "Pinned parameters"), val: Object.keys(S.pins).length }, { lab: L("Dicek", "Checked"), val: cmpRows.length }, { lab: L("Tidak sesuai", "Not meeting"), val: cmpRows.filter((r) => r.ok === false).length }],
       checks: [], kv: [],
       tables: [{ title: L("Parameter kunci & sumber RTS", "Key parameters & RTS source"), cols: [L("Kelompok", "Group"), L("Parameter", "Parameter"), L("Nilai RTS", "RTS value"), L("Sumber (dokumen · pasal · halaman)", "Source (document · clause · page)")], rows: rowsP, align: ["l", "l", "l", "l"] },
         ...(rowsC.length ? [{ title: L("Kepatuhan masukan Desain", "Design input compliance"), cols: [L("Parameter", "Parameter"), L("Lokasi", "Location"), L("Desain", "Design"), "RTS", L("Status", "Status")], rows: rowsC, align: ["l", "l", "r", "l", "l"] }] : []),
-        ...(docs.length ? [{ title: L("Dokumen RTS di perangkat", "RTS documents on device"), cols: [L("No. dokumen", "Document no."), L("Jenis", "Type"), "Rev.", L("Judul", "Title"), L("Berkas", "File"), L("Hal.", "Pages"), L("Pasal", "Clauses")], rows: docs, dec: [null, null, null, null, null, 0, 0], align: ["l", "l", "l", "l", "l", "r", "r"] }] : [])],
+        ...(docs.length ? [{ title: L("Dokumen RTS di perangkat", "RTS documents on device"), cols: [L("No. dokumen", "Document no."), L("Disiplin", "Discipline"), L("Jenis", "Type"), "Rev.", L("Judul", "Title"), L("Berkas", "File"), L("Hal.", "Pages"), L("Pasal", "Clauses")], rows: docs, dec: [null, null, null, null, null, null, 0, 0], align: ["l", "l", "l", "l", "l", "l", "r", "r"] }] : [])],
       notes: [L("Nilai RTS ditetapkan pengguna dari pasal yang dikutip; verifikasi terhadap revisi RTS yang berlaku dan Design Basis proyek.", "RTS values are pinned by the user from the quoted clauses; verify against the governing RTS revision and the project Design Basis.")],
       drawings: [], steps: [], combos: [], cases: {},
     }
