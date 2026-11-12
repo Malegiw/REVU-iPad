@@ -424,3 +424,33 @@ mark.rt-val[role=button]:hover, mark.rt-val[role=button]:focus-visible { backgro
 .rt-ren input { flex: 1 1 240px; min-width: 0; min-height: 42px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--field); color: var(--ink); font-size: 1rem; }
 .rt-ren input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media print { .rt-viewer { display: none !important; } }
+
+/* ---------------------------------------------------------------- jenis dokumen (Specification / Procedure / Lainnya) */
+.rt-scope { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: -2px 2px 14px; }
+.rt-scope[hidden] { display: none; }
+.rt-scope > small { color: var(--muted); font-size: .8rem; font-weight: 700; }
+.rt-scope .rt-seg { flex: 1 1 340px; max-width: 560px; }
+.rt-segb:disabled { opacity: .4; cursor: default; }
+.rt-dotc { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.rt-dotc.c-spec { background: var(--accent); } .rt-dotc.c-proc { background: var(--gold, #E3A857); } .rt-dotc.c-other { background: var(--muted); }
+/* penanda jenis: Specification = aksen, Procedure = emas, Lainnya = abu */
+.rt-cat { flex: none; display: inline-flex; align-items: center; font-size: .66rem; font-weight: 700; letter-spacing: .01em; padding: 2px 8px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; }
+.rt-cat.c-spec { color: var(--accent2); background: color-mix(in srgb, var(--accent) 13%, transparent); border-color: color-mix(in srgb, var(--accent) 32%, transparent); }
+:root[data-theme="dark"] .rt-cat.c-spec { color: var(--accent); }
+.rt-cat.c-proc { color: var(--warnink); background: color-mix(in srgb, var(--gold, #E3A857) 22%, transparent); border-color: color-mix(in srgb, var(--gold, #E3A857) 50%, transparent); }
+.rt-cat.c-other { color: var(--muted); background: var(--field); border-color: var(--line); }
+/* judul kelompok per jenis (Pustaka & hasil "Per dokumen") */
+.rt-cgrp-h { display: flex; align-items: center; gap: 10px; margin: 18px 2px 8px; min-width: 0; }
+.rt-cgrp-h:first-of-type { margin-top: 12px; }
+.rt-cgrp-t { flex: 1; min-width: 0; color: var(--muted); font-size: .84rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-cgrp-h > i { flex: none; font-style: normal; color: var(--muted); font-size: .78rem; font-variant-numeric: tabular-nums; }
+.rt-cgrp-h + .rt-docs { margin-top: 0; }
+.rt-scopenote { margin: 4px 2px 10px; padding: 8px 12px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 8%, var(--field)); color: var(--muted); font-size: .8rem; line-height: 1.4; }
+.rt-ren select { flex: 0 1 230px; min-width: 0; min-height: 42px; padding: 6px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--field); color: var(--ink); font-size: .95rem; }
+.rt-docl .rt-cat { align-self: center; }
+@media print { .rt-scope { display: none !important; } }
+.rt-dgrp-h .rt-cat { display: none; }
+@media (max-width: 560px) {
+  .rt-seg { flex-wrap: wrap; overflow: visible; border-radius: 18px; }
+  .rt-seg .rt-segb { flex: 1 1 auto; padding: 0 10px; }
+}

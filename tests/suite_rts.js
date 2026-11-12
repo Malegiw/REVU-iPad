@@ -61,6 +61,13 @@ export async function run({ check }) {
   eq("judul huruf besar di sampul", [R.detectDocMeta(cover("SAMPLE DESIGN CRITERIA"), "a.pdf").docNo, R.detectDocMeta(cover("SAMPLE DESIGN CRITERIA"), "a.pdf").rev, R.detectDocMeta(cover("SAMPLE DESIGN CRITERIA"), "a.pdf").title], ["ABC-CIV-PRC-900001", "xx", "SAMPLE DESIGN CRITERIA"])
   eq("baris 'Title: …' diutamakan", R.detectDocMeta(cover("", ["Title: Sample Steel Fabrication"]), "a.pdf").title, "Sample Steel Fabrication")
   eq("tanpa judul di sampul → sisa nama berkas setelah nomor dokumen", R.detectDocMeta(cover(""), "ABC-CIV-PRC-900001 Sample Earthwork Spec.pdf").title, "Sample Earthwork Spec")
+  // jenis dokumen (Specification / Procedure): dari kode pada nomor dokumen, lalu judul, lalu nama berkas
+  eq("jenis dari kode nomor dokumen: PRC = Procedure, SP = Specification", [R.detectCategory("ABC-CIV-PRC-900001", "", ""), R.detectCategory("ABC-SP-CI-GG-002", "", "")], ["proc", "spec"])
+  eq("nomor dokumen tanpa kode → jenis dari judul, lalu nama berkas", [R.detectCategory("RTS-901", "Concrete Works Specification", ""), R.detectCategory("RTS-901", "Prosedur Pekerjaan Beton", ""), R.detectCategory("RTS-901", "Beton", "Spec_Earthwork.pdf")], ["spec", "proc", "spec"])
+  eq("kode pada nomor dokumen menang atas kata di judul", R.detectCategory("ABC-CIV-PRC-1", "Foundation Specification", ""), "proc")
+  eq("tanpa petunjuk → other; 'SPARE' bukan kode SP", [R.detectCategory("RTS-901", "Concrete", "x.pdf"), R.detectCategory("ABC-SPARE-1", "", "")], ["other", "other"])
+  eq("detectDocMeta menyertakan jenis (PRC pada sampul fiktif)", R.detectDocMeta(cover("SAMPLE DESIGN CRITERIA"), "a.pdf").cat, "proc")
+  eq("label jenis", [R.catLab("spec")[0], R.catLab("proc")[0], R.catLab("other")[0]], ["Specification", "Procedure", "Lainnya"])
   const secs = R.splitSections(pages)
   eq("pasal terbaca berurutan", secs.map((s) => s.no), ["1", "2.1", "3.1", "3.2", "4"])
   truthy("kepala/kaki halaman berulang dibuang", !secs.some((s) => /Page \d|SAMPLE CONCRETE|RTS-CIV-901/.test(s.text)))
@@ -129,6 +136,8 @@ export async function run({ check }) {
   // ---- paket JSON
   const pk = parsePack(makePack([{ id: "a", ...meta, secs, fileName: "x.pdf", pages: 3 }]))
   truthy("paket JSON ekspor → impor utuh", pk.length === 1 && pk[0].docNo === "RTS-CIV-901" && pk[0].secs.length === secs.length && pk[0].secs[1].text === secs[1].text)
+  const pk2 = parsePack(makePack([{ id: "b", docNo: "ABC-SP-CI-GG-002", title: "T", secs, fileName: "y.pdf", pages: 1, cat: "proc", catManual: true, titleManual: true }, { id: "c", docNo: "ABC-CIV-PRC-9", title: "U", secs, fileName: "z.pdf", pages: 1 }]))
+  eq("paket JSON menyimpan jenis & penanda manual; tanpa jenis → dikenali dari nomor dokumen", [pk2[0].cat, pk2[0].catManual, pk2[0].titleManual, pk2[1].cat, pk2[1].catManual], ["proc", true, true, "proc", undefined])
   let bad = ""
   try { parsePack('{"x":1}') } catch (e) { bad = e.message }
   truthy("paket tidak sah ditolak", /paket RTS/.test(bad))
