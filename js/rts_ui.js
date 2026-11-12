@@ -78,7 +78,7 @@ export function mountRts(box, ctx) {
         row.append(sm)
         const acts = el("div", "rt-acts")
         const bOpen = el("button", "rt-btn", L("Buka berkas asli", "Open original")); bOpen.type = "button"
-        bOpen.onclick = async () => { const f = await store.getFile(d.id).catch(() => null); if (!f) { bOpen.textContent = L("Berkas asli tidak disimpan", "Original not stored"); return } window.open(URL.createObjectURL(f.blob), "_blank") }
+        bOpen.onclick = () => openOriginal(d, 1, bOpen)
         const bFind = el("button", "rt-btn", L("Cari di dokumen ini", "Search this document")); bFind.type = "button"
         bFind.onclick = () => { S.doc = d.id; saveSt(S); drawSearch(); searchBox.scrollIntoView({ behavior: "smooth" }) }
         const bDel = el("button", "rt-btn danger", L("Hapus", "Delete")); bDel.type = "button"
@@ -100,6 +100,68 @@ export function mountRts(box, ctx) {
       body.push(tools)
     }
     libBox.append(card("rt-lib", "book", L("Pustaka dokumen RTS", "RTS document library"), docs.length ? `${docs.length} ${L("dokumen", "documents")} · ${nSec} ${L("pasal", "clauses")}` : L("kosong", "empty"), body, !docs.length))
+  }
+
+  // ---------------------------------------------------------------- berkas asli
+  // Dibaca dari IndexedDB lalu PDF ditampilkan di dalam app (pdf.js). Jangan pakai window.open setelah await: Safari/iPad menganggapnya popup
+  // dan memblokirnya (juga sering gagal untuk URL blob: pada app layar utama). DOCX/XLSX tidak bisa ditampilkan peramban → diunduh/dibagikan.
+  const killPdf = () => document.querySelectorAll(".rt-pdf").forEach((n) => { if (n._close) n._close(); else n.remove() })
+  addEventListener("hashchange", killPdf, { once: true })
+  async function openOriginal(doc, page, btn) {
+    const lab0 = btn.textContent
+    const fail = (tx) => { btn.textContent = tx; setTimeout(() => { btn.textContent = lab0 }, 4000) }
+    btn.disabled = true
+    try {
+      const f = await store.getFile(doc.id).catch(() => null)
+      if (!f || !f.blob) return fail(L("Berkas asli tidak tersimpan — impor ulang berkasnya", "Original not stored — import the file again"))
+      if (doc.type !== "pdf") {
+        const a = el("a"); a.href = URL.createObjectURL(f.blob); a.download = f.name || doc.fileName || doc.docNo; document.body.append(a); a.click()
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove() }, 4000)
+        return
+      }
+      await showPdf(doc, f.blob, page)
+    } catch (e) { fail(`${L("Gagal membuka", "Could not open")}: ${e.message || e}`) }
+    finally { btn.disabled = false }
+  }
+  async function showPdf(doc, blob, page0) {
+    killPdf()
+    const pdf = await store.openPdf(blob)
+    const url = URL.createObjectURL(blob)
+    const wrap = el("div", "rt-pdf"), bar = el("div", "rt-pdf-bar"), body = el("div", "rt-pdf-body"), cv = el("canvas"), msg = el("p", "rt-pdf-msg")
+    const mk = (tx, fn, lab) => { const b = el("button", "rt-btn", tx); b.type = "button"; if (lab) b.setAttribute("aria-label", lab); b.onclick = fn; return b }
+    let n = Math.min(Math.max(1, Math.round(page0) || 1), pdf.numPages), zoom = 1, token = 0, task = null
+    const ttl = el("b", null, `${doc.docNo}${doc.rev ? " · Rev." + doc.rev : ""}`), lbl = el("span", "rt-pdf-pg")
+    const go = (k) => { const m = Math.min(Math.max(1, k), pdf.numPages); if (m !== n) { n = m; draw(); body.scrollTop = 0 } }
+    const bPrev = mk("‹", () => go(n - 1), L("Halaman sebelumnya", "Previous page")), bNext = mk("›", () => go(n + 1), L("Halaman berikutnya", "Next page"))
+    const bOut = mk("−", () => { zoom = Math.max(0.5, zoom - 0.25); draw() }, L("Perkecil", "Zoom out")), bIn = mk("+", () => { zoom = Math.min(4, zoom + 0.25); draw() }, L("Perbesar", "Zoom in"))
+    const bNew = mk(L("Tab baru", "New tab"), () => { if (!window.open(url, "_blank")) { msg.textContent = L("Peramban memblokir tab baru — pakai Unduh.", "The browser blocked the new tab — use Download."); msg.hidden = false } })
+    const bDl = mk(L("Unduh", "Download"), () => { const a = el("a"); a.href = url; a.download = doc.fileName || `${doc.docNo}.pdf`; document.body.append(a); a.click(); a.remove() })
+    const close = () => { token++; if (task) task.cancel(); pdf.destroy().catch(() => {}); URL.revokeObjectURL(url); document.removeEventListener("keydown", key); document.documentElement.classList.remove("rt-lock2"); wrap.remove() }
+    const key = (e) => { if (e.key === "Escape") close(); else if (e.key === "ArrowRight" || e.key === "PageDown") go(n + 1); else if (e.key === "ArrowLeft" || e.key === "PageUp") go(n - 1) }
+    const x = el("button", "rt-x", "✕"); x.type = "button"; x.setAttribute("aria-label", L("Tutup", "Close")); x.onclick = close
+    wrap._close = close
+    bar.append(ttl, bPrev, lbl, bNext, bOut, bIn, bNew, bDl, x)
+    body.append(cv); wrap.append(bar, msg, body); msg.hidden = true
+    document.body.append(wrap); document.addEventListener("keydown", key); document.documentElement.classList.add("rt-lock2")
+    async function draw() {
+      const my = ++token
+      lbl.textContent = `${L("hal.", "p.")} ${n} / ${pdf.numPages}`
+      bPrev.disabled = n <= 1; bNext.disabled = n >= pdf.numPages
+      try {
+        if (task) { task.cancel(); await task.promise.catch(() => {}) }
+        const pg = await pdf.getPage(n)
+        if (my !== token) return
+        const v1 = pg.getViewport({ scale: 1 }), fit = Math.max(200, body.clientWidth - 16) / v1.width, css = fit * zoom
+        // batas kanvas iOS ≈ 16,7 juta piksel → turunkan resolusi bila perlu
+        let os = Math.min(window.devicePixelRatio || 1, 2); const px = v1.width * css * v1.height * css; if (px * os * os > 1.4e7) os = Math.max(1, Math.sqrt(1.4e7 / px))
+        const vp = pg.getViewport({ scale: css * os })
+        cv.width = Math.floor(vp.width); cv.height = Math.floor(vp.height); cv.style.width = `${Math.floor(vp.width / os)}px`; cv.style.height = `${Math.floor(vp.height / os)}px`
+        task = pg.render({ canvasContext: cv.getContext("2d"), viewport: vp })
+        await task.promise
+        msg.hidden = true
+      } catch (e) { if (my === token && !(e && e.name === "RenderingCancelledException")) { msg.textContent = `${L("Gagal menampilkan halaman", "Could not render the page")}: ${e.message || e}`; msg.hidden = false } }
+    }
+    draw()
   }
 
   // ---------------------------------------------------------------- tampilan teks bersorot
@@ -144,7 +206,7 @@ export function mountRts(box, ctx) {
     const bc = el("button", "rt-btn", L("Salin kutipan + referensi", "Copy quote + reference")); bc.type = "button"
     bc.onclick = async () => { try { await navigator.clipboard.writeText(`${full.trim()}\n\n— ${refOf(doc, sec)}`); bc.textContent = L("✓ Tersalin", "✓ Copied") } catch (e) { bc.textContent = L("Gagal menyalin", "Copy failed") } }
     const bo = el("button", "rt-btn", L("Buka PDF asli", "Open original PDF")); bo.type = "button"
-    bo.onclick = async () => { const f = await store.getFile(doc.id).catch(() => null); if (!f) { bo.textContent = L("Berkas asli tidak disimpan", "Original not stored"); return } window.open(URL.createObjectURL(f.blob) + (doc.type === "pdf" ? `#page=${sec.page}` : ""), "_blank") }
+    bo.onclick = () => openOriginal(doc, sec.page, bo)
     acts.append(bc, bo)
     pan.append(head, el("p", "dz-note", L("Ketuk nilai bergaris (mis. 28 MPa) untuk menetapkannya sebagai nilai RTS sebuah parameter.", "Tap an underlined value (e.g. 28 MPa) to pin it as an RTS value for a parameter.")), bodyTx, acts)
     sheet.append(pan)

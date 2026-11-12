@@ -52,6 +52,11 @@ async function loadPdfjs() {
   pdfjs.GlobalWorkerOptions.workerSrc = new URL("./vendor/pdf.worker.min.mjs", import.meta.url).href
   return pdfjs
 }
+// buka PDF asli (Blob dari IndexedDB) untuk ditampilkan di dalam app; pemanggil wajib memanggil .destroy() setelah selesai
+export async function openPdf(blob) {
+  const lib = await loadPdfjs()
+  return lib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()), isEvalSupported: false, useSystemFonts: true }).promise
+}
 async function pdfPages(buf, onProg) {
   const lib = await loadPdfjs()
   const doc = await lib.getDocument({ data: new Uint8Array(buf), isEvalSupported: false, useSystemFonts: true }).promise

@@ -100,6 +100,18 @@ mark.rt-val[role=button]:hover { background: color-mix(in srgb, var(--accent) 30
 .rt-pick { display: grid; gap: 6px; overflow: auto; }
 .rt-pick-b { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 52px; padding: 8px 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--field); color: var(--ink); text-align: left; cursor: pointer; }
 .rt-pick-b:hover { border-color: var(--accent); } .rt-pick-b small { color: var(--muted); font-size: .74rem; }
+/* pembaca PDF asli di dalam app (pdf.js) */
+.rt-lock2, .rt-lock2 body { overflow: hidden; }
+.rt-pdf { position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column; background: #1d2229; color: var(--ink); animation: rt-fade .2s ease; }
+.rt-pdf-bar { flex: none; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: calc(8px + env(safe-area-inset-top)) 10px 8px; background: var(--cardsolid); border-bottom: 1px solid var(--line); }
+.rt-pdf-bar > b { flex: 1 1 140px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-pdf-bar .rt-btn { min-width: 44px; min-height: 44px; padding: 0 12px; font-size: 1rem; }
+.rt-pdf-bar .rt-btn:disabled { opacity: .4; cursor: default; transform: none; }
+.rt-pdf-pg { font-size: .82rem; color: var(--muted); white-space: nowrap; min-width: 84px; text-align: center; }
+.rt-pdf-body { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 8px 8px calc(16px + env(safe-area-inset-bottom)); text-align: center; }
+.rt-pdf-body canvas { display: inline-block; background: #fff; box-shadow: 0 4px 22px rgba(0,0,0,.5); max-width: none; }
+.rt-pdf-msg { margin: 0; padding: 8px 14px; background: var(--dz-bad, #b3261e); color: #fff; font-size: .85rem; }
+.rt-pdf-msg[hidden] { display: none; }
 @keyframes rt-fade { from { opacity: 0; } }
 @keyframes rt-up { from { transform: translateY(40px); opacity: 0; } }
-@media print { .rt-sheet, .rt-drop, .rt-q, .rt-chips { display: none !important; } }
+@media print { .rt-pdf, .rt-sheet, .rt-drop, .rt-q, .rt-chips { display: none !important; } }
