@@ -5,6 +5,7 @@ import * as S from "../js/desain/soil.js"
 import * as pl from "../js/desain/pile.js"
 import * as ft from "../js/desain/footing.js"
 import { pileLayout } from "../js/desain/deep.js"
+import { TV90 } from "../js/penurunan.js"
 import { analyze, overburden } from "../js/penurunan.js"
 import { sdc, spectrum } from "../js/project.js"
 import { seismicParams } from "../js/desain/core.js"
@@ -109,4 +110,69 @@ export async function run({ check }) {
   const spc = spectrum(spx, 8, 4, 400)
   near("spektrum: Sa(0) = 0,4·SDS", spc[0][1], 0.4 * spx.SDS, 1e-12)
   near("spektrum: Sa(1 s) = SD1", spc[100][1], spx.SD1, 1e-12)
+
+  // ---- data per interval (mis. 0,5 m s.d. 30 m): banyak baris, sel kosong, alat bantu input
+  const base5 = S.defaultSoil(), fine = S.resampleSoil(base5, 0.5, 35)
+  truthy("bagi per interval 0,5 m s.d. 35 m → 70 baris setebal 0,5 m", fine.layers.length === 70 && fine.layers.every((l) => Math.abs(l.h - 0.5) < 1e-9))
+  truthy("gabung baris yang sama → kembali 5 lapis bawaan", S.mergeRows(fine).layers.length === 5 && S.mergeRows(fine).layers.map((l) => l.h).join() === "3,6,8,8,10")
+  truthy("batas baris: lebih dari MAX_ROWS ditolak", (() => { try { S.resampleSoil(base5, 0.1, 30); return false } catch (e) { return true } })())
+  const dA = S.deriveSoil(base5), dB = S.deriveSoil(fine)
+  near("kelas situs sama untuk 5 lapis vs 70 baris", S.siteClass(dB).Nbar, S.siteClass(dA).Nbar, 1e-9)
+  for (const m of ["spt", "cpt", "vesic"]) near(`qa ${m} sama untuk 5 lapis vs 70 baris`, S.shallowQa(dB, 2.5, 2.5, 1.5, m, 3).qa, S.shallowQa(dA, 2.5, 2.5, 1.5, m, 3).qa, 1e-9)
+  const sA = S.settleShallow(dA, { shape: "persegi", B: 3, L: 3, Df: 1.5, q: 200 }, { life: 20 }).res, sB = S.settleShallow(dB, { shape: "persegi", B: 3, L: 3, Df: 1.5, q: 200 }, { life: 20 }).res
+  near("konsolidasi: baris lempung tipis bersambung = satu strata (s 20 th sama)", sB.s_life, sA.s_life, 0.01)
+  near("konsolidasi: t90 tidak dipercepat oleh baris tipis", sB.t90, sA.t90, 0.03)
+  truthy("konsolidasi: Hdr tiap baris = ½ tebal strata lempungnya (1,5 m → 0,75; 8 m → 4)", Math.abs(sB.cons[0].Hdr - 0.75) < 1e-9 && Math.abs(sB.cons[3].Hdr - 4) < 1e-9 && sB.cons[0].grp !== sB.cons[3].grp)
+  const gA = S.settleGroup(dA, { D: 0.4064, Lp: 18, Ap: 0.0157, Ep: 2e8, n: 4, Bg: 2.2, Lg: 2.2, Q: 1600, Qb: 300, Qu: 2000, qb: 5000, z0: 1.5, driven: true })
+  const gB = S.settleGroup(dB, { D: 0.4064, Lp: 18, Ap: 0.0157, Ep: 2e8, n: 4, Bg: 2.2, Lg: 2.2, Q: 1600, Qb: 300, Qu: 2000, qb: 5000, z0: 1.5, driven: true })
+  near("penurunan kelompok tiang sama untuk 5 lapis vs 70 baris", gB.total, gA.total, 0.01)
+  // interpolasi N kosong & γ
+  const holes = fine.layers.map((l, i) => (i % 4 === 0 ? { ...l, N: 8 + i, qc: null } : { ...l, N: null, qc: null }))
+  const dH = S.deriveSoil({ ...fine, layers: holes })
+  truthy("N kosong diinterpolasi linier: 8 → 9 → 10 → 11 → 12 (z 0,25…2,25 m)", [0, 1, 2, 3, 4].every((i) => Math.abs(dH.layers[i].N60 - (8 + i)) < 1e-9) && dH.layers[1].est.N && !dH.layers[0].est.N)
+  truthy("interpolasi diutamakan di lapis sejenis (tidak melintas batas lempung–pasir)", Math.abs(dH.layers[5].N60 - 12) < 1e-9 && Math.abs(dH.layers[6].N60 - 16) < 1e-9)
+  truthy("N = 0 tetap data (WOH), bukan kosong", S.deriveSoil({ ...base5, layers: [{ ...base5.layers[0], N: 0, qc: null }, base5.layers[1]] }).layers[0].N60 === 0)
+  const dG = S.deriveSoil({ ...base5, layers: [{ ...base5.layers[0], g: null, gsat: null }, { ...base5.layers[0], g: null, gsat: null, h: 1 }, { ...base5.layers[1], g: null, gsat: null }] })
+  truthy("γ kosong: baris pertama nilai tipikal, sejenis ikut atas, jenis lain nilai tipikal", dG.layers[0].g === 17 && dG.layers[1].gsat === 18 && dG.layers[2].g === 18 && dG.layers[2].gsat === 20 && dG.layers[0].est.g)
+  // tempel dari Excel
+  const p1 = S.parseSoilPaste("Kedalaman (m)\tJenis\tN-SPT\n0,5\tLempung\t4\n1,0\tLempung\t\n1,5\tPasir lanauan\t14\n", { test: "spt", base: base5 })
+  truthy("tempel: kolom dari judul, koma desimal, sel kosong → null, 'pasir lanauan' → pasir", p1.mapped && p1.n === 3 && p1.layers[1].N === null && p1.layers[0].N === 4 && p1.layers[2].type === "sand" && Math.abs(p1.layers[2].h - 0.5) < 1e-12)
+  const p2 = S.parseSoilPaste("2 12\n4 18 pasir\n6 25\n", { test: "spt", base: base5 })
+  truthy("tempel tanpa judul: kedalaman N [jenis]; jenis kosong dari profil saat ini", !p2.mapped && p2.layers.map((l) => `${l.h}/${l.type}/${l.N}`).join() === "2/clay/12,2/sand/18,2/sand/25")
+  const p3 = S.parseSoilPaste("z;qc;fs\n0,2;100;1\n0,4;50;0,5\n", { test: "cpt", base: base5, qcUnit: "kgcm2", fsUnit: "kgcm2" })
+  near("tempel sondir: qc kg/cm² → MPa (×0,0980665)", p3.layers[0].qc, 9.80665, 1e-12); near("tempel sondir: fs kg/cm² → kPa (×98,0665)", p3.layers[1].fs, 49.03325, 1e-12)
+  const p4 = S.parseSoilPaste("0.0–3.0\tLempung\t17\t17.8\t10\t0.95\t35\n3.0–9.0\tPasir\t18\t19.5\t18\t–\t70\n", { test: "spt", base: base5 })
+  truthy("tempel tabel ekspor app (rentang z, jenis, γ, γsat, N, qc, fs)", p4.layers.map((l) => `${l.h}/${l.type}/${l.g}/${l.N}/${l.qc}`).join() === "3/clay/17/10/0.95,6/sand/18/18/null")
+  truthy("jenis dari teks: pasir lanauan → pasir, silty sand → pasir, lanau kepasiran → lanau, sandy clay → lempung", ["pasir lanauan", "Silty sand", "lanau kepasiran", "Sandy CLAY", "kerikil"].map(S.typeFromText).join() === "sand,sand,silt,clay,gravel")
+  // kelas situs: N lapangan tanpa koreksi energi, maks. 100
+  truthy("kelas situs memakai N lapangan (Er tidak mengubah N̄)", Math.abs(S.siteClass(soil([ly(30, "sand", 30)], { Er: 90 })).Nbar - 30) < 1e-9)
+  near("kelas situs: N tiap lapis dibatasi 100", S.siteClass(soil([ly(15, "sand", 150), ly(15, "sand", 50)])).Nbar, 30 / (15 / 100 + 15 / 50), 1e-12)
+  // ujung tiang N-SPT (Meyerhof): N̄ 10D di atas s.d. 4D di bawah, Lb = penetrasi ke lapis pasir
+  const lay2 = soil([ly(12, "clay", 8), ly(18, "sand", 30)])
+  const sp2 = S.pileAxial(lay2, { D: 0.5, t: 0.0127, Lp: 14, open: false, method: "spt", kind: "pipe", z0: 0 })
+  near("Meyerhof: Lb = ujung − puncak lapis pasir (14 − 12 = 2 m)", sp2.tip.Lb, 2, 1e-12)
+  near("Meyerhof: N̄ ujung rata-rata 10D di atas s.d. 4D di bawah", sp2.tip.Nb, (3 * 8 + 4 * 30) / 7, 1e-9)
+  near("Meyerhof: q = min(40·N̄·Lb/D, 400·N̄)", sp2.q, Math.min(40 * sp2.tip.Nb * 2 / 0.5, 400 * sp2.tip.Nb), 1e-12)
+  // LCPC: qca ±1,5D dibatasi 0,7–1,3 qca'
+  const cpL = S.deriveSoil({ name: "C", test: "cpt", gwt: 99, Er: 60, Nkt: 15, Gs: 2.7, layers: [{ ...ly(9.75, "sand", 0), qc: 10 }, { ...ly(0.5, "sand", 0), qc: 40 }, { ...ly(20, "sand", 0), qc: 10 }] })
+  const cL = S.pileAxial(cpL, { D: 0.5, t: 0.0127, Lp: 10, open: false, method: "cpt", kind: "pipe", z0: 0 })
+  near("LCPC: qca' = rata-rata qc pada ±1,5D (⅓ zona berisi lonjakan 40 MPa)", cL.tip.qca1, 10 + 30 * 0.5 / 1.5, 0.02)
+  truthy("LCPC: qc dipangkas 0,7–1,3·qca' (lonjakan turun, nilai rendah naik) → qca < qca'", cL.tip.qca < cL.tip.qca1 && Math.abs(cL.tip.qca - (2 * 0.7 * cL.tip.qca1 + 1.3 * cL.tip.qca1) / 3) < 0.4)
+  // Ic CPT (Robertson): pasir bersih vs lempung
+  const icS = S.cptIc(15, 75, 100, 60), icC = S.cptIc(0.8, 40, 100, 60)
+  near("Ic = √((3,47 − log Qt)² + (log Fr + 1,22)²)", icS.Ic, Math.sqrt((3.47 - Math.log10((15000 - 100) / 60)) ** 2 + (Math.log10(75 / (15000 - 100) * 100) + 1.22) ** 2), 1e-12)
+  truthy("Ic: qc 15 MPa, fs 75 kPa → pasir; qc 0,8 MPa, fs 40 kPa → lempung", icS.type === "sand" && icC.type === "clay")
+  const cls = S.classifyCpt({ ...base5, test: "cpt", layers: [{ ...base5.layers[0], type: "sand", qc: 0.4, fs: 30 }, { ...base5.layers[1], type: "clay", qc: 15, fs: 75 }] })
+  truthy("jenis dari Ic mengganti jenis baris", cls.n === 2 && cls.soil.layers[0].type === "clay" && cls.soil.layers[1].type === "sand")
+  // Vesic dq untuk Df/B > 1 memakai arctan
+  const vs = S.shallowQa(soil([ly(30, "sand", 25)]), 1, 1, 2, "vesic", 3), phiV = vs.rows.find((r) => String(r[0]).startsWith("φ"))
+  truthy("Vesic dq (Df/B = 2) = 1 + 2tanφ(1 − sinφ)²·arctan(2)", String(vs.rows.find((r) => String(r[0]).startsWith("qult"))[2]).includes(`dq ${(1 + 2 * Math.tan(parseFloat(phiV[3]) * Math.PI / 180) * (1 - Math.sin(parseFloat(phiV[3]) * Math.PI / 180)) ** 2 * Math.atan(2)).toFixed(2)}`))
+  // lateral: tanah atas = jenis dominan 5D, bukan baris pertama
+  const tz = pl.topZone([{ h: 0.5, type: "sand", phi: 30, cu: 0 }, { h: 3, type: "clay", cu: 40, phi: 0 }], 0.4)
+  truthy("lateral: zona atas 5D (2 m) didominasi lempung meski baris pertama pasir", tz.type === "clay" && Math.abs(tz.cu - 40) < 1e-12)
+  // pencarian cepat = penjumlahan langsung
+  const lays = S.pileLayers(dB, 1.5), P0 = pl.profile(lays, 3), naive = (zz) => { let s2 = 0, z = 0; for (let i = 0; i < lays.length && z < zz; i++) { const a = z, b = Math.min(zz, i === lays.length - 1 ? zz : z + lays[i].h), g = lays[i].g, dry = Math.max(0, Math.min(b, 3) - a), wet = Math.max(0, b - Math.max(a, 3)); s2 += g * dry + (g - 9.81) * wet; z += lays[i].h } return s2 }
+  truthy("profil tiang: σ'v pencarian biner = penjumlahan langsung (60 kedalaman)", Array.from({ length: 60 }, (_, i) => i * 0.613).every((zz) => Math.abs(P0.sv(zz) - naive(zz)) < 1e-9))
+  truthy("stressAt cepat = lambat (100 kedalaman, termasuk di bawah dasar bor)", Array.from({ length: 100 }, (_, i) => i * 0.47).every((zz) => { const [a, b] = S.stressAt(dB, zz), ds0 = { ...dB, layers: dB.layers.map(({ st0, ...l }) => l) }, [c, d] = S.stressAt(ds0, zz); return Math.abs(a - c) < 1e-9 && Math.abs(b - d) < 1e-9 }))
+  near("TV90 = 0,848", TV90, 0.848, 2e-3)
 }

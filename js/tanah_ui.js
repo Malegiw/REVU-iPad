@@ -6,7 +6,7 @@ import { el, sv, field, exportBar, reveal, tableView, isConv } from "./desain/ui
 import { palette, root, T, R as Rect } from "./desain/draw.js"
 import { lineChart } from "./desain/chart.js"
 import { projLoad, projSave, soilDS, seisSite, stepper } from "./project.js"
-import { TYPES, typeName, siteClass, shallowQa, pileAxial, QA_METHOD, AXIAL_METHOD, OVR } from "./desain/soil.js"
+import { TYPES, typeName, siteClass, shallowQa, pileAxial, QA_METHOD, AXIAL_METHOD, OVR, MAX_ROWS, resampleSoil, mergeRows, classifyCpt, parseSoilPaste } from "./desain/soil.js"
 import { singlePile, effPile } from "./desain/deep.js"
 import { initUnits, hero, card, footer, nextBtn } from "./pj_ui.js"
 
@@ -36,7 +36,7 @@ export function mountTanah(box, ctx) {
       field({ k: "Nkt", lab: L("Faktor konus Nkt (cu = (qc − σv)/Nkt)", "Cone factor Nkt (cu = (qc − σv)/Nkt)"), u: "", lo: 8, hi: 30, obj: so }, so, changed),
       field({ k: "Gs", lab: L("Berat jenis butir Gs (untuk e0)", "Specific gravity Gs (for e0)"), u: "", lo: 2.4, hi: 2.9, obj: so }, so, changed))
     inBox.append(card("t-inv", "🔎", L("Penyelidikan tanah", "Site investigation"), so.test === "cpt" ? "CPT" : "N-SPT", g))
-    inBox.append(card("t-lay", "🧱", L("Lapisan tanah (dari muka tanah ke bawah)", "Soil layers (from grade down)"), `${so.layers.length} ${L("lapis", "layers")}`, layersTable(P, changed)))
+    inBox.append(card("t-lay", "🧱", L("Lapisan tanah / data per kedalaman (dari muka tanah ke bawah)", "Soil layers / data by depth (from grade down)"), `${so.layers.length} ${L("baris", "rows")} · ${nf(so.layers.reduce((a, l) => a + (+l.h || 0), 0), 1)} m`, layersTable(P, changed)))
   }
   function drawResults() {
     const ds = soilDS(P), sc = siteClass(ds), out = buildOut(P, ds, sc)
@@ -92,51 +92,122 @@ function stepsTable(st) {
   const w = tableView(t); w.classList.add("dz-steptbl"); return w
 }
 
-// ---------------------------------------------------------------- editor lapisan
+// ---------------------------------------------------------------- editor lapisan / baris per interval
+const hasV = (v) => v != null && v !== "" && isFinite(v)
+let tool = "", undo = null
+const intSt = { dz: 0.5, zmax: 30, blank: false }, pasteSt = { qcUnit: "mpa", fsUnit: "kpa", text: "" }
 function layersTable(P, changed) {
   const box = el("div")
   const draw = () => {
     box.textContent = ""
-    const so = P.soil, cpt = so.test === "cpt"
-    const tw = el("div", "dz-tbl-wrap"), tb = el("table", "dz-edit pj-edit")
-    const cols = [L("Kedalaman", "Depth"), L("Tebal (m)", "Thick. (m)"), L("Jenis", "Type"), `γ (${uName("G")})`, `γsat (${uName("G")})`, cpt ? "qc (MPa)" : "N-SPT", cpt ? "fs (kPa)" : L("qc (MPa, opsional)", "qc (MPa, optional)")]
+    const so = P.soil, cpt = so.test === "cpt", n = so.layers.length
+    const depth = so.layers.reduce((s2, l) => s2 + (+l.h || 0), 0)
+    // ---- bilah alat
+    const bar = el("div", "pj-row pj-soilbar")
+    const btn = (txt, cls, on, dis) => { const x = el("button", cls || "dz-add ghost", txt); x.type = "button"; x.disabled = !!dis; x.onclick = on; return x }
+    const apply = (soil, msg) => { undo = { layers: so.layers.map((l) => ({ ...l })), msg }; so.layers = soil.layers; tool = ""; changed(true) }
+    bar.append(btn(L("＋ Tambah baris", "＋ Add row"), "dz-add", () => { const last = so.layers[so.layers.length - 1]; so.layers.push({ ...last }); changed(true) }, n >= MAX_ROWS),
+      btn(L("⇅ Bagi per interval…", "⇅ Split by interval…"), "dz-add ghost" + (tool === "int" ? " on" : ""), () => { tool = tool === "int" ? "" : "int"; draw() }),
+      btn(L("📋 Tempel dari Excel…", "📋 Paste from Excel…"), "dz-add ghost" + (tool === "paste" ? " on" : ""), () => { tool = tool === "paste" ? "" : "paste"; draw() }),
+      btn(L("⊟ Gabung baris yang sama", "⊟ Merge identical rows"), "dz-add ghost", () => { const m = mergeRows(so); if (m.layers.length < n) apply(m, L(`${n} → ${m.layers.length} baris`, `${n} → ${m.layers.length} rows`)) }, n < 2),
+      ...(cpt ? [btn(L("◎ Jenis dari CPT (Ic)", "◎ Type from CPT (Ic)"), "dz-add ghost", () => { const r = classifyCpt(so); if (r.n) apply(r.soil, L(`jenis ${r.n} baris diubah dari Ic`, `${r.n} row types set from Ic`)); else { info.textContent = L("Tidak ada jenis yang berubah (perlu qc dan fs).", "No type changed (needs qc and fs).") } })] : []),
+      btn(showAdv ? L("Sembunyikan parameter lanjutan", "Hide advanced parameters") : L("Parameter lanjutan ▸", "Advanced parameters ▸"), "dz-add ghost", () => { showAdv = !showAdv; draw() }))
+    if (undo) bar.append(btn(L(`↶ Urungkan (${undo.msg})`, `↶ Undo (${undo.msg})`), "dz-add ghost warn", () => { so.layers = undo.layers; undo = null; changed(true) }))
+    const info = el("span", "hint pj-soilinfo", L(`${n} baris · kedalaman ${nf(depth, 2)} m · maks. ${MAX_ROWS} baris`, `${n} rows · depth ${nf(depth, 2)} m · max. ${MAX_ROWS} rows`))
+    bar.append(info)
+    box.append(bar)
+    if (tool === "int") box.append(intervalPanel(so, apply))
+    if (tool === "paste") box.append(pastePanel(so, apply))
+    // ---- tabel
+    const tw = el("div", "dz-tbl-wrap pj-soilwrap"), tb = el("table", "dz-edit pj-edit")
+    const cols = ["#", L("Kedalaman (m)", "Depth (m)"), L("Tebal (m)", "Thick. (m)"), L("Jenis", "Type"), `γ (${uName("G")})`, `γsat (${uName("G")})`, cpt ? "qc (MPa)" : "N-SPT", cpt ? "fs (kPa)" : L("qc (MPa, opsional)", "qc (MPa, optional)")]
     const adv = [["cu", `cu (${uName("Q")})`, "Q", 0, 2000], ["phi", "φ (°)", "", 0, 50], ["E", "E (MPa)", "", 0, 5000], ["nu", "ν", "", 0, 0.5], ["e0", "e0", "", 0, 5], ["Cc", "Cc", "", 0, 3], ["Cs", "Cs", "", 0, 1], ["OCR", "OCR", "", 0, 20], ["cv", "cv (m²/th)", "", 0, 500], ["Ca", "Cα/(1+e0)", "", 0, 0.2]]
-    const hd = el("tr"); cols.forEach((c) => hd.append(el("th", null, c))); if (showAdv) adv.forEach((a) => hd.append(el("th", "adv", a[1]))); hd.append(el("th")); tb.append(hd)
+    const th = el("thead"), hd = el("tr"); cols.forEach((c) => hd.append(el("th", null, c))); if (showAdv) adv.forEach((x) => hd.append(el("th", "adv", x[1]))); hd.append(el("th")); th.append(hd); tb.append(th)
+    const tbody = el("tbody")
     let z = 0
     so.layers.forEach((ly, i) => {
       const tr = el("tr")
-      tr.append(el("td", "dz-zz", `${nf(z, 1)}–${nf(z + ly.h, 1)} m`)); z += ly.h
-      const num = (k, kind, lo, hi, cls) => {
+      tr.append(el("td", "dz-zn", String(i + 1)), el("td", "dz-zz", `${nf(z, 2)}–${nf(z + (+ly.h || 0), 2)}`)); z += +ly.h || 0
+      // kind: "" | Q | G; opt: "null" = kosong disimpan null (diinterpolasi / ikut atas), "auto" = kosong → 0 (korelasi otomatis)
+      const num = (k, kind, lo, hi, opt, cls, ph) => {
         const td = el("td", cls || ""), inp = el("input"); inp.type = "text"; inp.inputMode = "decimal"
-        const fac = isConv(kind) ? uFac(kind) : 1
-        inp.value = ly[k] > 0 || k === "h" || k === "g" || k === "gsat" || k === "N" ? fmtIn(ly[k] / fac) : ""
-        if (cls === "adv") inp.placeholder = L("auto", "auto")
-        inp.oninput = () => { const v = inp.value.trim() === "" ? 0 : parseNum(inp.value); const ok = !isNaN(v) && v >= lo / fac && v <= hi / fac; inp.classList.toggle("bad", !ok); if (ok) { ly[k] = v * fac; changed(false) } }
+        const fac = isConv(kind) ? uFac(kind) : 1, v = ly[k]
+        inp.value = opt === "auto" ? (v > 0 ? fmtIn(v / fac) : "") : hasV(v) && (k === "N" || v > 0 || k === "h") ? fmtIn(v / fac) : ""
+        if (ph) inp.placeholder = ph
+        inp.oninput = () => {
+          const t = inp.value.trim()
+          if (t === "" && opt) { inp.classList.remove("bad"); ly[k] = opt === "auto" ? 0 : null; changed(false); return }
+          const x = parseNum(t), ok = !isNaN(x) && x >= lo / fac && x <= hi / fac
+          inp.classList.toggle("bad", !ok); if (ok) { ly[k] = x * fac; changed(false) }
+        }
         inp.onchange = () => { if (k === "h") draw() }
         td.append(inp); return td
       }
-      tr.append(num("h", "", 0.1, 80))
+      tr.append(num("h", "", 0.05, 80))
       const tdT = el("td"), sel = el("select")
       Object.keys(TYPES).forEach((k) => { const o = el("option", null, typeName(k)); o.value = k; if (ly.type === k) o.selected = true; sel.append(o) })
       sel.onchange = () => { ly.type = sel.value; changed(false) }
       tdT.append(sel); tr.append(tdT)
-      tr.append(num("g", "G", 10, 24), num("gsat", "G", 10, 25))
-      if (cpt) tr.append(num("qc", "", 0, 100), num("fs", "", 0, 2000))
-      else tr.append(num("N", "", 0, 200), num("qc", "", 0, 100))
-      if (showAdv) adv.forEach(([k, , kind, lo, hi]) => tr.append(num(k, kind, lo, hi, "adv")))
-      const del = el("button", "dz-x", "✕"); del.type = "button"; del.title = L("Hapus lapis", "Remove layer"); del.disabled = so.layers.length <= 1
-      del.onclick = () => { so.layers.splice(i, 1); draw(); changed(false) }
+      const up = L("= atas", "= above")
+      tr.append(num("g", "G", 10, 24, "null", "", up), num("gsat", "G", 10, 25, "null", "", up))
+      if (cpt) tr.append(num("qc", "", 0.01, 100, "null", "", "≈"), num("fs", "", 0, 2000, "null", "", "≈"))
+      else tr.append(num("N", "", 0, 200, "null", "", "≈"), num("qc", "", 0.01, 100, "null"))
+      if (showAdv) adv.forEach(([k, , kind, lo, hi]) => tr.append(num(k, kind, lo, hi, "auto", "adv", L("auto", "auto"))))
+      const del = el("button", "dz-x", "✕"); del.type = "button"; del.title = L("Hapus baris", "Remove row"); del.disabled = so.layers.length <= 1
+      del.onclick = () => { so.layers.splice(i, 1); changed(true) }
       const td = el("td"); td.append(del); tr.append(td)
-      tb.append(tr)
+      tbody.append(tr)
     })
-    tw.append(tb); box.append(tw)
-    const bar = el("div", "pj-row")
-    const add = el("button", "dz-add", L("＋ Tambah lapis", "＋ Add layer")); add.type = "button"; add.disabled = so.layers.length >= 15
-    add.onclick = () => { const last = so.layers[so.layers.length - 1]; so.layers.push({ ...last }); draw(); changed(false) }
-    const tg = el("button", "dz-add ghost", showAdv ? L("Sembunyikan parameter lanjutan", "Hide advanced parameters") : L("Parameter lanjutan (timpa korelasi) ▸", "Advanced parameters (override correlations) ▸")); tg.type = "button"
-    tg.onclick = () => { showAdv = !showAdv; draw() }
-    bar.append(add, tg); box.append(bar)
-    box.append(el("p", "dz-note", L("Kosongkan kolom lanjutan (atau 0) untuk memakai korelasi otomatis. Bila uji CPT, N60 setara dihitung dari qc/N (Robertson) untuk kelas situs.", "Leave advanced columns empty (or 0) to use automatic correlations. With CPT, an equivalent N60 is derived from qc/N (Robertson) for site class.")))
+    tb.append(tbody); tw.append(tb); box.append(tw)
+    box.append(el("p", "dz-note", L("Isi per lapis atau per interval (mis. tiap 0,5 m sampai 30 m). Sel N-SPT / qc / fs yang kosong (≈) diinterpolasi dari baris berdata terdekat dalam lapis sejenis; γ kosong (= atas) sama dengan baris di atasnya bila jenisnya sama, selain itu nilai tipikal. Kolom lanjutan kosong = korelasi otomatis. Bila uji CPT, N60 setara dihitung dari qc/N (Robertson) untuk kelas situs.",
+      "Enter per layer or per interval (e.g. every 0.5 m down to 30 m). Empty SPT N / qc / fs cells (≈) are interpolated from the nearest rows with data within the same soil type; empty γ (= above) takes the row above when the type matches, otherwise a typical value. Empty advanced columns = automatic correlation. With CPT, an equivalent N60 is derived from qc/N (Robertson) for site class.")))
+  }
+  // ---- panel: bagi per interval
+  function intervalPanel(so, apply) {
+    const st = intSt
+    if (!st.touched) st.zmax = Math.max(30, Math.ceil(so.layers.reduce((s2, l) => s2 + (+l.h || 0), 0)))
+    const w = el("div", "pj-tool dz-in on"), g = el("div", "dz-grid")
+    g.append(field({ k: "dz", type: "seg", lab: L("Interval Δz", "Interval Δz"), opts: { 0.2: "0,2 m", 0.25: "0,25 m", 0.5: "0,5 m", 1: "1 m", 1.5: "1,5 m", 2: "2 m" }, obj: st }, st, () => draw()),
+      field({ k: "zmax", lab: L("Sampai kedalaman", "Down to depth"), u: "m", lo: 1, hi: 150, obj: st }, st, () => { st.touched = true }),
+      field({ k: "blank", type: "chk", lab: L("Kosongkan N/qc/fs (isi sendiri per baris; yang kosong diinterpolasi)", "Clear N/qc/fs (fill per row; empty cells are interpolated)"), obj: st }, st, () => {}))
+    const go = el("button", "pj-apply", L("Terapkan", "Apply")); go.type = "button"
+    const msg = el("p", "dz-note")
+    go.onclick = () => {
+      try { const r = resampleSoil(so, st.dz, st.zmax, st.blank); apply(r, L(`${so.layers.length} → ${r.layers.length} baris`, `${so.layers.length} → ${r.layers.length} rows`)) }
+      catch (e) { msg.textContent = e.message; msg.classList.add("bad") }
+    }
+    msg.textContent = L("Jenis, γ, dan parameter diambil dari lapis saat ini pada kedalaman tiap baris (di bawah dasar bor: lapis terakhir).", "Type, γ and parameters are taken from the current layer at each row depth (below the boring: last layer).")
+    w.append(g, go, msg)
+    return w
+  }
+  // ---- panel: tempel dari Excel / CSV
+  function pastePanel(so, apply) {
+    const cpt = so.test === "cpt", st = pasteSt
+    const w = el("div", "pj-tool dz-in on"), ta = el("textarea", "pj-paste")
+    ta.rows = 7; ta.spellcheck = false; ta.value = st.text
+    ta.placeholder = cpt ? L("Kedalaman ⇥ qc ⇥ fs ⇥ jenis\n0,2 ⇥ 8,5 ⇥ 25\n0,4 ⇥ 9,1 ⇥ 31 ⇥ pasir", "Depth ⇥ qc ⇥ fs ⇥ type\n0.2 ⇥ 8.5 ⇥ 25\n0.4 ⇥ 9.1 ⇥ 31 ⇥ sand") : L("Kedalaman ⇥ N-SPT ⇥ jenis\n0,5 ⇥ 4 ⇥ lempung\n1,0 ⇥ ⇥ lempung\n1,5 ⇥ 6", "Depth ⇥ SPT N ⇥ type\n0.5 ⇥ 4 ⇥ clay\n1.0 ⇥ ⇥ clay\n1.5 ⇥ 6")
+    const g = el("div", "dz-grid")
+    if (cpt) g.append(field({ k: "qcUnit", type: "seg", lab: L("Satuan qc", "qc unit"), opts: { mpa: "MPa", kgcm2: "kg/cm²" }, obj: st }, st, () => draw()), field({ k: "fsUnit", type: "seg", lab: L("Satuan fs", "fs unit"), opts: { kpa: "kPa", kgcm2: "kg/cm²" }, obj: st }, st, () => draw()))
+    const msg = el("div", "pj-pastemsg"), go = el("button", "pj-apply", L("Ganti data tanah dengan tabel ini", "Replace soil data with this table")); go.type = "button"; go.disabled = true
+    let res = null
+    const prev = () => {
+      st.text = ta.value
+      msg.textContent = ""; res = null; go.disabled = true
+      if (!ta.value.trim()) return
+      try {
+        res = parseSoilPaste(ta.value, { test: so.test, base: so, qcUnit: st.qcUnit, fsUnit: st.fsUnit })
+        const zz = res.layers.reduce((s2, l) => s2 + l.h, 0)
+        msg.append(el("b", null, L(`${res.n} baris terbaca · kedalaman 0–${nf(zz, 2)} m`, `${res.n} rows read · depth 0–${nf(zz, 2)} m`)), el("span", "hint", res.mapped ? L(" · kolom dari baris judul", " · columns from header row") : L(" · tanpa judul: kolom urut kedalaman, nilai uji, …", " · no header: columns in order depth, test value, …")))
+        res.warn.slice(0, 4).forEach((x) => msg.append(el("small", null, x)))
+        go.disabled = false
+      } catch (e) { msg.append(el("span", "bad", e.message)) }
+    }
+    ta.oninput = () => { clearTimeout(ta._t); ta._t = setTimeout(prev, 200) }
+    go.onclick = () => { if (res) { st.text = ""; apply({ layers: res.layers }, L(`tempel ${res.n} baris`, `paste ${res.n} rows`)) } }
+    w.append(ta, g, msg, go, el("p", "dz-note", L("Salin kolom dari Excel / log bor lalu tempel. Kolom dikenali dari judul (kedalaman, jenis, γ, γsat, N-SPT, qc, fs); tanpa judul urutannya kedalaman, nilai uji, nilai kedua, jenis. Kedalaman = dasar baris (baris = dari kedalaman sebelumnya sampai kedalaman ini). Jenis dan γ yang tidak ada diambil dari profil saat ini.",
+      "Copy columns from Excel / a boring log and paste. Columns are recognised from the header (depth, type, γ, γsat, SPT N, qc, fs); without a header the order is depth, test value, second value, type. Depth = row bottom (row = from the previous depth to this depth). Missing type and γ come from the current profile.")))
+    if (st.text) setTimeout(prev, 0)
+    return w
   }
   draw()
   return box
@@ -146,29 +217,42 @@ function layersTable(P, changed) {
 export function profileChart(ds, P) {
   const W = 760, H = 520, s = root(W, H, P, L("Profil tanah", "Soil profile"))
   const top = 54, bot = H - 30, depth = Math.ceil(ds.depth / 5) * 5, Y = (z) => top + z / depth * (bot - top)
-  T(s, 16, 28, `${L("Profil tanah", "Soil profile")} · ${ds.name || ""} · ${ds.test === "cpt" ? "CPT" : "N-SPT"}`, { c: P.ink, fs: 14, b: true })
+  const many = ds.layers.length > 30
+  T(s, 16, 28, `${L("Profil tanah", "Soil profile")} · ${ds.name || ""} · ${ds.test === "cpt" ? "CPT" : "N-SPT"} · ${ds.layers.length} ${L("baris", "rows")}`, { c: P.ink, fs: 14, b: true })
   const cx0 = 56, cw = 110
   for (let z = 0; z <= depth; z += 5) { T(s, cx0 - 8, Y(z) + 4, nf(z, 0), { c: P.mut, fs: 10.5, a: "end" }); s.append(sv("line", { x1: cx0, x2: W - 16, y1: Y(z), y2: Y(z), stroke: P.grid, "stroke-width": 1 })) }
   T(s, 18, Y(depth / 2), "z (m)", { c: P.ink, fs: 11 })
-  ds.layers.forEach((l, i) => {
-    const r = Rect(s, cx0, Y(l.z0), cw, Y(l.z1) - Y(l.z0), l.coh ? P.clay : P.sand, P.ink, { sw: 1, cls: "dz-fade" }); r.style.setProperty("--i", i)
+  // kolom tanah: baris bersambung sejenis digabung menjadi satu blok
+  const blocks = []
+  ds.layers.forEach((l) => { const b = blocks[blocks.length - 1]; if (b && b.type === l.type) b.z1 = l.z1; else blocks.push({ type: l.type, coh: l.coh, z0: l.z0, z1: l.z1 }) })
+  blocks.forEach((l, i) => {
+    const r = Rect(s, cx0, Y(l.z0), cw, Y(l.z1) - Y(l.z0), l.coh ? P.clay : P.sand, P.ink, { sw: 1, cls: "dz-fade" }); r.style.setProperty("--i", Math.min(i, 12))
     if (Y(l.z1) - Y(l.z0) > 16) T(s, cx0 + cw / 2, (Y(l.z0) + Y(l.z1)) / 2 + 4, typeName(l.type), { c: P.ink, fs: 11, a: "middle", b: true })
   })
   if (ds.gwt < depth) { s.append(sv("line", { x1: cx0 - 6, x2: W - 16, y1: Y(ds.gwt), y2: Y(ds.gwt), stroke: P.water, "stroke-width": 2, "stroke-dasharray": "8 5" })); T(s, cx0 + cw + 6, Y(ds.gwt) - 5, `▽ MAT ${nf(ds.gwt, 1)} m`, { c: P.water, fs: 11, b: true }) }
-  const panel = (x0, w, title, val, max, c) => {
+  const panel = (x0, w, title, val, max, c, estK) => {
     T(s, x0 + w / 2, top - 12, title, { c: P.ink, fs: 11.5, a: "middle", b: true })
     s.append(sv("rect", { x: x0, y: top, width: w, height: bot - top, fill: "none", stroke: P.line }))
     const m = Math.max(max, 1e-6)
     for (let k = 0; k <= 4; k++) { const xv = x0 + w * k / 4; T(s, xv, bot + 14, nf(m * k / 4, m >= 20 ? 0 : 1), { c: P.mut, fs: 9.5, a: k === 0 ? "start" : k === 4 ? "end" : "middle" }) }
     let d = ""
     ds.layers.forEach((l, i) => { const x = x0 + Math.min(val(l), m) / m * w; d += `${i ? "L" : "M"}${x.toFixed(1)},${Y(l.z0).toFixed(1)} L${x.toFixed(1)},${Y(l.z1).toFixed(1)} ` })
-    const p = sv("path", { d, fill: "none", stroke: c, "stroke-width": 2.6, class: "dz-draw", pathLength: 1 }); s.append(p)
-    ds.layers.forEach((l) => { const v = val(l); if (v > 0) { s.append(sv("circle", { cx: x0 + Math.min(v, m) / m * w, cy: (Y(l.z0) + Y(l.z1)) / 2, r: 3.5, fill: c })); T(s, x0 + Math.min(v, m) / m * w + 6, (Y(l.z0) + Y(l.z1)) / 2 - 4, nf(v, v >= 10 ? 0 : 1), { c, fs: 10 }) } })
+    const p = sv("path", { d, fill: "none", stroke: c, "stroke-width": many ? 2 : 2.6, "stroke-linejoin": "round", class: "dz-draw", pathLength: 1 }); s.append(p)
+    // titik: data terukur (penuh) vs interpolasi (kosong); label hanya bila tidak berhimpit
+    let lastY = -99, lastV = NaN
+    ds.layers.forEach((l) => {
+      const v = val(l), cy = (Y(l.z0) + Y(l.z1)) / 2, est = estK && l.est && l.est[estK]
+      if (!(v > 0)) return
+      const cx = x0 + Math.min(v, m) / m * w
+      if (!many || est) s.append(sv("circle", { cx, cy, r: many ? 2.4 : 3.5, fill: est ? P.bg || "#fff" : c, stroke: c, "stroke-width": 1.3 }))
+      if (cy - lastY >= 13 && !est && Math.abs(v - lastV) > 1e-6 * Math.max(1, v)) { T(s, cx + 6, cy - 4, nf(v, v >= 10 ? 0 : 1), { c, fs: 10 }); lastY = cy; lastV = v }
+    })
   }
   const pw = (W - cx0 - cw - 80) / 3
-  panel(cx0 + cw + 20, pw, "N60", (l) => l.N60, Math.max(...ds.layers.map((l) => l.N60)) * 1.15, P.acc)
-  panel(cx0 + cw + 40 + pw, pw, "qc (MPa)", (l) => l.qcE, Math.max(...ds.layers.map((l) => l.qcE)) * 1.15, P.steel)
+  panel(cx0 + cw + 20, pw, "N60", (l) => l.N60, Math.max(...ds.layers.map((l) => l.N60)) * 1.15, P.acc, "N")
+  panel(cx0 + cw + 40 + pw, pw, "qc (MPa)", (l) => l.qcE, Math.max(...ds.layers.map((l) => l.qcE)) * 1.15, P.steel, "qc")
   panel(cx0 + cw + 60 + 2 * pw, pw, `cu (${uName("Q")}) · φ (°)`, (l) => (l.coh ? toDisp("Q", l.cu) : l.phi), Math.max(...ds.layers.map((l) => (l.coh ? toDisp("Q", l.cu) : l.phi))) * 1.15, P.bad)
+  if (ds.layers.some((l) => l.est && (l.est.N || l.est.qc))) T(s, W - 16, H - 8, L("○ = interpolasi", "○ = interpolated"), { c: P.mut, fs: 10, a: "end" })
   return s
 }
 
@@ -186,7 +270,10 @@ function buildOut(P, ds, sc) {
   const pSteps = { h: `${L("Tiang rencana", "Design pile")} — ${pl.kind === "bored" ? L("bor", "bored") : L("pipa", "pipe")} Ø${nf(pl.D, 0)} mm, L = ${nf(pl.L, 1)} m (${AXIAL_METHOD()[pl.method].split(" (")[0]})`, rows: [
     [L("Kepala / ujung tiang", "Pile head / tip"), "z0 ; z0 + L", "", `${nf(pl.z0, 2)} ; ${nf(sp.ax.tip.z, 2)} m (${typeName(sp.ax.tip.type)})`],
     [L("Gesek selimut Qs", "Shaft friction Qs"), pl.method === "spt" ? "Σ fs·πD·Δz ; fs = 2N60 (pasir) / α·cu" : pl.method === "cpt" ? "Σ (qc/αLCPC)·πD·Δz" : "Σ fs·πD·Δz ; α·cu / K·σ'v·tanδ", "", F1(sp.ax.Qc - sp.ax.Qb)],
-    [L("Tahanan ujung Qb", "End bearing Qb"), "q·Ap", `q = ${nf(toDisp("Q", sp.ax.q), 0)} ${uName("Q")}`, F1(sp.ax.Qb)],
+    ...(sp.ax.tip.Nb != null ? [[L("N60 rata-rata ujung N̄b", "Average tip N60 N̄b"), L("rata-rata 10D di atas s.d. 4D di bawah ujung", "average 10D above to 4D below tip"), `z ${nf(sp.ax.tip.za, 2)}–${nf(sp.ax.tip.zb, 2)} m`, nf(sp.ax.tip.Nb, 1)],
+      [L("Penetrasi ke lapis pendukung Lb", "Embedment into bearing stratum Lb"), L("ujung − puncak lapis granular bersambung", "tip − top of continuous granular stratum"), "", `${nf(sp.ax.tip.Lb, 2)} m (Lb/D ${nf(sp.ax.tip.Lb / sp.ax.D, 1)})`]] : []),
+    ...(sp.ax.tip.qca != null ? [[L("qc ekuivalen ujung qca", "Equivalent tip qc, qca"), L("rata-rata ±1,5D, dibatasi 0,7–1,3·qca'", "average ±1.5D, clipped to 0.7–1.3·qca'"), `qca' ${nf(sp.ax.tip.qca1, 2)} MPa`, `${nf(sp.ax.tip.qca, 2)} MPa`]] : []),
+    [L("Tahanan ujung Qb", "End bearing Qb"), pl.method === "spt" && !sp.ax.tip.coh ? (pl.kind === "bored" ? "q = 13·N̄b·Lb/D ≤ 130·N̄b; Qb = q·Ap" : "q = 40·N̄b·Lb/D ≤ 400·N̄b; Qb = q·Ap") : pl.method === "cpt" ? "q = kc·qca; Qb = q·Ap" : "q·Ap", `q = ${nf(toDisp("Q", sp.ax.q), 0)} ${uName("Q")}`, F1(sp.ax.Qb)],
     [L("Kapasitas ultimit Qu", "Ultimate capacity Qu"), "Qs + Qb", "", F1(sp.ax.Qc)],
     [L("Qa geoteknik", "Geotechnical Qa"), "Qu / FS", `FS ${nf(pl.fsC, 1)}`, F1(sp.Qac)],
     [L("Pa struktur", "Structural Pa"), sp.strTxt, "", F1(sp.Pstr)],
@@ -194,11 +281,13 @@ function buildOut(P, ds, sc) {
     [L("Qa tarik", "Qa tension"), "(Qs·k + W tiang)/FS", `FS ${nf(pl.fsT, 1)}`, F1(sp.Qat)],
     [L("Ha lateral", "Ha lateral"), "min(Hu,Broms jepit/FS; H(y izin))", `${F1(sp.Hal, 1)} ; ${F1(sp.Hd, 1)} (y ${nf(pl.yAllow, 0)} mm)`, F1(sp.Ha, 1)]] }
   const auto = (l, k) => (l.auto[k] ? "" : " ✎")
-  const derived = { title: L("Parameter desain turunan", "Derived design parameters"), cols: ["z (m)", L("Jenis", "Type"), "N60", "N1(60)", "qc (MPa)", `σ'v (${uQ})`, `cu (${uQ})`, "φ (°)", "E (MPa)", "ν", "e0", "Cc", "OCR", "cv"],
-    rows: ds.layers.map((l) => [`${nf(l.z0, 1)}–${nf(l.z1, 1)}`, typeName(l.type), nf(l.N60, 1), nf(l.N1, 1), nf(l.qcE, 2), nf(toDisp("Q", l.svp), 1), l.coh ? nf(toDisp("Q", l.cu), 1) + auto(l, "cu") : "–", l.coh ? "–" : nf(l.phi, 1) + auto(l, "phi"), nf(l.E / 1000, 1) + auto(l, "E"), nf(l.nu, 2) + auto(l, "nu"),
+  const cptT = P.soil.test === "cpt"
+  const derived = { note: ds.layers.some((l) => l.est.N || l.est.qc || l.est.g) ? L("≈ = nilai uji diinterpolasi dari baris berdata terdekat; γ kosong mengikuti baris di atas / nilai tipikal.", "≈ = test value interpolated from the nearest rows with data; empty γ follows the row above / a typical value.") : undefined,
+    title: L("Parameter desain turunan", "Derived design parameters"), cols: ["z (m)", L("Jenis", "Type"), "N60", "N1(60)", cptT ? "qc (MPa) · Ic" : "qc (MPa)", `σ'v (${uQ})`, `cu (${uQ})`, "φ (°)", "E (MPa)", "ν", "e0", "Cc", "OCR", "cv"],
+    rows: ds.layers.map((l) => [`${nf(l.z0, 2)}–${nf(l.z1, 2)}`, typeName(l.type) + (cptT && l.typeIc && l.typeIc !== l.type ? ` (Ic: ${typeName(l.typeIc)})` : ""), (l.est.N ? "≈" : "") + nf(l.N60, 1), nf(l.N1, 1), (l.est.qc ? "≈" : "") + nf(l.qcE, 2) + (cptT ? ` · Ic ${l.Ic != null ? nf(l.Ic, 2) : "–"}` : ""), nf(toDisp("Q", l.svp), 1), l.coh ? nf(toDisp("Q", l.cu), 1) + auto(l, "cu") : "–", l.coh ? "–" : nf(l.phi, 1) + auto(l, "phi"), nf(l.E / 1000, 1) + auto(l, "E"), nf(l.nu, 2) + auto(l, "nu"),
       l.coh ? nf(l.e0, 2) + auto(l, "e0") : "–", l.coh ? nf(l.Cc, 3) + auto(l, "Cc") : "–", l.coh ? nf(l.OCR, 2) + auto(l, "OCR") : "–", l.coh ? nf(l.cv, 1) + auto(l, "cv") : "–"]), align: ["l", "l", "r", "r", "r", "r", "r", "r", "r", "r", "r", "r", "r", "r"] }
   const input = { title: L("Data penyelidikan per lapis", "Investigation data per layer"), cols: ["z (m)", L("Jenis", "Type"), `γ (${uG})`, `γsat (${uG})`, "N-SPT", "qc (MPa)", "fs (kPa)"],
-    rows: ds.layers.map((l) => [`${nf(l.z0, 1)}–${nf(l.z1, 1)}`, typeName(l.type), toDisp("G", l.g), toDisp("G", l.gsat), l.N || "–", l.qc || "–", l.fs || "–"]), dec: [null, null, 2, 2, 0, 2, 0], align: ["l", "l", "r", "r", "r", "r", "r"] }
+    rows: ds.layers.map((l) => [`${nf(l.z0, 2)}–${nf(l.z1, 2)}`, typeName(l.type), toDisp("G", l.g), toDisp("G", l.gsat), hasV(l.N) ? l.N : "–", l.qc > 0 ? l.qc : "–", l.fs > 0 ? l.fs : "–"]), dec: [null, null, 2, 2, 0, 2, 0], align: ["l", "l", "r", "r", "r", "r", "r"] }
   const qaT = { title: `${L("Daya dukung izin bruto qa (pondasi bujur sangkar, Df", "Gross allowable bearing qa (square footing, Df")} = ${nf(b.Df, 2)} m, FS ${nf(b.FS, 1)})`, cols: ["B (m)", `N-SPT (${uQ})`, `CPT (${uQ})`, `Vesic/Skempton (${uQ})`, L("Penentu (metode aktif)", "Governing (active method)")],
     rows: qaRows, dec: [1, 0, 0, 0, null], align: ["r", "r", "r", "r", "l"], note: L(`Metode aktif: ${QA_METHOD()[b.method]}. Granular: min(qa penurunan 25 mm, qult/FS). Kohesif: Skempton (φ = 0) dengan cu dari korelasi.`, `Active method: ${QA_METHOD()[b.method]}. Granular: min(25 mm settlement qa, qult/FS). Cohesive: Skempton (φ = 0) with correlated cu.`) }
   const pT = { note: L("Qs = gesek yang terpakai (ujung terbuka: luar saja bila tersumbat, luar + dalam bila tidak).", "Qs = friction used (open end: outer only when plugged, outer + inner when unplugged)."), title: `${L("Kapasitas aksial tiang", "Pile axial capacity")} — ${pl.kind === "bored" ? L("bor", "bored") : L("pipa", "pipe")} Ø${nf(pl.D, 0)} mm, ${AXIAL_METHOD()[pl.method]}, z0 = ${nf(pl.z0, 2)} m`, cols: ["L (m)", `Qs (${uF})`, `Qb (${uF})`, `Qu (${uF})`, `Qa = Qu/${nf(pl.fsC, 1)} (${uF})`, `Qu,tarik (${uF})`, L("Lapis ujung", "Tip layer")],

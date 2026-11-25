@@ -9,18 +9,13 @@ import { pmCapacity, circlePoly, barsOnCircle, ld, ldh, phiBearing, phiShearFric
 // ---------------------------------------------------------------- profil tanah (kedalaman diukur dari kepala tiang / dasar pile cap)
 // layers: [{h, type: "clay" | "sand", g (kN/m³ total), cu (kPa), phi (°), nh (kN/m³, 0 = otomatis)}]
 export function profile(layers, gwt) {
-  const tops = []; let z = 0
-  for (const l of layers) { tops.push(z); z += l.h }
-  const at = (zz) => { for (let i = 0; i < layers.length; i++) if (zz < tops[i] + layers[i].h) return layers[i]; return layers[layers.length - 1] }
-  const sv = (zz) => {
-    let s = 0
-    for (let i = 0; i < layers.length && tops[i] < zz; i++) {
-      const a = tops[i], b = Math.min(zz, i === layers.length - 1 ? zz : tops[i] + layers[i].h), g = layers[i].g
-      const dry = Math.max(0, Math.min(b, gwt) - a), wet = Math.max(0, b - Math.max(a, gwt))
-      s += g * dry + (g - GAMMA_W) * wet
-    }
-    return s
-  }
+  const tops = [], S = [], n = layers.length; let z = 0, acc = 0
+  const part = (i, a, b) => { const g = layers[i].g, dry = Math.max(0, Math.min(b, gwt) - a), wet = Math.max(0, b - Math.max(a, gwt)); return g * dry + (g - GAMMA_W) * wet }
+  for (let i = 0; i < n; i++) { tops.push(z); S.push(acc); acc += part(i, z, z + layers[i].h); z += layers[i].h }
+  // indeks lapis berisi kedalaman zz (pencarian biner; di bawah dasar → lapis terakhir)
+  const ix = (zz) => { let lo = 0, hi = n - 1; if (zz >= tops[hi] + layers[hi].h) return hi; while (lo < hi) { const m = (lo + hi) >> 1; if (zz < tops[m] + layers[m].h) hi = m; else lo = m + 1 } return lo }
+  const at = (zz) => layers[ix(zz)]
+  const sv = (zz) => { if (zz <= 0) return 0; const i = ix(zz); return S[i] + part(i, tops[i], zz) }
   return { at, sv, total: z, tops }
 }
 // API RP 2GEO Tabel 1 (pasir), sebagai fungsi δ = φ − 5°
@@ -128,6 +123,23 @@ export function winkler(EI, e, Lp, kD, head, H, M, nel = 120) {
   return { z: zs, y, M: Mz, V: Vz, y0: y[0], Mmax: Math.abs(Mz[iMax]), zMmax: zs[iMax], Mhead: Mz[0] }
 }
 
+// Tanah "atas" untuk panjang karakteristik lateral (Davisson & Robinson): jenis dominan (berdasar tebal) pada zona 0…zd di bawah kepala
+// (zd = 5D, min. 1 m), cu / φ rata-rata tebal bagian sejenisnya. Dengan data per baris tipis (0,5 m) baris teratas saja tidak representatif.
+export function topZone(layers, D) {
+  const zd = Math.max(5 * D, 1)
+  let z = 0, hc = 0, hs = 0, cu = 0, phi = 0, nh = 0, nhAll = true
+  for (const l of layers) {
+    const h = Math.max(0, Math.min(z + l.h, zd) - z)
+    if (h > 0) {
+      if (l.type === "clay") { hc += h; cu += l.cu * h } else { hs += h; phi += l.phi * h; nh += (l.nh || 0) * h; if (!(l.nh > 0)) nhAll = false }
+    }
+    z += l.h
+    if (z >= zd) break
+  }
+  if (hc + hs <= 0) return layers[0]
+  return hc >= hs ? { type: "clay", cu: cu / hc, phi: 0, nh: 0, zd, h: hc } : { type: "sand", cu: 0, phi: phi / hs, nh: nhAll ? nh / hs : 0, zd, h: hs }
+}
+
 // nh otomatis (Terzaghi 1955) dari φ: lepas / sedang / padat; kering (di atas MAT) dan terendam
 export const nhAuto = (phi, wet) => interp([28, 33, 38], wet ? [1300, 4400, 10700] : [2200, 6600, 17600], phi)
 
@@ -204,7 +216,7 @@ export function analyzePile(I, combos) {
   const pmF = n > 1 ? Math.min(pmGroup(I.nx, I.sx / D), pmGroup(I.ny, I.sy / D)) : 1
   const P0 = profile(I.layers, I.gwt)
   const kD = (z) => { const l = P0.at(z); return pmF * (l.type === "clay" ? 67 * l.cu : (l.nh > 0 ? l.nh : nhAuto(l.phi, z > I.gwt)) * z) }
-  const top = I.layers[0]
+  const top = topZone(I.layers, D)
   const nhTop = top.type === "sand" ? (top.nh > 0 ? top.nh : nhAuto(top.phi, I.gwt <= 1)) * pmF : 0
   const Tch = top.type === "sand" ? Math.pow(EI / nhTop, 0.2) : 0, Rch = top.type === "clay" ? Math.pow(EI / (67 * top.cu * pmF), 0.25) : 0
   const Lf = top.type === "sand" ? 1.8 * Tch : 1.4 * Rch                          // Davisson & Robinson (1965)

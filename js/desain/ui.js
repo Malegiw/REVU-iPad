@@ -137,7 +137,7 @@ export function layersEditor(st, key, onChange) {
       tb.append(tr)
     })
     box.append(tb)
-    const add = el("button", "dz-add", L("＋ Tambah lapis", "＋ Add layer")); add.type = "button"; add.disabled = st[key].length >= 10
+    const add = el("button", "dz-add", L("＋ Tambah lapis", "＋ Add layer")); add.type = "button"; add.disabled = st[key].length >= 40
     add.onclick = () => { const last = st[key][st[key].length - 1]; st[key].push({ ...last }); draw(); onChange(false) }
     box.append(add)
   }
