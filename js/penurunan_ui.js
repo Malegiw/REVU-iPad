@@ -6,7 +6,8 @@ import { el, field, exportBar, reveal, tableView, urClass } from "./desain/ui.js
 import { palette, root, T, R as Rect } from "./desain/draw.js"
 import { lineChart } from "./desain/chart.js"
 import { projLoad, projSave, soilDS, stepper } from "./project.js"
-import { settleShallow, settleGroup, pileAxial, typeName, AXIAL_METHOD } from "./desain/soil.js"
+import { settleShallow, settleGroup, pileAxial, typeName, AXIAL_METHOD, soilBlocks } from "./desain/soil.js"
+import { TV90 } from "./penurunan.js"
 import { initUnits, hero, card, footer, nextBtn } from "./pj_ui.js"
 import { ico, MOD_ICO } from "./icons.js"
 
@@ -182,7 +183,8 @@ function buildOut(P, ds, results, it) {
       tables.push({ detail: true, title: L("Penurunan segera per lapis (Steinbrenner)", "Immediate settlement per layer (Steinbrenner)"), cols: [L("Lapis", "Layer"), "H (m)", "E (MPa)", "ν", "si (mm)"],
         rows: (x.si_layers || []).map((si, i) => { const ly = (r.layers || [])[i] || {}; return [`${i + 1} · ${ly.name || ""}`, ly.H ?? "", ly.E != null ? ly.E / 1000 : "", ly.nu ?? "", si * 1000] }), dec: [null, 2, 1, 2, 2], align: ["l", "r", "r", "r", "r"] })
       tables.push({ detail: true, title: L("Konsolidasi per lapis lempung (Terzaghi)", "Consolidation per clay layer (Terzaghi)"), cols: [L("Lapis", "Layer"), "H (m)", "Hdr (m)", "cv (m²/th)", "sc (mm)", "t90 (th)"],
-        rows: x.cons.map((k) => [k.lapis, k.H, k.Hdr, k.cv, k.sc * 1000, k.t90 == null ? "–" : k.t90]), dec: [null, 2, 2, 2, 1, 2], align: ["l", "r", "r", "r", "r", "r"] })
+        rows: consStrata(x.cons).map((k) => [k.lapis, k.H, k.Hdr, k.cv, k.sc * 1000, k.t90 == null ? "–" : k.t90]), dec: [null, 2, 2, 2, 1, 2], align: ["l", "r", "r", "r", "r", "r"],
+        note: L("Baris kohesif yang bersambung dihitung sebagai satu strata lempung: Hdr = ½ tebal strata (drainase atas & bawah).", "Contiguous cohesive rows are treated as one clay stratum: Hdr = ½ stratum thickness (top & bottom drainage).") })
       tables.push({ detail: true, fold: true, title: L("Sublapis konsolidasi", "Consolidation sublayers"), cols: [L("Lapis", "Layer"), "z (m)", `σ'v0 (${uQ})`, `σ'p (${uQ})`, `Δσ (${uQ})`, "sc (mm)"],
         rows: x.subs.map((k) => [k.lapis, k.z_tengah, toDisp("Q", k.s0), toDisp("Q", k.sp), toDisp("Q", k.ds), k.sc * 1000]), dec: [null, 2, 1, 1, 1, 2], align: ["l", "r", "r", "r", "r", "r"] })
       drawings.push({ detail: true, make: (m) => { const Pp = palette(m); return lineChart(Pp, { title: L("Penurunan vs waktu", "Settlement vs time"), xLog: true, xLab: L("waktu (tahun, log)", "time (years, log)"), yLab: "s (mm)", yDown: true, yMin: 0,
@@ -226,7 +228,7 @@ function sectionDraw(ds, it, P) {
   const zr = deep ? (r.st.zr + Math.max(r.st.Br, 2) * 1.5) : Df + Math.max(B, 1) * 2.5, depth = Math.min(Math.max(zr, deep ? r.g.z0 + r.g.Lp + 3 : 6), ds.depth + 5)
   const top = 50, ky = (H - top - 26) / depth, kx = deep ? (W - 380) / Math.max(r.st.Br, B * 1.3, 1) : Math.min((W - 300) / Math.max(B * 1.6, 1), ky * 2), cx = 330, Y = (z) => top + z * ky, X = (x) => cx + x * kx
   T(s, 16, 28, `${c.title.split(" (")[0]} — ${deep ? L("kelompok tiang & rakit ekuivalen", "pile group & equivalent raft") : L("pondasi dangkal", "shallow foundation")}`, { c: P.ink, fs: 14, b: true })
-  for (const l of ds.layers) { if (l.z0 > depth) break; Rect(s, 16, Y(l.z0), W - 32, (Math.min(l.z1, depth) - l.z0) * ky, l.coh ? P.clay : P.sand, null, { op: 0.45 }); T(s, W - 22, Y(l.z0) + 15, `${typeName(l.type)} · ${l.coh ? "cu " + nf(l.cu, 0) + " · Cc " + nf(l.Cc, 2) : "φ " + nf(l.phi, 0) + "°"} · E ${nf(l.E / 1000, 1)} MPa`, { c: P.ink, fs: 10.5, a: "end" }) }
+  for (const l of soilBlocks(ds)) { if (l.z0 > depth) break; const hh = (Math.min(l.z1, depth) - l.z0) * ky; Rect(s, 16, Y(l.z0), W - 32, hh, l.coh ? P.clay : P.sand, null, { op: 0.45 }); if (hh >= 18) T(s, W - 22, Y(l.z0) + 15, `${typeName(l.type)}${l.n > 1 ? " (" + L("rata-rata", "avg.") + ")" : ""} · ${l.coh ? "cu " + nf(l.cu, 0) + " · Cc " + nf(l.Cc, 2) : "φ " + nf(l.phi, 0) + "°"} · E ${nf(l.E / 1000, 1)} MPa`, { c: P.ink, fs: 10.5, a: "end" }) }
   if (ds.gwt < depth) { s.append(sv2("line", { x1: 16, x2: W - 16, y1: Y(ds.gwt), y2: Y(ds.gwt), stroke: P.water, "stroke-width": 2, "stroke-dasharray": "8 5" })); T(s, 22, Y(ds.gwt) - 5, `▽ MAT ${nf(ds.gwt, 1)} m`, { c: P.water, fs: 11 }) }
   s.append(sv2("line", { x1: 16, x2: W - 16, y1: Y(0), y2: Y(0), stroke: P.ink, "stroke-width": 2 }))
   if (deep) {
@@ -260,4 +262,15 @@ export async function settleSummary(lng) {
   const res = cases.map((c) => ({ c, r: computeCase(P, ds, c) })).filter((x) => !x.r.error)
   const worst = res.reduce((a, b) => (!a || b.r.s / b.r.allow > a.r.s / a.r.allow ? b : a), null)
   return { n: res.length, nBad: res.filter((x) => x.r.s > x.r.allow).length, worst: worst ? { title: worst.c.title, s: worst.r.s, allow: worst.r.allow, kind: worst.r.kind } : null }
+}
+
+// gabungkan baris konsolidasi per strata lempung (grp): H & sc dijumlah, cv rata-rata tebal, t90 dari Hdr strata
+function consStrata(cons) {
+  const out = []
+  for (const k of cons) {
+    const g = k.grp && out.length && out[out.length - 1].grp === k.grp ? out[out.length - 1] : null
+    if (!g) { out.push({ ...k, lapis: k.grp || k.lapis, cvH: k.cv * k.H }); continue }
+    g.H += k.H; g.sc += k.sc; g.cvH += k.cv * k.H
+  }
+  return out.map((g) => { const cv = g.H > 0 ? g.cvH / g.H : g.cv; return { ...g, cv, t90: cv > 0 ? TV90 * g.Hdr ** 2 / cv : null } })
 }

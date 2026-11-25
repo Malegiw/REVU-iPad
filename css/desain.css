@@ -239,6 +239,8 @@ table.dz-res tr:hover td { background: color-mix(in srgb, var(--accent) 7%, tran
 @keyframes dz-bobx-k { 0%, 100% { transform: translateX(-5px); } 50% { transform: translateX(3px); } }
 .dz-draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: dz-draw-k 1.4s var(--dz-ease) forwards; animation-delay: calc(.15s + var(--i, 0) * .12s); }
 @keyframes dz-draw-k { to { stroke-dashoffset: 0; } }
+/* Kurangi Gerakan (iPad: Aksesibilitas → Gerakan): animasi dimatikan di app.css, jadi garis harus langsung tampil penuh */
+@media (prefers-reduced-motion: reduce) { .dz-draw { stroke-dasharray: none; stroke-dashoffset: 0; } }
 .dz-fade { animation: dz-fade-k 1s ease both .3s; }
 @keyframes dz-fade-k { from { opacity: 0; } }
 .dz-pop { transform-box: fill-box; transform-origin: center; animation: dz-pop-k .6s var(--dz-ease) both; animation-delay: calc(var(--i, 0) * 70ms); }

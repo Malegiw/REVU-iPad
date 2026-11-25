@@ -10,7 +10,7 @@ Kalkulator desain pondasi dan sipil untuk fasilitas migas yang berjalan **sepenu
 
 ## Alur proyek (contoh "Project A")
 
-1. **Tanah** — isi lapisan hasil bor (N-SPT) atau sondir (CPT). Parameter desain dihitung otomatis dan bisa ditimpa. Di sini juga ditetapkan **tiang rencana** (jenis, D, L, FS): **kapasitas tiang tunggal** Qa tekan/tarik/lateral menjadi acuan semua pondasi dalam.
+1. **Tanah** — isi lapisan hasil bor (N-SPT) atau sondir (CPT), per lapis **atau per interval kedalaman** (mis. tiap 0,5 m sampai 30 m; maks. 250 baris), bisa **ditempel dari Excel**. Parameter desain dihitung otomatis dan bisa ditimpa. Di sini juga ditetapkan **tiang rencana** (jenis, D, L, FS): **kapasitas tiang tunggal** Qa tekan/tarik/lateral menjadi acuan semua pondasi dalam.
 2. **Gempa** — isi Ss, S1, TL, kategori risiko. Kelas situs diambil otomatis dari data tanah (atau manual).
 3. **Desain** — pilih kalkulator; tiap pondasi peralatan bisa **dangkal** (telapak/mat) atau **dalam** (tiang). Data tanah, tiang rencana, dan gempa terpakai otomatis. Urutan hitungan ditampilkan di panel **Alur perhitungan**:
    - **dalam:** kapasitas tiang tunggal → beban struktur atas (berat peralatan, isi, angin, gempa, berat cap) → **jumlah tiang** n ≥ P/(Qa·Eg) dan cek momen Pi = P/n ± M·x/Σx² → **ukuran pile cap** B = (n−1)s + 2ce (≥ denah peralatan) → **tebal cap** dari geser satu arah & pons → tulangan → pemeriksaan → penurunan;
@@ -25,7 +25,7 @@ Alur ini tampil sebagai langkah 1–5 di atas setiap tab dan di Beranda.
 | Menu | Keterangan |
 |---|---|
 | **Beranda** | Alur proyek, dashboard status semua kalkulator (OK/NOT OK, rasio UR penentu, tipe pondasi dangkal/dalam), penurunan terbesar, dan pintu masuk ke Alur Produksi Migas. |
-| **Tanah** | Lapisan tanah dengan N-SPT (efisiensi hammer → N60) atau CPT (qc, fs). Korelasi: cu (Stroud / (qc − σv)/Nkt), φ (Peck–Hanson–Thornburn / Kulhawy–Mayne), E, ν, e0, Cc (Hough), Cs, OCR (SHANSEP), cv, Cα; semua bisa ditimpa di *Parameter lanjutan*. Grafik profil (N60, qc, cu/φ, MAT), **kelas situs SNI 1726:2019 Tabel 5** dari N̄, **daya dukung pondasi dangkal** dengan pilihan metode **N-SPT** (Meyerhof, 25 mm), **CPT** (Meyerhof) atau **Vesic/Skempton**, dan **tiang rencana — kapasitas tiang tunggal (acuan desain)**: pipa baja pancang atau bor beton, metode α/β (API RP 2GEO & FHWA), N-SPT (Meyerhof) atau CPT (LCPC); Qa desain = min(Qu/FS; Pa struktur), Qa tarik, Ha lateral = min(Broms kepala jepit/FS; H pada defleksi izin), tabel & grafik kapasitas vs panjang. |
+| **Tanah** | Lapisan tanah dengan N-SPT (efisiensi hammer → N60) atau CPT (qc, fs), per lapis atau **per baris kedalaman (maks. 250 baris)**. Alat bantu: *Bagi per interval* (0,2–2 m sampai kedalaman tertentu, sifat diambil dari lapis saat ini), *Tempel dari Excel* (kolom dikenali dari judul: kedalaman, jenis, γ, γsat, N-SPT, qc, fs; sondir boleh kg/cm²), *Gabung baris yang sama*, *Jenis dari CPT (Ic Robertson)*, dan *Urungkan*. Sel N-SPT/qc/fs kosong diinterpolasi terhadap kedalaman dari baris berdata terdekat dalam lapis sejenis (ditandai ≈); γ kosong mengikuti baris di atas (jenis sama) atau nilai tipikal. Korelasi: cu (Stroud / (qc − σv)/Nkt), φ (Peck–Hanson–Thornburn / Kulhawy–Mayne), E, ν, e0, Cc (Hough), Cs, OCR (SHANSEP), cv, Cα; semua bisa ditimpa di *Parameter lanjutan*. Grafik profil (N60, qc, cu/φ, MAT), **kelas situs SNI 1726:2019 Tabel 5** dari N̄, **daya dukung pondasi dangkal** dengan pilihan metode **N-SPT** (Meyerhof, 25 mm), **CPT** (Meyerhof) atau **Vesic/Skempton**, dan **tiang rencana — kapasitas tiang tunggal (acuan desain)**: pipa baja pancang atau bor beton, metode α/β (API RP 2GEO & FHWA), N-SPT (Meyerhof) atau CPT (LCPC); Qa desain = min(Qu/FS; Pa struktur), Qa tarik, Ha lateral = min(Broms kepala jepit/FS; H pada defleksi izin), tabel & grafik kapasitas vs panjang. |
 | **Gempa** | Fa, Fv, SMS, SM1, SDS, SD1, T0, Ts, Ie dari kategori risiko, kategori desain seismik (Tabel 8 & 9), spektrum respons desain. Dipakai semua modul Desain. |
 | **Desain** | Lima kalkulator dengan input beban per kasus dan kombinasi otomatis SNI 1727:2020 / ASCE 7-16 (ASD & LRFD) + PIP STC01015, angin SNI 1727 Bab 29, sketsa parameter, lembar perhitungan langkah demi langkah, ekspor Excel & PDF. |
 | ↳ Pilihan **dangkal / dalam** | Tangki, vessel, peralatan dinamis, dan trafo punya bagian *Tipe pondasi*. **Dangkal:** qa dihitung dari tab Tanah memakai B, L, Df pondasi itu (atau manual). Ukuran telapak bisa **otomatis dari beban & qa** (A ≥ P/qa, lalu tekanan, kontak, guling, geser; tebal dari geser & pons) atau manual. **Dalam:** tiang memakai **tiang rencana tab Tanah** (atau diatur di modul); **jumlah tiang, ukuran & tebal pile cap dihitung otomatis** dari beban (minimal 2 × 2, jarak s ≥ 2,5D, jarak maks dapat diatur, bawaan maks(8D; 3 m)); untuk **tangki, tiang disusun radial** (cincin konsentris dari tepi pelat ke pusat, bukan grid). Mode manual (grid s, ce) tetap tersedia. Kapasitas aksial dari tab Tanah, efisiensi kelompok Converse–Labarre, reaksi tiang cap kaku, lateral Broms + Winkler kepala jepit, struktur tiang (AISC 360 / SNI 2847 P–M), pons tiang pada cap, desain cap dengan reaksi tiang (§13.4.2.5), dan penurunan kelompok. Tangki di atas tiang memakai pelat datar terbalik (metode desain langsung); pondasi mesin di atas tiang memakai kekakuan kelompok tiang (indikatif). |
@@ -83,6 +83,18 @@ Narasi Alur Migas bisa memakai rekaman suara manusia-sintetis ElevenLabs yang ja
 
 Lewat komputer: `ELEVENLABS_API_KEY=… node tools/tts_elevenlabs.mjs` (opsi `--dry-run` untuk menghitung karakter tanpa API, `--list-voices`, `--lang id|en`, `--force` setelah ganti suara, `--prune` hapus rekaman lama), lalu `python3 tools/build_sw.py`. Jangan pernah menulis kunci API di kode atau commit.
 
+## Catatan perhitungan data per interval
+
+Saat data tanah diisi per baris tipis (mis. 0,5 m), beberapa perhitungan disesuaikan agar hasilnya tidak bergantung pada cara data dibagi:
+
+- **Konsolidasi**: baris kohesif yang bersambung dihitung sebagai satu strata lempung, Hdr = ½ tebal strata (sebelumnya tiap baris dianggap lapis terdrainase sendiri sehingga t90 jauh terlalu cepat dan penurunan jangka panjang terlalu besar).
+- **Tahanan ujung tiang N-SPT (Meyerhof)**: N̄ rata-rata 10D di atas s.d. 4D di bawah ujung, dan Lb = penetrasi ke lapis granular pendukung (bukan panjang tiang total): q = 40·N̄·Lb/D ≤ 400·N̄ (bor 13/130).
+- **Tahanan ujung CPT (LCPC)**: qca = rata-rata qc pada ±1,5D, dipangkas 0,7–1,3·qca'.
+- **Kelas situs SNI 1726**: N lapangan (tanpa koreksi energi), tiap nilai ≤ 100.
+- **Lateral (panjang karakteristik Davisson–Robinson)**: jenis tanah dominan pada 5D teratas di bawah kepala tiang, bukan baris pertama saja.
+- **Vesic**: faktor kedalaman dq memakai arctan(Df/B) bila Df/B > 1.
+- Gambar profil, penurunan, dan potongan tiang menggabungkan baris sejenis agar label tidak bertumpuk; garis grafik kini tetap tampil bila *Kurangi Gerakan* aktif di iPad.
+
 ## Memasang di iPad
 
 1. Buka **<https://malegiw.github.io/REVU-iPad/>** di **Safari** (sekali saja, dengan internet).
@@ -97,13 +109,13 @@ Masukan tersimpan di perangkat (localStorage: `ymd.project.v1` untuk data proyek
 
 - **penurunan**: `js/penurunan.js` dibandingkan dengan hasil versi Python di aplikasi utama (`tests/penurunan_cases.json`, toleransi relatif 1e-9), ditambah nilai acuan teori.
 - **desain**: `js/desain/*.js` terhadap nilai acuan teori/rumus tertutup (Matlock–Reese, Hetenyi, Broms, API RP 2GEO, AC358, API 650 Annex E, SNI 1726/1727 & ASCE 7-22, ACI 318-14 & 318-19, AISC 360, Richart–Whitman, XLSX/PDF), ditambah alur desain baru (tiang tunggal Qa = min(Qu/FS; Pa), grid & susunan radial tangki, jumlah tiang/pile cap/telapak otomatis dengan semua pemeriksaan OK di keempat modul) dan hash rekaman suara (FNV-1a).
-- **tanah**: 44 uji untuk data tanah & pondasi dalam — korelasi (N60, φ, cu, e0, Cc), kelas situs SNI 1726, Nc/Nq/Nγ, Meyerhof N-SPT/CPT, Skempton, kapasitas tiang (α/β sama dengan `pile.js`, N-SPT Meyerhof, CPT LCPC), penurunan dangkal = `analyze()` langsung, rakit ekuivalen, keseimbangan reaksi tiang, momen pile cap dari reaksi titik, KDS & spektrum.
+- **tanah**: 80 uji untuk data tanah & pondasi dalam — korelasi (N60, φ, cu, e0, Cc), kelas situs SNI 1726, Nc/Nq/Nγ, Meyerhof N-SPT/CPT, Skempton, kapasitas tiang (α/β sama dengan `pile.js`, N-SPT Meyerhof, CPT LCPC), penurunan dangkal = `analyze()` langsung, rakit ekuivalen, keseimbangan reaksi tiang, momen pile cap dari reaksi titik, KDS & spektrum; ditambah data per interval: profil 5 lapis vs baris 0,5 m memberi kelas situs, qa, dan penurunan yang sama (strata konsolidasi), interpolasi sel kosong, tempel dari Excel, Meyerhof N̄ ujung & Lb, LCPC qca, Ic CPT, kelas situs dengan N lapangan ≤ 100.
 
 - **rts**: 52 uji mesin pencari RTS dengan dokumen fiktif — token & sinonim ID ↔ EN, nilai teknis & konversi (psi, inci, K-xxx, ASTM Grade, BJTS), judul pasal vs butir daftar, kepala/kaki halaman, penyambungan baris PDF, nomor dokumen, peringkat BM25, cuplikan, parameter kunci, cek kepatuhan, item teks PDF, DOCX/XLSX/ZIP deflate, paket JSON.
 
 ```bash
 python3 -m http.server 8610
-# lalu buka http://127.0.0.1:8610/tests/run.html  (judul tab: "LOLOS 274/274")
+# lalu buka http://127.0.0.1:8610/tests/run.html  (judul tab: "LOLOS 331/331")
 ```
 
 ## Struktur

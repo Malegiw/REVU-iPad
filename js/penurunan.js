@@ -140,7 +140,7 @@ export function tvOfU(u) {
 }
 
 export const TV99 = tvOfU(0.99)
-const TV50 = tvOfU(0.5), TV90 = tvOfU(0.9)
+export const TV50 = tvOfU(0.5), TV90 = tvOfU(0.9)
 
 const f1 = (x) => fixed(x, 1)
 
@@ -174,9 +174,10 @@ export function analyze(foot, soil, qGross, opt = {}) {
         scLayer += sc
         subs.push({ lapis: nm, z_tengah: zm, ds, s0, sp, sc })
       }
-      const Hdr = ly.double ? ly.H / 2 : ly.H
+      // Hdr bisa diberikan (strata gabungan dari beberapa baris tipis); bila tidak: ½H (dua arah) atau H (satu arah)
+      const Hdr = ly.Hdr > 0 ? ly.Hdr : ly.double ? ly.H / 2 : ly.H
       const cv = ly.cv == null ? 0.0 : ly.cv
-      cons.push({ lapis: nm, idx, H: ly.H, Hdr, cv, sc: scLayer, Ca: ly.Ca || 0.0,
+      cons.push({ lapis: nm, idx, grp: ly.grp || null, H: ly.H, Hdr, cv, sc: scLayer, Ca: ly.Ca || 0.0,
         t50: cv > 0 ? TV50 * Hdr ** 2 / cv : null, t90: cv > 0 ? TV90 * Hdr ** 2 / cv : null, tp: cv > 0 ? TV99 * Hdr ** 2 / cv : null })
     }
     z0 = z1

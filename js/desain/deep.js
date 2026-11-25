@@ -3,8 +3,8 @@
 // (α/β, N-SPT, CPT), efisiensi kelompok, lateral (Broms umum + Winkler kepala jepit), struktur tiang (AISC 360 pipa / SNI 2847 bor), pons tiang
 // pada cap, pelat tangki di atas tiang, kekakuan tiang (indikatif) untuk pondasi mesin, dan penurunan kelompok (rakit ekuivalen + pemendekan elastis).
 import { L, chk, nf, toDisp, uName, barA, GAMMA_C, clamp, govern } from "./core.js"
-import { pileAxial, pileLayers, settleGroup, settleShallow, shallowQa, AXIAL_METHOD, QA_METHOD } from "./soil.js"
-import { winkler, bromsGeneral, nhAuto, profile, pmGroup, convLab } from "./pile.js"
+import { pileAxial, pileLayers, settleGroup, settleShallow, shallowQa, AXIAL_METHOD, QA_METHOD, soilBlocks } from "./soil.js"
+import { winkler, bromsGeneral, nhAuto, profile, pmGroup, convLab, topZone } from "./pile.js"
 import { pipeCapacity, h1, E_STEEL } from "./steel.js"
 import { pmCapacity, circlePoly, barsOnCircle, vcTwo, vcOne, asFlex, pickBars, phiMn, rhoTS } from "./rc.js"
 import { inside, planPoly, weights, resultant, pileGroup, pileReact, analyzeFooting } from "./footing.js"
@@ -271,7 +271,7 @@ function lateral(s, ds, pp, m) {
   const pmF = n > 1 ? Math.min(pmGroup(Math.max(nx, 1), s.psx / D), pmGroup(Math.max(ny, 1), s.psx / D)) : 1
   const kD = (z) => { const l = P0.at(z); return pmF * (l.type === "clay" ? 67 * l.cu : nhAuto(l.phi, z > gw) * z) }
   const uH = winkler(pp.EI, 0, s.pL, kD, "fixed", 1, 0)
-  const top = lay[0], nhT = top.type === "sand" ? nhAuto(top.phi, gw <= 1) * pmF : 0
+  const top = topZone(lay, D), nhT = top.type === "sand" ? nhAuto(top.phi, gw <= 1) * pmF : 0
   const Tch = top.type === "sand" ? Math.pow(pp.EI / nhT, 0.2) : 0, Rch = top.type === "clay" ? Math.pow(pp.EI / (67 * top.cu * pmF), 0.25) : 0
   const Lf = top.type === "sand" ? 1.8 * Tch : 1.4 * Rch
   const My = pp.bored ? pp.rc.My0 : pp.sec.Mp
@@ -574,7 +574,7 @@ export function pileSection(m, s0, g, ds, P) {
   const Bx = m.B, depth = m.Df + s0.pL + 2, kx = (W - 280) / Math.max(Bx, 1), ky = (H - 70) / depth, cx = (W - 120) / 2, top = 40
   const X = (x) => cx + x * kx, Y = (z) => top + z * ky
   T(s, 20, 26, L("Potongan · tiang & profil tanah", "Section · piles & soil profile"), { c: P.ink, fs: 14, b: true })
-  for (const l of ds.layers) { if (l.z0 > depth) break; Rect(s, 20, Y(l.z0), W - 40, (Math.min(l.z1, depth) - l.z0) * ky, l.coh ? P.clay : P.sand, null, { op: 0.45 }); T(s, W - 26, Y(l.z0) + 16, `${l.coh ? "cu " + nf(l.cu, 0) : "φ " + nf(l.phi, 0) + "°"} · N60 ${nf(l.N60, 0)}`, { c: P.ink, fs: 10.5, a: "end" }) }
+  for (const l of soilBlocks(ds)) { if (l.z0 > depth) break; const hh = (Math.min(l.z1, depth) - l.z0) * ky; Rect(s, 20, Y(l.z0), W - 40, hh, l.coh ? P.clay : P.sand, null, { op: 0.45 }); if (hh >= 18) T(s, W - 26, Y(l.z0) + 16, `${l.n > 1 ? "≈ " : ""}${l.coh ? "cu " + nf(l.cu, 0) : "φ " + nf(l.phi, 0) + "°"} · N60 ${nf(l.N60, 0)}`, { c: P.ink, fs: 10.5, a: "end" }) }
   if (ds.gwt < depth) { s.append(sv("line", { x1: 20, x2: W - 20, y1: Y(ds.gwt), y2: Y(ds.gwt), stroke: P.water, "stroke-width": 2, "stroke-dasharray": "8 5" })); T(s, 26, Y(ds.gwt) - 5, `▽ MAT ${nf(ds.gwt, 1)} m`, { c: P.water, fs: 11 }) }
   s.append(sv("line", { x1: 20, x2: W - 20, y1: Y(0), y2: Y(0), stroke: P.ink, "stroke-width": 2 }))
   Rect(s, X(-Bx / 2), Y(m.Df - m.t), Bx * kx, m.t * ky, P.conc, P.ink, { sw: 2 })

@@ -18,19 +18,81 @@ export function defaultSoil() {
     layers: [ly(3, "clay", 17, 17.8, 10, 0.95, 35), ly(6, "sand", 18, 19.5, 18, 9, 70), ly(8, "clay", 17.5, 18.3, 15, 1.6, 60), ly(8, "sand", 19, 20.2, 35, 17.5, 140), ly(10, "clay", 18.5, 19.5, 40, 4.2, 180)] }
 }
 
-// ---------------------------------------------------------------- parameter turunan tiap lapis
+// ---------------------------------------------------------------- parameter turunan tiap lapis / baris
+// Data bisa berupa lapis tebal atau baris per interval (mis. 0,5 m sampai 30 m; maks. MAX_ROWS baris). Sel kosong (null):
+// - N-SPT (uji SPT) / qc (uji CPT) kosong → diinterpolasi linier terhadap kedalaman dari baris berdata terdekat (diutamakan
+//   dalam lapis sejenis yang sama); di luar data → nilai terdekat. Ditandai est.N / est.qc. N = 0 tetap dianggap data (WOH).
+// - γ / γsat kosong → sama dengan baris di atas bila jenisnya sama, selain itu nilai tipikal jenis tanah (TYPE_G). Ditandai est.g.
+export const MAX_ROWS = 250
+export const TYPE_G = { clay: [17, 18], silt: [17.5, 18.5], sand: [18, 20], gravel: [19, 21] }
+const has = (v) => v != null && v !== "" && isFinite(v)
+const pos = (v) => has(v) && v > 0
+// interpolasi kolom: ok(r) = baris berdata, val(r) = nilainya; diutamakan tetangga berdata di strata (jenis sama, bersambung) yang sama
+function interpCol(rows, ok, val) {
+  const all = rows.map((r, i) => (ok(r) ? i : -1)).filter((i) => i >= 0)
+  return rows.map((r, i) => {
+    if (ok(r)) return [val(r), false]
+    if (!all.length) return [0, false]
+    const same = all.filter((j) => rows[j].grp === r.grp), idx = same.length ? same : all
+    let a = -1, b = -1
+    for (const j of idx) { if (j < i) a = j; else { b = j; break } }
+    if (a < 0) return [val(rows[b]), true]
+    if (b < 0) return [val(rows[a]), true]
+    const ra = rows[a], rb = rows[b], t = (r.zm - ra.zm) / Math.max(rb.zm - ra.zm, 1e-9)
+    return [val(ra) + t * (val(rb) - val(ra)), true]
+  })
+}
+// Indeks perilaku tanah CPT (Robertson & Wride 1998; Robertson 2009), n = 1: Qt = (qt − σv)/σ'v, Fr = fs/(qt − σv)·100 %,
+// Ic = √((3,47 − log Qt)² + (log Fr + 1,22)²). Ic < 1,31 kerikil; < 2,60 pasir (campuran); < 2,95 lanau (campuran); ≥ 2,95 lempung.
+export function cptIc(qcMPa, fsKPa, sv, svp) {
+  if (!(qcMPa > 0) || !(fsKPa > 0)) return null
+  const net = qcMPa * 1000 - sv
+  if (net <= 0) return null
+  const Qt = net / Math.max(svp, 1), Fr = fsKPa / net * 100
+  const Ic = Math.sqrt((3.47 - Math.log10(Math.max(Qt, 1e-3))) ** 2 + (Math.log10(Fr) + 1.22) ** 2)
+  return { Ic, Qt, Fr, type: Ic < 1.31 ? "gravel" : Ic < 2.6 ? "sand" : Ic < 2.95 ? "silt" : "clay" }
+}
 export function deriveSoil(soil) {
-  const out = [], gwt = soil.gwt ?? 99
-  let z = 0, sv = 0, svp = 0
-  for (const ly of soil.layers) {
-    const h = Math.max(ly.h, 0.01), z0 = z, z1 = z + h, zm = (z0 + z1) / 2
-    const inc = (zz) => { const dry = clamp(Math.min(zz, gwt) - z0, 0, h), wet = clamp(zz - Math.max(z0, gwt), 0, h); return [ly.g * dry + ly.gsat * wet, ly.g * dry + (ly.gsat - GAMMA_W) * wet] }
+  const out = [], gwt = soil.gwt ?? 99, cpt = soil.test === "cpt", Er = soil.Er ?? 60
+  // geometri, strata (jenis sama bersambung), γ terisi
+  let z = 0, gi = -1, prev = null
+  const rows = soil.layers.map((ly) => {
+    const h = Math.max(+ly.h || 0, 0.01), r = { ly, h, z0: z, z1: z + h, zm: z + h / 2 }
+    if (!prev || prev.ly.type !== ly.type) gi++
+    r.grp = gi
+    const t = TYPE_G[ly.type] || TYPE_G.clay, inh = prev && prev.ly.type === ly.type
+    r.g = pos(ly.g) ? +ly.g : inh ? prev.g : t[0]
+    r.gsat = pos(ly.gsat) ? +ly.gsat : inh ? prev.gsat : t[1]
+    r.gEst = !pos(ly.g) || !pos(ly.gsat)
+    z = r.z1; prev = r
+    return r
+  })
+  // nilai uji utama: SPT → N60 (dari N, atau dari qc opsional); CPT → qc dan fs
+  // SPT: N kosong → interpolasi dari baris ber-N (qc opsional tidak dipakai untuk mengisi N); N = 0 dengan qc > 0 = data lama "kosong".
+  // Hanya bila tidak ada satu pun N: N60 setara dari qc/N (Robertson).
+  const hasN = (r) => has(r.ly.N) && !(+r.ly.N === 0 && pos(r.ly.qc))
+  const anyN = rows.some(hasN)
+  const fillN = cpt ? null : anyN ? interpCol(rows, hasN, (r) => r.ly.N * Er / 60) : rows.map((r) => [pos(r.ly.qc) ? r.ly.qc / QC_N[r.ly.type] : 0, false])
+  const fillQ = cpt ? interpCol(rows, (r) => pos(r.ly.qc), (r) => +r.ly.qc) : null
+  const fillF = cpt ? interpCol(rows, (r) => pos(r.ly.fs), (r) => +r.ly.fs) : null
+  let sv = 0, svp = 0
+  rows.forEach((r, i) => {
+    const ly = r.ly, { h, z0, z1, zm } = r, g = r.g, gsat = r.gsat
+    const inc = (zz) => { const dry = clamp(Math.min(zz, gwt) - z0, 0, h), wet = clamp(zz - Math.max(z0, gwt), 0, h); return [g * dry + gsat * wet, g * dry + (gsat - GAMMA_W) * wet] }
     const [tm, em] = inc(zm), [tb, eb] = inc(z1)
     const svm = sv + tm, svpm = Math.max(svp + em, 1)
     const coh = cohesive(ly.type)
-    let N60 = ly.N > 0 ? ly.N * (soil.Er ?? 60) / 60 : 0, qc = ly.qc > 0 ? ly.qc : 0
-    const useCpt = soil.test === "cpt" && qc > 0
-    if (!N60 && qc) N60 = qc / QC_N[ly.type]
+    let N60, qc, fs = pos(ly.fs) ? +ly.fs : 0
+    const est = { N: false, qc: false, fs: false, g: r.gEst }
+    if (cpt) {
+      ;[qc, est.qc] = fillQ[i]
+      if (!pos(ly.fs)) [fs, est.fs] = fillF[i]
+      N60 = pos(ly.N) ? ly.N * Er / 60 : qc / QC_N[ly.type]
+    } else {
+      ;[N60, est.N] = fillN[i]
+      qc = pos(ly.qc) ? +ly.qc : 0
+    }
+    const useCpt = cpt && qc > 0
     if (!qc && N60) qc = QC_N[ly.type] * N60
     const N1 = N60 * Math.min(Math.sqrt(100 / svpm), 1.7)                                  // Liao & Whitman
     const d = { cu: 0, phi: 0, E: 0, nu: coh ? 0.45 : 0.3, e0: 0, Cc: 0, Cs: 0, OCR: 1, cv: coh ? 2 : 0, Ca: 0 }
@@ -38,7 +100,7 @@ export function deriveSoil(soil) {
     if (coh) {
       d.cu = Math.max(5, useCpt ? (qc * 1000 - svm) / (soil.Nkt || 15) : (ly.type === "silt" ? 5 : 6) * N60)   // Lunne et al.; Stroud (1974)
       d.E = (ly.type === "silt" ? 250 : 300) * d.cu                                        // Duncan & Buchignani (Eu/cu, PI menengah)
-      d.e0 = clamp(((soil.Gs || 2.7) * GAMMA_W - ly.gsat) / Math.max(ly.gsat - GAMMA_W, 0.5), 0.3, 3)
+      d.e0 = clamp(((soil.Gs || 2.7) * GAMMA_W - gsat) / Math.max(gsat - GAMMA_W, 0.5), 0.3, 3)
       d.Cc = Math.max(0.05, 0.30 * (d.e0 - 0.27))                                          // Hough (1957)
       d.Cs = 0.15 * d.Cc
       d.OCR = clamp(Math.pow(d.cu / svpm / 0.22, 1.25), 1, 10)                             // SHANSEP: cu/σ'v = 0,22·OCR^0,8
@@ -55,14 +117,32 @@ export function deriveSoil(soil) {
       const v = ly[k]
       if (v > 0) { d[k] = k === "E" ? v * 1000 : v; auto[k] = false } else auto[k] = true
     }
-    out.push({ ...ly, h, z0, z1, zm, sv: svm, svp: svpm, N60, N1, qcE: qc, coh, ...d, auto, src })
-    sv += tb; svp += eb; z = z1
-  }
-  return { layers: out, gwt, depth: z, test: soil.test, name: soil.name, Er: soil.Er, Nkt: soil.Nkt }
+    const ic = cpt ? cptIc(qc, fs, svm, svpm) : null
+    // N lapangan (tanpa koreksi energi) untuk kelas situs SNI 1726 (§5.4.2: N tidak dikoreksi, maks. 100)
+    const Nf = N60 * 60 / Er
+    out.push({ ...ly, g, gsat, h, z0, z1, zm, sv: svm, svp: svpm, st0: sv, ef0: svp, N60, N1, Nf, qcE: qc, fsE: fs, coh, ...d, auto, src, est, grp: r.grp, Ic: ic ? ic.Ic : null, typeIc: ic ? ic.type : null })
+    sv += tb; svp += eb
+  })
+  return { layers: out, gwt, depth: z, test: soil.test, name: soil.name, Er, Nkt: soil.Nkt, z1s: out.map((l) => l.z1) }
 }
-export const layerAt = (ds, z) => ds.layers.find((l) => z < l.z1) || ds.layers[ds.layers.length - 1]
+// lapis pada kedalaman z (pencarian biner; di bawah dasar bor → lapis terakhir)
+export function layerIx(ds, z) {
+  const a = ds.z1s || ds.layers.map((l) => l.z1)
+  let lo = 0, hi = a.length - 1
+  if (z >= a[hi]) return hi
+  while (lo < hi) { const m = (lo + hi) >> 1; if (z < a[m]) hi = m; else lo = m + 1 }
+  return lo
+}
+export const layerAt = (ds, z) => ds.layers[layerIx(ds, z)]
 // tegangan vertikal total dan efektif pada kedalaman z (lapis terakhir diperpanjang)
 export function stressAt(ds, z) {
+  if (z <= 0) return [0, 0]
+  const l = ds.layers[layerIx(ds, z)], last = ds.layers[ds.layers.length - 1]
+  if (l.st0 == null) return stressAtSlow(ds, z)
+  const b = l === last ? z : Math.min(z, l.z1), dry = clamp(Math.min(b, ds.gwt) - l.z0, 0, b - l.z0), wet = b - l.z0 - dry
+  return [l.st0 + l.g * dry + l.gsat * wet, Math.max(l.ef0 + l.g * dry + (l.gsat - GAMMA_W) * wet, 0)]
+}
+function stressAtSlow(ds, z) {
   let tot = 0, eff = 0
   for (const l of ds.layers) {
     if (z <= l.z0) break
@@ -81,16 +161,147 @@ export function avgOver(ds, a, b, f) {
   return w ? s / w : f(layerAt(ds, a))
 }
 
+// Blok tampilan: baris bersambung sejenis digabung (nilai = rata-rata tebal) — untuk gambar agar label tidak bertumpuk
+export function soilBlocks(ds) {
+  const out = []
+  for (const l of ds.layers) {
+    let b = out[out.length - 1]
+    if (!b || b.type !== l.type) { b = { type: l.type, coh: l.coh, z0: l.z0, z1: l.z0, n: 0, h: 0, cu: 0, phi: 0, N60: 0, E: 0, Cc: 0 }; out.push(b) }
+    const h = l.z1 - l.z0
+    b.z1 = l.z1; b.n++; b.h += h
+    for (const k of ["cu", "phi", "N60", "E", "Cc"]) b[k] += (l[k] || 0) * h
+  }
+  for (const b of out) for (const k of ["cu", "phi", "N60", "E", "Cc"]) b[k] /= Math.max(b.h, 1e-9)
+  return out
+}
+// ---------------------------------------------------------------- alat bantu input per interval
+const blankRow = (src) => ({ h: 1, type: "clay", g: null, gsat: null, N: null, qc: null, fs: null, ...Object.fromEntries(OVR.map((k) => [k, 0])), ...src })
+// Pecah profil menjadi baris setebal dz sampai kedalaman zmax (sifat diambil dari lapis asal di tengah baris; di bawah dasar bor = lapis
+// terakhir). blank: kosongkan N/qc/fs agar diisi per baris (sel kosong diinterpolasi). Maks. MAX_ROWS baris.
+export function resampleSoil(soil, dz, zmax, blank = false) {
+  dz = clamp(+dz || 0.5, 0.1, 10); zmax = clamp(+zmax || 30, dz, 150)
+  const n = Math.ceil(zmax / dz - 1e-9)
+  if (n > MAX_ROWS) throw new Error(L(`Terlalu banyak baris (${n}); maks. ${MAX_ROWS}. Perbesar interval atau kurangi kedalaman.`, `Too many rows (${n}); max. ${MAX_ROWS}. Increase the interval or reduce the depth.`))
+  const tops = []; let z = 0
+  for (const l of soil.layers) { tops.push([z, z + (+l.h || 0), l]); z += +l.h || 0 }
+  const at = (zz) => (tops.find(([, b]) => zz < b) || tops[tops.length - 1])[2]
+  const rows = []
+  for (let i = 0; i < n; i++) {
+    const a = i * dz, b = Math.min((i + 1) * dz, zmax), src = at((a + b) / 2)
+    rows.push(blankRow({ ...src, h: +(b - a).toFixed(4), ...(blank ? { N: null, qc: null, fs: null } : {}) }))
+  }
+  return { ...soil, layers: rows }
+}
+// Gabungkan baris bersambung yang isinya sama (jenis, γ, N, qc, fs, parameter lanjutan) → lapis lebih tebal
+export function mergeRows(soil) {
+  const keys = ["type", "g", "gsat", "N", "qc", "fs", ...OVR], same = (a, b) => keys.every((k) => (a[k] ?? null) === (b[k] ?? null))
+  const out = []
+  for (const l of soil.layers) { const p = out[out.length - 1]; if (p && same(p, l)) p.h = +(p.h + l.h).toFixed(4); else out.push({ ...l }) }
+  return { ...soil, layers: out }
+}
+// Jenis tanah tiap baris dari indeks perilaku CPT Ic (Robertson); baris tanpa qc/fs tidak diubah. Hasil: { soil, n (baris berubah) }
+export function classifyCpt(soil) {
+  const ds = deriveSoil(soil)
+  let n = 0
+  const layers = soil.layers.map((l, i) => { const t = ds.layers[i].typeIc; if (t && t !== l.type) { n++; return { ...l, type: t } } return l })
+  return { soil: { ...soil, layers }, n }
+}
+const TYPE_WORDS = [["clay", ["lempung", "clay", "lemp"]], ["silt", ["lanau", "silt"]], ["gravel", ["kerikil", "gravel", "batu"]], ["sand", ["pasir", "sand"]]]
+export function typeFromText(t) {
+  // kata sifat Inggris (silty sand = pasir) diabaikan; bahasa Indonesia kata pertama = jenis utama (pasir lanauan = pasir)
+  let x = String(t || "").toLowerCase(); const y = x.replace(/\b(clayey|silty|sandy|gravelly)\b/g, " ")
+  if (/clay|silt|sand|gravel|lemp|lanau|pasir|kerikil|batu/.test(y)) x = y
+  let best = null, bi = Infinity
+  for (const [k, ws] of TYPE_WORDS) for (const w of ws) { const i = x.indexOf(w); if (i >= 0 && i < bi) { bi = i; best = k } }
+  return best
+}
+const KGCM2 = { qc: 0.0980665, fs: 98.0665 }                                                // kg/cm² → MPa (qc) / kPa (fs)
+// Tempel tabel dari Excel / CSV / teks. Kolom dikenali dari baris judul (kedalaman, jenis, γ, γsat, N-SPT, qc, fs); tanpa judul:
+// N-SPT → "kedalaman  N  [qc]  [jenis]", CPT → "kedalaman  qc  [fs]  [jenis]". Kedalaman = dasar baris (baris i = kedalaman sebelumnya
+// s.d. kedalaman ini); rentang "0–0,5" juga diterima. Jenis/γ yang tidak diisi diambil dari profil base pada kedalaman itu.
+// o: { test, qcUnit: "mpa" | "kgcm2", fsUnit: "kpa" | "kgcm2", base (soil) }
+export function parseSoilPaste(text, o = {}) {
+  const cpt = o.test === "cpt", warn = []
+  const lines = String(text || "").replace(/\r/g, "").split("\n").map((x) => x.trim()).filter(Boolean)
+  const split = (ln) => (ln.includes("\t") ? ln.split("\t") : ln.includes(";") ? ln.split(";") : ln.split(/\s+/)).map((c) => c.trim())
+  const csv = (ln) => !ln.includes("\t") && !ln.includes(";") && !ln.includes(" ") && (ln.match(/,/g) || []).length >= 1 && /\./.test(ln)
+  const num = (c, dotOnly) => { const t = String(c).replace(/\s/g, ""); if (!t || /^[-–—]+$/.test(t)) return null; const v = Number(dotOnly ? t : t.replace(",", ".")); return isFinite(v) ? v : NaN }
+  const rng = (c) => { const m = String(c).replace(/\s/g, "").match(/^(\d+(?:[.,]\d+)?)[–—-](\d+(?:[.,]\d+)?)$/); return m ? Number(m[2].replace(",", ".")) : null }
+  let map = null
+  const head = (cells) => {
+    const m = {}
+    cells.forEach((c, i) => {
+      const x = c.toLowerCase()
+      if (m.z == null && (/kedalaman|depth|^z\b|^z\s*\(|elev/.test(x))) m.z = i
+      else if (m.type == null && /jenis|type|tanah|soil|deskrip|descr|lapis/.test(x)) m.type = i
+      else if (m.gsat == null && /sat/.test(x)) m.gsat = i
+      else if (m.g == null && /^γ|gamma|berat|unit w|^bv/.test(x)) m.g = i
+      else if (m.N == null && /spt|^n\b|^n\s*\(|^n60|pukulan|blow/.test(x)) m.N = i
+      else if (m.qc == null && /qc|konus|cone|ujung/.test(x)) m.qc = i
+      else if (m.fs == null && /fs|gesek|friction|sleeve|lekat|selimut/.test(x)) m.fs = i
+    })
+    return m.z != null && (m.N != null || m.qc != null) ? m : null
+  }
+  const recs = []
+  for (const ln of lines) {
+    const dotOnly = csv(ln), cells = dotOnly ? ln.split(",").map((c) => c.trim()) : split(ln)
+    const nums = cells.map((c) => rng(c) ?? num(c, dotOnly))
+    if (!map && !recs.length && nums.every((v) => v == null || isNaN(v))) { map = head(cells); continue }
+    let z, v = {}, type = null
+    if (map) {
+      z = nums[map.z]
+      for (const k of ["g", "gsat", "N", "qc", "fs"]) if (map[k] != null) v[k] = nums[map[k]]
+      if (map.type != null) type = typeFromText(cells[map.type])
+    } else if (cells.length >= 6 && isNaN(nums[1]) && nums[1] !== null) {
+      // urutan tabel app ini: z | jenis | γ | γsat | N-SPT | qc | fs (sel "–" = kosong)
+      z = nums[0]; type = typeFromText(cells[1])
+      Object.assign(v, { g: nums[2], gsat: nums[3], N: nums[4], qc: nums[5], fs: nums[6] ?? null })
+    } else {
+      const words = cells.filter((c, i) => isNaN(nums[i]) && nums[i] !== null)
+      const ns = nums.filter((x) => x != null && !isNaN(x))
+      type = typeFromText(words.join(" "))
+      z = ns[0]
+      if (cpt) { v.qc = ns[1]; v.fs = ns[2] } else { v.N = ns[1]; v.qc = ns[2] }
+    }
+    if (!(z > 0)) { if (lines.length) warn.push(L(`Baris dilewati: "${ln.slice(0, 40)}"`, `Line skipped: "${ln.slice(0, 40)}"`)); continue }
+    for (const k of Object.keys(v)) if (v[k] != null && (isNaN(v[k]) || v[k] < 0)) v[k] = null
+    if (v.qc != null && o.qcUnit === "kgcm2") v.qc *= KGCM2.qc
+    if (v.fs != null && o.fsUnit === "kgcm2") v.fs *= KGCM2.fs
+    recs.push({ z, type, ...v })
+  }
+  recs.sort((a, b) => a.z - b.z)
+  const uniq = recs.filter((r, i) => i === 0 || r.z > recs[i - 1].z + 1e-9)
+  if (uniq.length < recs.length) warn.push(L(`${recs.length - uniq.length} kedalaman ganda diabaikan.`, `${recs.length - uniq.length} duplicate depths ignored.`))
+  if (uniq.length > MAX_ROWS) throw new Error(L(`Terlalu banyak baris (${uniq.length}); maks. ${MAX_ROWS}.`, `Too many rows (${uniq.length}); max. ${MAX_ROWS}.`))
+  if (!uniq.length) throw new Error(L("Tidak ada baris data yang dikenali. Contoh: 0,5 ⇥ 12 (kedalaman, N-SPT).", "No data rows recognised. Example: 0.5 ⇥ 12 (depth, SPT N)."))
+  const base = o.base && o.base.layers && o.base.layers.length ? o.base : null, bt = []
+  if (base) { let zz = 0; for (const l of base.layers) { bt.push([zz + (+l.h || 0), l]); zz += +l.h || 0 } }
+  const baseAt = (zz) => (base ? (bt.find(([b]) => zz < b) || bt[bt.length - 1])[1] : null)
+  let z0 = 0
+  const layers = uniq.map((r) => {
+    const b = baseAt((z0 + r.z) / 2), row = blankRow({ ...(b || {}), h: +(r.z - z0).toFixed(4), N: null, qc: null, fs: null })
+    if (r.type) row.type = r.type
+    else if (!b) row.type = "clay"
+    if (r.type && b && r.type !== b.type) { row.g = null; row.gsat = null }
+    for (const k of ["g", "gsat", "N", "qc", "fs"]) if (r[k] != null) row[k] = r[k]
+    z0 = r.z
+    return row
+  })
+  return { layers, warn, n: layers.length, depth: z0, mapped: !!map }
+}
+
 // ---------------------------------------------------------------- kelas situs SNI 1726:2019 Tabel 5 (N̄ pada 30 m teratas)
+// N = tahanan penetrasi standar LAPANGAN (tanpa koreksi energi), tiap nilai dibatasi 100 (SNI 1726:2019 §5.4.2 / ASCE 7 §20.4.2).
+const Nsite = (l) => clamp(l.Nf ?? l.N60, 1, 100)
 export function siteClass(ds) {
   let sumD = 0, sumDN = 0, soft = 0
   for (const l of ds.layers) {
     const h = Math.max(0, Math.min(30, l.z1) - l.z0)
-    if (h > 0) { sumD += h; sumDN += h / Math.max(l.N60, 1) }
+    if (h > 0) { sumD += h; sumDN += h / Nsite(l) }
     if (l.coh && l.cu < 25 && l.z0 < 30) soft += Math.min(l.z1, 30) - l.z0
   }
   const extra = Math.max(0, 30 - sumD)
-  if (extra > 0) { sumDN += extra / Math.max(ds.layers[ds.layers.length - 1].N60, 1); sumD = 30 }
+  if (extra > 0) { sumDN += extra / Nsite(ds.layers[ds.layers.length - 1]); sumD = 30 }
   const Nbar = sumD / sumDN
   let cls = Nbar > 50 ? "SC" : Nbar >= 15 ? "SD" : "SE", why = `N̄ = ${Nbar.toFixed(1)} → ${Nbar > 50 ? "> 50" : Nbar >= 15 ? "15–50" : "< 15"}`
   if (soft >= 3 && cls !== "SE") { cls = "SE"; why += L(`; lempung lunak cu < 25 kPa setebal ${soft.toFixed(1)} m (≥ 3 m)`, `; soft clay cu < 25 kPa, ${soft.toFixed(1)} m thick (≥ 3 m)`) }
@@ -119,7 +330,8 @@ export function shallowQa(ds, B, Lf, Df, method, FS = 3) {
   const vesic = () => {
     const phi = avgOver(ds, za, zb, (x) => (x.coh ? 25 : x.phi)), [, Nq, Ng] = bearingFactors(phi)
     const gam = avgOver(ds, za, zb, (x) => (x.zm > ds.gwt ? x.gsat - GAMMA_W : x.g)), r = b / l, tp = Math.tan(rad(phi))
-    const sq = 1 + r * tp, sg = Math.max(1 - 0.4 * r, 0.6), dq = 1 + 2 * tp * (1 - Math.sin(rad(phi))) ** 2 * Math.min(Df / b, 1)
+    const kd = Df / b <= 1 ? Df / b : Math.atan(Df / b)                                      // Hansen/Vesic: Df/B > 1 → arctan(Df/B) (rad)
+    const sq = 1 + r * tp, sg = Math.max(1 - 0.4 * r, 0.6), dq = 1 + 2 * tp * (1 - Math.sin(rad(phi))) ** 2 * kd
     const qu = svp * Nq * sq * dq + 0.5 * gam * b * Ng * sg
     return { phi, Nq, Ng, gam, sq, sg, dq, qu }
   }
@@ -183,10 +395,27 @@ export function pileAxial(ds, o) {
     if (open) Qsi += f * Math.PI * Di * dz
     if (i % step === 0) prof.push({ z, svp, f, Qs: Qso, type: l.type })
   }
-  const zt = z0 + Lp, lt = layerAt(ds, zt - 1e-6), [, svT] = stressAt(ds, zt)
-  let q
-  if (method === "spt") q = lt.coh ? 9 * lt.cu : Math.min((bored ? 13 : 40) * lt.N60 * Lp / D, (bored ? 130 : 400) * lt.N60)
-  else if (method === "cpt") q = (lt.coh ? (bored ? 0.375 : 0.55) : (bored ? 0.15 : 0.4)) * lt.qcE * 1000
+  const zt = z0 + Lp, it = layerIx(ds, zt - 1e-6), lt = ds.layers[it], [, svT] = stressAt(ds, zt)
+  let q, tipx = {}
+  if (method === "spt") {
+    if (lt.coh) q = 9 * lt.cu
+    else {
+      // Meyerhof (1976), Das: N60 rata-rata dekat ujung (10D di atas s.d. 4D di bawah ujung); Lb = penetrasi ke dalam lapis pendukung
+      // granular yang bersambung di atas ujung (bukan panjang tiang total), qp = 40·N̄·Lb/D ≤ 400·N̄ (pancang) / 13·N̄·Lb/D ≤ 130·N̄ (bor).
+      const za = Math.max(zt - 10 * D, 0), zb = zt + 4 * D, Nb = avgOver(ds, za, zb, (x) => x.N60)
+      let k = it; while (k > 0 && !ds.layers[k - 1].coh) k--
+      const Lb = Math.max(zt - ds.layers[k].z0, 0)
+      q = Math.min((bored ? 13 : 40) * Nb * Lb / D, (bored ? 130 : 400) * Nb)
+      tipx = { Nb, Lb, za, zb }
+    }
+  } else if (method === "cpt") {
+    // LCPC (Bustamante & Gianeselli 1982): qca = rata-rata qc pada ujung ± 1,5D, tiap qc dibatasi 0,7–1,3·qca' lalu dirata-rata ulang
+    const za = Math.max(zt - 1.5 * D, 0), zb = zt + 1.5 * D, m = 30, smp = []
+    for (let j = 0; j <= m; j++) smp.push(layerAt(ds, za + (zb - za) * j / m).qcE)
+    const q1 = smp.reduce((a, b) => a + b, 0) / smp.length, qca = smp.reduce((a, b) => a + clamp(b, 0.7 * q1, 1.3 * q1), 0) / smp.length
+    q = (lt.coh ? (bored ? 0.375 : 0.55) : (bored ? 0.15 : 0.4)) * qca * 1000
+    tipx = { qca, qca1: q1, za, zb }
+  }
   else if (bored) q = lt.coh ? Math.min(9 * lt.cu, 3800) : Math.min(57.5 * lt.N60, 2900)
   else q = lt.coh ? 9 * lt.cu : Math.min(apiSand(lt.phi).Nq * svT, apiSand(lt.phi).qlim)
   const Ag = Math.PI * D * D / 4, Aan = bored ? Ag : Math.PI * (D * D - Di * Di) / 4
@@ -196,7 +425,7 @@ export function pileAxial(ds, o) {
   const wet = Math.max(0, Math.min(Lp, zt - Math.max(z0, ds.gwt)))
   const Wp = bored ? GAMMA_C * Ag * Lp - GAMMA_W * Ag * wet : GAMMA_S * Aan * Lp - GAMMA_W * Aan * wet
   const Qt = (bored ? 0.75 : 1) * Qso + Wp
-  return { Qso, Qsi, q, Qb: plugged ? q * Ag : q * Aan, plugged, Qc, Qt, Wp, prof, tip: { type: lt.type, coh: lt.coh, z: zt, svp: svT }, method, Ag, Aan, D, Lp, z0, bored }
+  return { Qso, Qsi, q, Qb: plugged ? q * Ag : q * Aan, plugged, Qc, Qt, Wp, prof, tip: { type: lt.type, coh: lt.coh, z: zt, svp: svT, ...tipx }, method, Ag, Aan, D, Lp, z0, bored }
 }
 // Lapisan format pile.js (untuk lateral Broms/Winkler), kedalaman relatif kepala tiang pada z0
 export function pileLayers(ds, z0 = 0) {
@@ -224,6 +453,17 @@ function settleSoil(ds, zb) {
   const last = ds.layers[ds.layers.length - 1]
   if (zb >= ds.depth) { gu += last.g * (zb - ds.depth); gs += last.gsat * (zb - ds.depth); w += zb - ds.depth }
   if (!layers.length || layers.reduce((a, x) => a + x.H, 0) < 3) layers.push(mk(last, 5))
+  // Strata konsolidasi: baris kohesif yang bersambung = satu lapisan lempung (drainase dua arah di batas atas & bawahnya),
+  // jadi Hdr = ½·tebal strata, bukan ½·tebal baris. Tanpa ini data per 0,5 m membuat konsolidasi (t90) jauh terlalu cepat.
+  let z = zb, i = 0
+  while (i < layers.length) {
+    if (!layers[i].clay) { z += layers[i].H; i++; continue }
+    let j = i, H = 0
+    while (j < layers.length && layers[j].clay) { H += layers[j].H; j++ }
+    const nm = `${L("Lempung/lanau", "Clay/silt")} ${z.toFixed(1)}–${(z + H).toFixed(1)} m`
+    for (let k = i; k < j; k++) Object.assign(layers[k], { Hdr: H / 2, grp: nm, name: j - i > 1 ? `${nm} · ${layers[k].name}` : layers[k].name })
+    z += H; i = j
+  }
   return { Df: zb, gamma_up: w ? gu / w : 18, gsat_up: w ? gs / w : 19, Dw: ds.gwt, layers }
 }
 export const SETTLE_OPT = { life: 20, allow: 50, allowDeep: 25, method: "boussinesq", rig: "kaku", dz: 0.5 }

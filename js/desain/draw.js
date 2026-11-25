@@ -64,11 +64,14 @@ export function pileElevation(I, Rr, P) {
   const ky = (H - top - 40) / (depth + hc + 1.4), Z = (z) => top + (1.4 + hc + z) * ky
   const x0 = 40, x1 = 560, cw = (I.nx - 1) * I.sx + 2 * I.ce, kx = Math.min((x1 - x0 - 170) / cw, ky * 4), cx = (x0 + x1) / 2, X = (x) => cx + x * kx
   // tanah
+  // baris tipis sejenis yang bersambung digambar sebagai satu pita (label = rata-rata tebal) supaya label tidak bertumpuk
+  const bands = []
+  I.layers.forEach((ly) => { const b = bands[bands.length - 1]; if (b && b.type === ly.type) { b.cu += ly.cu * ly.h; b.phi += ly.phi * ly.h; b.h += ly.h; b.n++ } else bands.push({ type: ly.type, h: ly.h, cu: ly.cu * ly.h, phi: ly.phi * ly.h, n: 1 }) })
   let z = 0
-  I.layers.forEach((ly) => {
-    const y0 = Z(z), y1 = Z(Math.min(z + ly.h, depth))
+  bands.forEach((ly) => {
+    const y0 = Z(z), y1 = Z(Math.min(z + ly.h, depth)), cu = ly.cu / ly.h, phi = ly.phi / ly.h, pre = ly.n > 1 ? "≈ " : ""
     R(s, x0, y0, x1 - x0, y1 - y0, ly.type === "clay" ? P.clay : P.sand, null, { op: 0.55 })
-    T(s, x0 + 8, y0 + 18, ly.type === "clay" ? `${L("Lempung", "Clay")} cu = ${nf(toDisp("Q", ly.cu), 0)} ${uName("Q")}` : `${L("Pasir", "Sand")} φ = ${nf(ly.phi, 0)}°`, { c: P.ink, fs: 12, b: true })
+    if (y1 - y0 >= 22) T(s, x0 + 8, y0 + 18, ly.type === "clay" ? `${L("Lempung", "Clay")} cu ${pre}${nf(toDisp("Q", cu), 0)} ${uName("Q")}` : `${L("Pasir", "Sand")} φ ${pre}${nf(phi, 0)}°`, { c: P.ink, fs: 12, b: true })
     z += ly.h
   })
   s.append(sv("line", { x1: x0, y1: Z(0), x2: x1, y2: Z(0), stroke: P.ink, "stroke-width": 2 }))

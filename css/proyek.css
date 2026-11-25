@@ -132,3 +132,21 @@
 .pj-pilecard small.hint { flex-basis: 100%; font-size: .72rem; color: var(--muted); line-height: 1.35; }
 .pj-pilecard span { font-size: .84rem; } .pj-pilecard .pj-kv i { font-style: normal; color: var(--muted); font-size: .76rem; margin-left: 6px; }
 .pj-pilecard a { margin-left: auto; font-weight: 800; font-size: .84rem; color: var(--accent); text-decoration: none; }
+/* tab Tanah: input per interval */
+.pj-soilbar { margin: 4px 0 8px; }
+.pj-soilbar .dz-add { margin-top: 0; }
+.pj-soilbar .dz-add.on { border-style: solid; border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.pj-soilbar .dz-add.warn { border-color: var(--dz-warn, #b7791f); color: var(--dz-warn, #b7791f); }
+.pj-soilinfo { margin-left: auto; font-size: .8rem; }
+.pj-soilwrap { max-height: 62vh; overflow: auto; border: 1px solid var(--line); border-radius: 14px; padding: 0 6px; }
+.pj-soilwrap thead th { position: sticky; top: 0; z-index: 1; background: var(--card); padding: 8px 6px; }
+.pj-edit td.dz-zn { color: var(--muted); font-size: .78rem; text-align: right; font-variant-numeric: tabular-nums; }
+.pj-edit td.dz-zz { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: .86rem; }
+.pj-edit td input::placeholder { color: var(--muted); opacity: .75; }
+.pj-tool { margin: 4px 0 10px; padding: 12px; border-radius: 16px; border: 1px solid var(--line); background: var(--field); display: flex; flex-direction: column; gap: 8px; }
+.pj-tool .dz-note.bad { color: var(--dz-bad); }
+.pj-paste { width: 100%; min-height: 140px; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--ink); resize: vertical; }
+.pj-pastemsg { display: flex; flex-direction: column; gap: 2px; font-size: .86rem; }
+.pj-pastemsg .bad { color: var(--dz-bad); }
+.pj-apply { align-self: flex-start; min-height: 42px; padding: 0 18px; border-radius: 12px; border: 0; color: #fff; font-weight: 700; background: linear-gradient(135deg, var(--btn1), var(--btn2)); }
+.pj-apply:disabled { opacity: .45; }
