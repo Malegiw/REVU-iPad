@@ -1,5 +1,5 @@
 // Modul halaman: Tiang pancang pipa baja & tiang helical (kapasitas, lateral, titik jepit, momen, kepala tiang & sambungan ke pile cap).
-import { L, nf, toDisp, uName, expandCombos } from "./core.js"
+import { L, nf, toDisp, uName, expandCombos, chk } from "./core.js"
 import { analyzePile } from "./pile.js"
 import { GRADES } from "./steel.js"
 import { circlePoly, barsOnCircle, pmCurve } from "./rc.js"
@@ -8,9 +8,9 @@ import { layersEditor, loadsEditor, addUserLoads, LOAD_LABEL } from "./ui.js"
 import { palette, pileElevation, pileConnection, pmChart } from "./draw.js"
 import { pileSteps } from "./steps.js"
 import { skPileSection, skPileSoil, skPileGroup, skPileConn } from "./sketch.js"
-import { pileAxial, pileLayers, AXIAL_METHOD, typeName, settleGroup } from "./soil.js"
+import { pileAxial, pileLayers, AXIAL_METHOD, typeName, fillName, settleGroup, nsfModel } from "./soil.js"
 import { settleOf, settleTable } from "./deep.js"
-import { E_STEEL } from "./steel.js"
+import { E_STEEL, pipeCapacity } from "./steel.js"
 
 export const id = "tiang"
 export const icon = "📍"
@@ -141,13 +141,24 @@ export function run(s, ctx) {
   ]
   if (proj) kv[1] = { title: L("Tanah (tab Tanah)", "Soil (Soil tab)"), rows: [[L("Penyelidikan", "Investigation"), `${ds.name || "BH"} · ${ds.test === "cpt" ? "CPT" : "N-SPT"}`], [L("Kepala tiang zh", "Pile head zh"), s.zHead, "m", 2], [L("Muka air tanah", "Groundwater"), ds.gwt, "m", 2],
     ...(R.isH ? [] : [[L("Metode aksial", "Axial method"), AXIAL_METHOD()[s.ameth]]]),
-    ...ds.layers.filter((l) => l.z1 > s.zHead).map((l) => [`${nf(l.z0, 1)}–${nf(l.z1, 1)} m`, `${typeName(l.type)} · N60 ${nf(l.N60, 0)} · ${l.coh ? "cu " + nf(toDisp("Q", l.cu), 0) + " " + uQ : "φ " + nf(l.phi, 1) + "°"} · E ${nf(l.E / 1000, 1)} MPa`])] }
+    ...ds.layers.filter((l) => l.z1 > s.zHead).map((l) => [`${nf(l.z0, 1)}–${nf(l.z1, 1)} m`, `${fillName(l)} · N60 ${nf(l.N60, 0)} · ${l.coh ? "cu " + nf(toDisp("Q", l.cu), 0) + " " + uQ : "φ " + nf(l.phi, 1) + "°"} · E ${nf(l.E / 1000, 1)} MPa`])] }
   // penurunan kelompok tiang (A1 = D + Do, beban tetap) — data tanah proyek
   let settle = null
   if (proj) {
     const a1 = R.asd.find((a) => a.c.base === "A1") || R.asd[0], D = R.D, Lp0 = R.Lp
     const Ast = Math.PI / 4 * (R.Dmm ** 2 - (R.Dmm - 2 * R.tmm) ** 2) * 1e-6
-    const st = settleGroupFor(ds, { D, Lp: Lp0, Ap: Ast, Ep: E_STEEL * 1000, n: R.n, Bg: (I.nx - 1) * I.sx + D, Lg: (I.ny - 1) * I.sy + D, Q: a1 ? a1.r.P : 0, Qb: R.ax.Qb ?? 0, Qu: R.ax.Qc, qb: R.ax.q ?? 1000, z0: s.zHead, driven: true }, ctx)
+    const st = settleGroupFor(ds, { D, Lp: Lp0, Ap: Ast, Ep: E_STEEL * 1000, n: R.n, Bg: (I.nx - 1) * I.sx + D, Lg: (I.ny - 1) * I.sy + D, Q: a1 ? a1.r.P : 0, Qb: R.ax.Qb ?? 0, Qu: R.ax.Qc, qb: R.ax.q ?? 1000, z0: s.zHead, driven: true, ...(axS ? { ax: axS } : {}) }, ctx)
+    // gesekan negatif (timbunan / penurunan MAT di tab Tanah): bidang netral pada reaksi tekan terbesar
+    if (ds.fill && axS && R.govC) {
+      const md = nsfModel(ds, axS, { EA: Ast * E_STEEL * 1000 }), Pm = Math.max(R.govC.r.max, 0), r = md.solve(ds.fill.qd * Pm)
+      const Le = Math.max(R.Le, 0.5), Pa = pipeCapacity(R.Dmm, R.tmm, I.Fy, 1.2 * Le * 1000, Le * 1000).phiPn / 0.9 / 1.67
+      const gN = L("Gesekan negatif (tab Tanah)", "Negative skin friction (Soil tab)"), conv = ds.fill.meth === "conv"
+      if (conv) R.checks.push(chk(gN, L(`Geoteknik: P + Qn ≤ (Qu − Rs,atas NP)/FS (NP ${nf(r.zn, 2)} m)`, `Geotechnical: P + Qn ≤ (Qu − Rs,above NP)/FS (NP ${nf(r.zn, 2)} m)`), "Tomlinson / FHWA", Pm + r.Qn, (axS.Qc - r.RsAbove) / I.fsC, "F", { note: R.govC.c.id, d: 1 }))
+      R.checks.push(chk(gN, conv ? L("Struktur: P + Qn ≤ Pa", "Structure: P + Qn ≤ Pa") : L(`Struktur di bidang netral: Qd + Qn ≤ Pa (NP ${nf(r.zn, 2)} m)`, `Structure at neutral plane: Qd + Qn ≤ Pa (NP ${nf(r.zn, 2)} m)`),
+        conv ? "Tomlinson / FHWA" : "Fellenius (2004) · AASHTO LRFD §3.11.8", conv ? Pm + r.Qn : r.Qmax, Pa, "F", { note: R.govC.c.id, d: 1 }))
+      R.nsf = { ...r, Pa, Pm }
+      metrics.push({ lab: L("Bidang netral NP", "Neutral plane NP"), val: r.zn, d: 2, unit: "m" }, { lab: L("Gaya seret Qn", "Drag force Qn"), val: toDisp("F", r.Qn), d: 0, unit: uF })
+    }
     settle = settleOf("deep", ctx, { st }, s.sAllow || 0, R.isH ? L("Tiang helical", "Helical piles") : L("Tiang pipa baja", "Steel pipe piles"), "tiang")
     settle.group = { D, Lp: Lp0, n: R.n, Bg: (I.nx - 1) * I.sx + D, Lg: (I.ny - 1) * I.sy + D, Q: a1 ? a1.r.P : 0, z0: s.zHead, Qb: R.ax.Qb ?? 0, Qu: R.ax.Qc, qb: R.ax.q ?? 1000, Ap: Ast, Ep: E_STEEL * 1000, driven: true }
     R.checks.push(settle.check)
@@ -192,6 +203,7 @@ export function run(s, ctx) {
     L("Kapasitas aksial: API RP 2GEO (α untuk lempung, β untuk pasir dengan batas fs dan q), ujung terbuka dicek tersumbat/tidak; helical: individual bearing (AC358, Nq = 1 + 0,56(12φ)^(φ/54)) dan korelasi torsi bila diisi.", "Axial capacity: API RP 2GEO (α for clay, β for sand with fs and q limits), open-end plugged/unplugged; helical: individual bearing (AC358, Nq = 1 + 0.56(12φ)^(φ/54)) and torque correlation when given."),
     L("Lateral: Broms umum (pu = 3Kp·σ'v·D pasir; 9cu·D di bawah 1,5D lempung) sebagai kapasitas ultimit, Winkler/elemen hingga linear (nh Terzaghi, k = 67cu Davisson) untuk defleksi & momen layan/terfaktor.", "Lateral: generalised Broms (pu = 3Kp·σ'v·D sand; 9cu·D below 1.5D clay) for ultimate capacity, linear Winkler/finite elements (Terzaghi nh, Davisson k = 67cu) for service/factored deflection & moment."),
     L("Struktur: AISC 360-16 (SNI 1729:2020) dengan penampang setelah korosi; interaksi H1-1 memakai amplifikasi B1 = 1/(1 − Pr/Pe).", "Structure: AISC 360-16 (SNI 1729:2020) on the corroded section; H1-1 interaction with B1 = 1/(1 − Pr/Pe)."),
+    ...(R.nsf ? [L(`Gesekan negatif: metode ${ds.fill.meth === "conv" ? "konvensional" : "terpadu Fellenius"} dari timbunan/penurunan MAT tab Tanah — NP ${nf(R.nsf.zn, 2)} m, Qn ${nf(toDisp("F", R.nsf.Qn), 0)} ${uF}, downdrag kepala ${nf(R.nsf.sHead * 1000, 1)} mm (masuk penurunan kelompok).`, `Negative skin friction: ${ds.fill.meth === "conv" ? "conventional" : "Fellenius unified"} method from the Soil tab fill/groundwater lowering — NP ${nf(R.nsf.zn, 2)} m, Qn ${nf(toDisp("F", R.nsf.Qn), 0)} ${uF}, head downdrag ${nf(R.nsf.sHead * 1000, 1)} mm (included in group settlement).`)] : []),
     L("Batas: tanpa analisis p-y nonlinear, penurunan kelompok, gesek negatif, pancang (driveability), dan likuefaksi. Verifikasi dengan uji beban (PDA/statik) sesuai SNI 8460:2017.", "Limits: no nonlinear p-y, group settlement, downdrag, driveability or liquefaction. Verify with load tests (PDA/static) per SNI 8460:2017."),
     ...R.warn,
   ]

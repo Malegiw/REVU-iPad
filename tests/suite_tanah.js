@@ -4,9 +4,10 @@
 import * as S from "../js/desain/soil.js"
 import * as pl from "../js/desain/pile.js"
 import * as ft from "../js/desain/footing.js"
-import { pileLayout } from "../js/desain/deep.js"
-import { TV90 } from "../js/penurunan.js"
+import { pileLayout, singlePile, effPile, pileSprings } from "../js/desain/deep.js"
+import { TV90, uOfTv } from "../js/penurunan.js"
 import { analyze, overburden } from "../js/penurunan.js"
+import { projDefaults } from "../js/project.js"
 import { sdc, spectrum } from "../js/project.js"
 import { seismicParams } from "../js/desain/core.js"
 
@@ -175,4 +176,73 @@ export async function run({ check }) {
   truthy("profil tiang: σ'v pencarian biner = penjumlahan langsung (60 kedalaman)", Array.from({ length: 60 }, (_, i) => i * 0.613).every((zz) => Math.abs(P0.sv(zz) - naive(zz)) < 1e-9))
   truthy("stressAt cepat = lambat (100 kedalaman, termasuk di bawah dasar bor)", Array.from({ length: 100 }, (_, i) => i * 0.47).every((zz) => { const [a, b] = S.stressAt(dB, zz), ds0 = { ...dB, layers: dB.layers.map(({ st0, ...l }) => l) }, [c, d] = S.stressAt(ds0, zz); return Math.abs(a - c) < 1e-9 && Math.abs(b - d) < 1e-9 }))
   near("TV90 = 0,848", TV90, 0.848, 2e-3)
+
+  // ---- timbunan baru, penurunan tanah, gesekan negatif & bidang netral, koefisien pegas
+  const FL = (o) => ({ ...S.FILL0, on: true, ...o })
+  const prof = [ly(4, "clay", 4, { OCR: 1, Cc: 0.3, Cs: 0.05, e0: 1.0 }), ly(10, "sand", 30)]
+  const d0 = soil(prof), dF = soil(prof, { fill: FL({ H: 2, g: 20, type: "sand", N: 12 }) })
+  truthy("tanpa timbunan (on = false / H = 0 & Δh = 0) → profil identik, ds.fill = null", soil(prof, { fill: { ...S.FILL0 } }).fill === null && soil(prof, { fill: FL({ H: 0, dGwt: 0 }) }).fill === null && JSON.stringify(soil(prof, { fill: FL({ on: false, H: 3 }) }).layers) === JSON.stringify(d0.layers))
+  truthy("timbunan: baris timbunan di atas, z = 0 puncak timbunan, kedalaman & MAT + H", dF.layers.length === 3 && dF.layers[0].fill && dF.layers[0].z1 === 2 && Math.abs(dF.depth - d0.depth - 2) < 1e-12 && Math.abs(dF.gwt - d0.gwt - 2) < 1e-12 && Math.abs(dF.layers[1].z0 - 2) < 1e-12)
+  truthy("timbunan: korelasi tanah asli memakai σ'v sebelum timbunan (cu, φ, N1 tidak berubah)", dF.layers[1].cu === d0.layers[0].cu && dF.layers[2].phi === d0.layers[1].phi && dF.layers[2].N1 === d0.layers[1].N1)
+  near("timbunan: σ'v desain = σ'v asli + γf·H", S.stressAt(dF, 2 + 7.3)[1], S.stressAt(d0, 7.3)[1] + 40, 1e-12)
+  near("timbunan: σ'v di dalam timbunan = γf·z", S.stressAt(dF, 1.5)[1], 20 * 1.5, 1e-12)
+  const l1 = dF.layers[1]
+  near("OCR desain sesudah timbunan = maks(OCR·σ'0; σ'0 + Δσ)/(σ'0 + Δσ)", l1.OCRd, Math.max(l1.OCR * l1.svp0, l1.svp0 + 40) / (l1.svp0 + 40), 1e-12)
+  // penurunan tanah akibat timbunan: lempung NC 4 m (8 sub-lapis) + pasir elastis 10 m
+  const fsl = S.fillSettle(dF, 20), Msand = (() => { const l = dF.layers[2], nu = l.nu; return l.E * (1 - nu) / ((1 + nu) * (1 - 2 * nu)) })()
+  let scl = 0
+  for (let i = 0; i < 8; i++) { const z = 0.25 + 0.5 * i, s0 = 18 * z; scl += 0.5 / 2 * 0.3 * Math.log10((s0 + 40) / s0) }
+  near("konsolidasi akibat timbunan = Σ h/(1+e0)·Cc·log((σ'0 + Δσ)/σ'0) + pasir Δσ·H/M", fsl.fin, scl + 40 * 10 / Msand, 1e-9)
+  near("sebelum konstruksi (tPre = 0) = pemampatan pasir seketika", fsl.s1, 40 * 10 / Msand, 1e-9)
+  near("sisa sesudah konstruksi = sc·U(cv·t2/Hdr²), Hdr = ½·4 m", fsl.rem, scl * uOfTv(2 * 20 / 4), 1e-9)
+  truthy("profil penurunan: di dalam timbunan = muka tanah asli, di bawah lempung = 0 (pasir seketika)", Math.abs(fsl.remAt(0.7) - fsl.rem) < 1e-12 && fsl.remAt(6.01) === 0 && fsl.remAt(4) > 0 && fsl.remAt(4) < fsl.rem)
+  const fsW = S.fillSettle(soil(prof, { fill: FL({ H: 2, g: 20, tPre: 1 }) }), 20)
+  near("masa tunggu 1 th: sisa = sc·[U(t1 + umur) − U(t1)]", fsW.rem, scl * (uOfTv(2 * 21 / 4) - uOfTv(2 * 1 / 4)), 1e-9)
+  // penurunan MAT saja (pasir): Δσ' = γw·min(maks(z − MAT, 0), Δh), sesudah konstruksi
+  const dW = soil([ly(10, "sand", 20)], { gwt: 1, fill: FL({ H: 0, dGwt: 2 }) }), lw = dW.layers[0], Mw = lw.E * (1 - lw.nu) / ((1 + lw.nu) * (1 - 2 * lw.nu))
+  let sw = 0
+  for (let i = 0; i < 20; i++) sw += 9.81 * Math.min(Math.max(0.25 + 0.5 * i - 1, 0), 2) * 0.5 / Mw
+  near("penurunan MAT Δh = 2 m pada pasir: Σ γw·Δh(z)·h/M (seluruhnya sesudah konstruksi)", S.fillSettle(dW, 20).rem, sw, 1e-9)
+  // gesekan negatif: lempung lunak 10 m + pasir padat, timbunan 2 m
+  const dN = soil([ly(10, "clay", 3, { OCR: 1, Cc: 0.4, Cs: 0.06, e0: 1.2 }), ly(25, "sand", 40)], { gwt: 1, fill: FL({ H: 2, g: 19 }) })
+  const axN = S.pileAxial(dN, { D: 0.5, t: 0.0127, Lp: 16, open: false, method: "api", kind: "pipe", z0: 1 }), EA = 2e8 * Math.PI / 4 * (0.5 ** 2 - (0.5 - 0.0254) ** 2)
+  near("pileAxial: Σ fs·πD·Δz per segmen = Qs luar", Array.from(axN.seg.f).reduce((a, f) => a + f * Math.PI * 0.5 * axN.seg.dz, 0), axN.Qso, 1e-9)
+  const rs = [0, 400, 900].map((Qd) => S.negSkin(dN, axN, { Qd, EA, life: 20 }))
+  truthy("bidang netral: keseimbangan gaya Qd + Qn = Rs(bawah NP) + Rt", rs.every((r) => Math.abs(r.Qmax - r.RsBelow - r.Rt) < 1e-6 * Math.max(r.Qmax, 1)))
+  truthy("bidang netral: kesesuaian penurunan — penurunan tiang = tanah di NP; δ ujung sesuai kurva q–z", rs.every((r) => r.none || Math.abs(r.Rt - r.Rtu * Math.sqrt(Math.min(Math.max(r.dT, 0) / r.du, 1))) < 1e-3 * Math.max(r.Rtu, 1)))
+  truthy("bidang netral naik & gaya maks bertambah bila beban tetap Qd naik", rs[0].zn > rs[1].zn && rs[1].zn > rs[2].zn && rs[0].Qmax < rs[1].Qmax && rs[1].Qmax < rs[2].Qmax)
+  truthy("NP di antara batas keseimbangan gaya Rt = 0 dan Rt = Rt,u", rs.every((r) => r.zn0 - 1e-6 <= r.zn && r.zn <= r.znU + 1e-6))
+  let qnI = 0
+  const zn1 = rs[1].zn, nI = 4000
+  for (let i = 0; i < nI; i++) { const z = 1 + (zn1 - 1) * (i + 0.5) / nI, l = S.layerAt(dN, z); qnI += (l.coh ? 0.25 : 0.35) * S.stressAt(dN, z)[1] * Math.PI * 0.5 * (zn1 - 1) / nI }
+  near("gaya seret Qn = Σ β·σ'v·πD·Δz (kepala → NP)", rs[1].Qn, qnI, 2e-3)
+  truthy("beban sangat besar → tiang turun melebihi tanah, tanpa gesekan negatif", S.negSkin(dN, axN, { Qd: 50000, EA, life: 20 }).none)
+  near("downdrag kepala = s_tanah(NP) + pemendekan di atas NP", rs[1].sHead, rs[1].sN + rs[1].ca, 1e-12)
+  const g0 = { D: 0.5, Lp: 16, Ap: EA / 2e8, Ep: 2e8, n: 4, Bg: 2, Lg: 2, Q: 1600, Qb: axN.Qb, Qu: axN.Qc, qb: axN.q, z0: 1, driven: true, ax: axN }
+  const sgN = S.settleGroup(dN, g0, { life: 20 }), sg0 = S.settleGroup(soil([ly(10, "clay", 3, { OCR: 1, Cc: 0.4, Cs: 0.06, e0: 1.2 }), ly(25, "sand", 40)], { gwt: 1 }), { ...g0, z0: 1, ax: S.pileAxial(soil([ly(10, "clay", 3, { OCR: 1, Cc: 0.4, Cs: 0.06, e0: 1.2 }), ly(25, "sand", 40)], { gwt: 1 }), { D: 0.5, t: 0.0127, Lp: 16, open: false, method: "api", kind: "pipe", z0: 1 }) }, { life: 20 })
+  truthy("penurunan kelompok + downdrag di NP (analisis terpadu); tanpa timbunan tidak ada downdrag", sgN.dd && sgN.dd.how === "np" && Math.abs(sgN.sdd - S.negSkin(dN, axN, { Qd: 400, EA, life: 20 }).sN) < 1e-9 && sg0.dd === null && sg0.sdd === 0)
+  const shF = S.settleShallow(dN, { shape: "persegi", B: 2, L: 2, Df: 1.5, q: 120 }, { life: 20 })
+  near("pondasi dangkal + sisa penurunan tanah akibat timbunan di Df", shF.sf, S.fillSettle(dN, 20).remAt(1.5), 1e-12)
+  // desain tiang: terpadu vs konvensional
+  const pile0 = { ...projDefaults().pile, kind: "pipe", D: 508, t: 12.7, open: false, L: 22, method: "api", z0: 1 }
+  const spU = singlePile(effPile({ pSrc: "proj" }, { pile: pile0 }), dN, 1), nsU = spU.ns
+  truthy("Qa terpadu: ≤ min(Qu/FS; Pa) dan Qd + Qn ≤ Pa di NP", nsU.uni.Qa <= Math.min(spU.Qac, spU.Pstr) + 1e-6 && nsU.uni.r.Qmax <= spU.Pstr * (1 + 1e-6))
+  const rC = nsU.conv.r
+  truthy("Qa konvensional = (Qu − Rs,atas NP)/FS − Qn ≤ Pa − Qn dan < Qa terpadu", nsU.conv.Qa > 0 && Math.abs(nsU.conv.Qa - Math.min((spU.ax.Qc - rC.RsAbove) / pile0.fsC - rC.Qn, spU.Pstr - rC.Qn)) < 1 && nsU.conv.Qa < nsU.uni.Qa)
+  const spC = singlePile(effPile({ pSrc: "proj" }, { pile: pile0 }), soil([ly(10, "clay", 3, { OCR: 1, Cc: 0.4, Cs: 0.06, e0: 1.2 }), ly(25, "sand", 40)], { gwt: 1, fill: FL({ H: 2, g: 19, meth: "conv" }) }), 1)
+  truthy("metode konvensional dipakai untuk Qa desain bila dipilih; tanpa timbunan Qa = min(Qu/FS; Pa)", Math.abs(spC.Qad - spC.ns.conv.Qa) < 1e-6 && singlePile(effPile({ pSrc: "proj" }, { pile: pile0 }), d0, 1).ns === null)
+  // koefisien pegas
+  const ksD = soil([ly(30, "sand", 20)], { gwt: 5 }), qaK = S.shallowQa(ksD, 2, 2, 1, "spt", 3).qa, kS = S.shallowSprings(ksD, { B: 2, L: 2, Df: 1, qa: qaK, FS: 3, settle: S.SETTLE_OPT })
+  near("ks Bowles = 40·FS·qa", kS.bow, 40 * 3 * qaK, 1e-12)
+  near("ks Vesic = Es/(B(1 − ν²))", kS.ves, ksD.layers[0].E / (2 * (1 - 0.3 ** 2)), 1e-12)
+  const stK = S.settleShallow(ksD, { shape: "persegi", B: 2, L: 2, Df: 1, q: qaK }, S.SETTLE_OPT)
+  near("ks dari penurunan segera = q_net/si", kS.kI, stK.res.q_net / stK.res.si, 1e-12)
+  const clayP = soil([ly(30, "clay", 10)], { gwt: 0 }), pileK = { ...projDefaults().pile, kind: "pipe", D: 406.4, t: 12.7, L: 15, z0: 0 }
+  const psK = pileSprings(effPile({ pSrc: "proj" }, { pile: pileK }), clayP, 0, { Q: 300, dz: 1, settle: S.SETTLE_OPT })
+  const KF = [0, 1].map((i) => [0, 1].map((j) => psK.K[i][0] * psK.F[0][j] + psK.K[i][1] * psK.F[1][j]))
+  truthy("matriks kekakuan kepala bebas = invers fleksibilitas (K·F = I)", Math.abs(KF[0][0] - 1) < 1e-9 && Math.abs(KF[1][1] - 1) < 1e-9 && Math.abs(KF[0][1]) < 1e-9 && Math.abs(KF[1][0]) < 1e-9)
+  near("Kyy kepala bebas = kekakuan kepala jepit H/y (θ = 0)", psK.K[0][0], psK.KhFix, 1e-6)
+  near("pegas lateral lempung: k titik tengah = 67·cu·Δz, kh = 67·cu/D", psK.nodes[5].k, 67 * 60 * 1, 1e-9)
+  truthy("pegas titik ujung = ½Δz; kh lempung = 67cu/D", Math.abs(psK.nodes[0].k - 67 * 60 * 0.5) < 1e-9 && Math.abs(psK.nodes[3].kh - 67 * 60 / 0.4064) < 1e-9 && psK.nodes.length === 16)
+  near("pegas vertikal kv = Q/s1 (Vesic)", psK.kv, 300 / psK.s1, 1e-12)
 }
