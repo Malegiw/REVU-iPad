@@ -120,7 +120,7 @@ export function winkler(EI, e, Lp, kD, head, H, M, nel = 120) {
   }
   let iMax = 0
   Mz.forEach((m, i) => { if (Math.abs(m) > Math.abs(Mz[iMax])) iMax = i })
-  return { z: zs, y, M: Mz, V: Vz, y0: y[0], Mmax: Math.abs(Mz[iMax]), zMmax: zs[iMax], Mhead: Mz[0] }
+  return { z: zs, y, M: Mz, V: Vz, y0: y[0], th0: u[1], Mmax: Math.abs(Mz[iMax]), zMmax: zs[iMax], Mhead: Mz[0] }
 }
 
 // Tanah "atas" untuk panjang karakteristik lateral (Davisson & Robinson): jenis dominan (berdasar tebal) pada zona 0…zd di bawah kepala

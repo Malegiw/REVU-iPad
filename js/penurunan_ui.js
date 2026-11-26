@@ -50,7 +50,7 @@ export function computeCase(P, ds, c) {
   const allow = c.src === "mod" && c.allowOv ? c.allowOv : o.allow
   if (r.error) return { kind: "shallow", foot: f, error: r.error, allow }
   const x = r.res
-  return { kind: "shallow", foot: f, res: x, layers: r.soil.layers, s: x.s_life * 1000, si: x.si * 1000, sc: (x.s_life - x.si) * 1000, allow }
+  return { kind: "shallow", foot: f, res: x, layers: r.soil.layers, s: (x.s_life + (r.sf || 0)) * 1000, si: x.si * 1000, sc: (x.s_life - x.si) * 1000, sf: (r.sf || 0) * 1000, allow }
 }
 
 export function mountPenurunan(box, ctx) {
@@ -146,8 +146,8 @@ export function mountPenurunan(box, ctx) {
       if (r.error) body.push(el("p", "dz-note", r.error))
       else {
         const k = el("div", "pj-kpis")
-        const items = r.kind === "deep" ? [[L("Pemendekan elastis se", "Elastic shortening se"), r.st.se * 1000], [L("Segera (rakit) si", "Immediate (raft) si"), r.st.si * 1000], [L("Konsolidasi sc", "Consolidation sc"), r.st.sc * 1000], [L(`Total ${nf(o.life, 0)} th`, `Total ${nf(o.life, 0)} yr`), r.s], [L("Izin", "Allowable"), r.allow], [L("Vesic (pembanding)", "Vesic (comparison)"), r.st.sgV * 1000]]
-          : [[L("Segera si", "Immediate si"), r.res.si * 1000], [L("Konsolidasi primer sc", "Primary consolidation sc"), r.res.sc * 1000], [L("Sekunder", "Secondary"), r.res.ss_life * 1000], [L(`Total ${nf(o.life, 0)} th`, `Total ${nf(o.life, 0)} yr`), r.s], [L("Total akhir", "Final total"), r.res.s_final * 1000 + r.res.ss_life * 1000], [L("Izin", "Allowable"), r.allow]]
+        const items = r.kind === "deep" ? [[L("Pemendekan elastis se", "Elastic shortening se"), r.st.se * 1000], [L("Segera (rakit) si", "Immediate (raft) si"), r.st.si * 1000], [L("Konsolidasi sc", "Consolidation sc"), r.st.sc * 1000], [L(`Total ${nf(o.life, 0)} th`, `Total ${nf(o.life, 0)} yr`), r.s], [L("Izin", "Allowable"), r.allow], [L("Vesic (pembanding)", "Vesic (comparison)"), r.st.sgV * 1000], ...(r.st.sdd ? [[L("Downdrag di NP (timbunan/MAT)", "Downdrag at NP (fill/groundwater)"), r.st.sdd * 1000]] : [])]
+          : [[L("Segera si", "Immediate si"), r.res.si * 1000], [L("Konsolidasi primer sc", "Primary consolidation sc"), r.res.sc * 1000], [L("Sekunder", "Secondary"), r.res.ss_life * 1000], [L(`Total ${nf(o.life, 0)} th`, `Total ${nf(o.life, 0)} yr`), r.s], [L("Total akhir", "Final total"), r.res.s_final * 1000 + r.res.ss_life * 1000], [L("Izin", "Allowable"), r.allow], ...(r.sf ? [[L("Sisa penurunan akibat timbunan/MAT", "Remaining settlement from fill/groundwater"), r.sf]] : [])]
         items.forEach(([lab, v], i) => { const d = el("div", "pj-kpi dz-in" + (i === 3 ? " hi" : "")); d.style.setProperty("--i", i); d.append(el("span", null, lab), el("b", null, `${nf(v, 1)} mm`)); k.append(d) })
         body.push(k)
         if (r.res) body.push(el("p", "dz-note", `t50 = ${r.res.t50 == null ? "–" : nf(r.res.t50, 2)} · t90 = ${r.res.t90 == null ? "–" : nf(r.res.t90, 2)} ${L("tahun", "years")} · q ${L("bersih", "net")} = ${nf(toDisp("Q", r.res.q_net), 1)} ${uName("Q")}${r.kind === "deep" ? ` · ${L("rakit ekuivalen", "equivalent raft")} ${nf(r.st.Br, 2)} × ${nf(r.st.Lr, 2)} m @ z = ${nf(r.st.zr, 2)} m` : ""}`))
@@ -200,7 +200,8 @@ function buildOut(P, ds, results, it) {
       [L("Rakit ekuivalen", "Equivalent raft"), r.st.endB ? L("di ujung tiang (dukung ujung)", "at pile tip (end bearing)") : "z = z0 + 2L/3 ; B' = Bg + 2·(2L/3)/4", `Bg × Lg = ${nf(r.g.Bg, 2)} × ${nf(r.g.Lg, 2)} m`, `${nf(r.st.Br, 2)} × ${nf(r.st.Lr, 2)} m @ ${nf(r.st.zr, 2)} m`],
       [L("Tekanan bersih rakit", "Raft net pressure"), "q = Q/(B'·L')", "", `${nf(toDisp("Q", r.st.qnet), 1)} ${uQ}`],
       [L("Penurunan rakit", "Raft settlement"), "si (Steinbrenner) + sc (Terzaghi)", r.res ? `si ${nf(r.res.si * 1000, 1)} + sc ${nf(r.res.sc * 1000, 1)}` : "", r.res ? `${nf(r.res.s_life * 1000, 1)} mm` : "–"],
-      [L("Total", "Total"), "s = se + s,rakit", "", `${nf(r.s, 1)} mm`],
+      ...(r.st.dd ? [[L("Downdrag (timbunan / MAT)", "Downdrag (fill / groundwater)"), L("s_tanah sisa pada bidang netral", "remaining soil settlement at neutral plane"), `NP ${nf(r.st.dd.zn, 2)} m`, `${nf(r.st.sdd * 1000, 1)} mm`]] : []),
+      [L("Total", "Total"), r.st.dd ? "s = se + s,rakit + s,downdrag" : "s = se + s,rakit", "", `${nf(r.s, 1)} mm`],
       [L("Pembanding Vesic", "Vesic comparison"), "s1 = se + Cp·Qp/(D·qp) + Qs/(pL)·D/Es·(1 − ν²)·Iws ; sg = s1·√(Bg/D)", `s1 ${nf(r.st.s1 * 1000, 2)} mm`, `${nf(r.st.sgV * 1000, 1)} mm`]] })
     else steps.push({ h: L("Penurunan pondasi dangkal", "Shallow foundation settlement"), rows: [
       [L("Pondasi", "Foundation"), SHAPE()[r.foot.shape], `B ${nf(r.foot.B, 2)}${r.foot.shape === "persegi" ? ` × L ${nf(r.foot.L, 2)}` : ""} m, Df ${nf(r.foot.Df, 2)} m`, ""],
@@ -209,7 +210,8 @@ function buildOut(P, ds, results, it) {
       [L("Konsolidasi primer", "Primary consolidation"), "sc = Σ H/(1 + e0)·[Cs·log(σ'p/σ'0) + Cc·log((σ'0 + Δσ)/σ'p)]", `Δσ ${o.method === "2:1" ? "2V:1H" : "Boussinesq"}`, `${nf(x.sc * 1000, 1)} mm`],
       [L("Derajat konsolidasi", "Degree of consolidation"), "Tv = cv·t/Hdr² → U(Tv)", `t = ${nf(o.life, 1)} ${L("th", "yr")}`, `t90 = ${x.t90 == null ? "–" : nf(x.t90, 2)} ${L("th", "yr")}`],
       [L("Sekunder", "Secondary"), "ss = Cα/(1 + e0)·H·log(t/tp)", "", `${nf(x.ss_life * 1000, 1)} mm`],
-      [L("Total pada umur rencana", "Total at design life"), "s = si + U·sc + ss", "", `${nf(r.s, 1)} mm`]] })
+      ...(r.sf ? [[L("Sisa penurunan tanah akibat timbunan / MAT", "Remaining ground settlement from fill / groundwater"), L("Σ s_i·[U(t2) − U(t1)] di bawah Df (tab Tanah)", "Σ s_i·[U(t2) − U(t1)] below Df (Soil tab)"), "", `${nf(r.sf, 1)} mm`]] : []),
+      [L("Total pada umur rencana", "Total at design life"), r.sf ? "s = si + U·sc + ss + s,timbunan" : "s = si + U·sc + ss", "", `${nf(r.s, 1)} mm`]] })
   }
   const worst = results.filter((x) => !x.r.error).reduce((a, b) => (!a || b.r.s / b.r.allow > a.r.s / a.r.allow ? b : a), null)
   return {
@@ -228,7 +230,7 @@ function sectionDraw(ds, it, P) {
   const zr = deep ? (r.st.zr + Math.max(r.st.Br, 2) * 1.5) : Df + Math.max(B, 1) * 2.5, depth = Math.min(Math.max(zr, deep ? r.g.z0 + r.g.Lp + 3 : 6), ds.depth + 5)
   const top = 50, ky = (H - top - 26) / depth, kx = deep ? (W - 380) / Math.max(r.st.Br, B * 1.3, 1) : Math.min((W - 300) / Math.max(B * 1.6, 1), ky * 2), cx = 330, Y = (z) => top + z * ky, X = (x) => cx + x * kx
   T(s, 16, 28, `${c.title.split(" (")[0]} — ${deep ? L("kelompok tiang & rakit ekuivalen", "pile group & equivalent raft") : L("pondasi dangkal", "shallow foundation")}`, { c: P.ink, fs: 14, b: true })
-  for (const l of soilBlocks(ds)) { if (l.z0 > depth) break; const hh = (Math.min(l.z1, depth) - l.z0) * ky; Rect(s, 16, Y(l.z0), W - 32, hh, l.coh ? P.clay : P.sand, null, { op: 0.45 }); if (hh >= 18) T(s, W - 22, Y(l.z0) + 15, `${typeName(l.type)}${l.n > 1 ? " (" + L("rata-rata", "avg.") + ")" : ""} · ${l.coh ? "cu " + nf(l.cu, 0) + " · Cc " + nf(l.Cc, 2) : "φ " + nf(l.phi, 0) + "°"} · E ${nf(l.E / 1000, 1)} MPa`, { c: P.ink, fs: 10.5, a: "end" }) }
+  for (const l of soilBlocks(ds)) { if (l.z0 > depth) break; const hh = (Math.min(l.z1, depth) - l.z0) * ky; Rect(s, 16, Y(l.z0), W - 32, hh, l.fill ? P.fillS : l.coh ? P.clay : P.sand, null, { op: l.fill ? 0.8 : 0.45 }); if (hh >= 18) T(s, W - 22, Y(l.z0) + 15, `${l.fill ? L("Timbunan", "Fill") + " · " : ""}${typeName(l.type)}${l.n > 1 ? " (" + L("rata-rata", "avg.") + ")" : ""} · ${l.coh ? "cu " + nf(l.cu, 0) + " · Cc " + nf(l.Cc, 2) : "φ " + nf(l.phi, 0) + "°"} · E ${nf(l.E / 1000, 1)} MPa`, { c: P.ink, fs: 10.5, a: "end" }) }
   if (ds.gwt < depth) { s.append(sv2("line", { x1: 16, x2: W - 16, y1: Y(ds.gwt), y2: Y(ds.gwt), stroke: P.water, "stroke-width": 2, "stroke-dasharray": "8 5" })); T(s, 22, Y(ds.gwt) - 5, `▽ MAT ${nf(ds.gwt, 1)} m`, { c: P.water, fs: 11 }) }
   s.append(sv2("line", { x1: 16, x2: W - 16, y1: Y(0), y2: Y(0), stroke: P.ink, "stroke-width": 2 }))
   if (deep) {

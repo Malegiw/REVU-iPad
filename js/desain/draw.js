@@ -5,8 +5,8 @@ import { sv } from "./ui.js"
 export function palette(mode) {
   const dark = mode !== "print" && document.documentElement.dataset.theme === "dark"
   return dark
-    ? { bg: "#13202C", ink: "#E8EDF3", mut: "#9FB0C0", line: "#3A4C5E", conc: "#5B6570", concD: "#8A939C", concL: "#46505A", steel: "#9BC7D6", clay: "#6E5440", sand: "#857245", water: "#5FB0E8", liq: "#2C6AA3", liqT: "#4E8FCC", acc: "#E3A857", ok: "#4cc27a", bad: "#ff8a7a", wind: "#7CC7E8", arw: "#F59E5B", grid: "#22303D", reb: "#ff9b8a", fill: "#1A2633", machine: "#6F8FAF", machine2: "#4D6A86" }
-    : { bg: "#FAF9F7", ink: "#1F2430", mut: "#5C6573", line: "#C3C8CF", conc: "#CFC9BE", concD: "#8F887D", concL: "#E4DFD6", steel: "#3F5A75", clay: "#C9A586", sand: "#E9D9AE", water: "#3D8FD1", liq: "#5E9BD3", liqT: "#87B6E2", acc: "#D18A2E", ok: "#1a7f37", bad: "#b42318", wind: "#2F7FA8", arw: "#C2410C", grid: "#E7E3DB", reb: "#B42318", fill: "#FFFFFF", machine: "#4A6078", machine2: "#27323F" }
+    ? { bg: "#13202C", ink: "#E8EDF3", mut: "#9FB0C0", line: "#3A4C5E", conc: "#5B6570", concD: "#8A939C", concL: "#46505A", steel: "#9BC7D6", clay: "#6E5440", sand: "#857245", fillS: "#6B6656", water: "#5FB0E8", liq: "#2C6AA3", liqT: "#4E8FCC", acc: "#E3A857", ok: "#4cc27a", bad: "#ff8a7a", wind: "#7CC7E8", arw: "#F59E5B", grid: "#22303D", reb: "#ff9b8a", fill: "#1A2633", machine: "#6F8FAF", machine2: "#4D6A86" }
+    : { bg: "#FAF9F7", ink: "#1F2430", mut: "#5C6573", line: "#C3C8CF", conc: "#CFC9BE", concD: "#8F887D", concL: "#E4DFD6", steel: "#3F5A75", clay: "#C9A586", sand: "#E9D9AE", fillS: "#D3CBB8", water: "#3D8FD1", liq: "#5E9BD3", liqT: "#87B6E2", acc: "#D18A2E", ok: "#1a7f37", bad: "#b42318", wind: "#2F7FA8", arw: "#C2410C", grid: "#E7E3DB", reb: "#B42318", fill: "#FFFFFF", machine: "#4A6078", machine2: "#27323F" }
 }
 const FONT = "Helvetica, Arial, sans-serif"
 export function root(W, H, P, label) {
@@ -66,12 +66,12 @@ export function pileElevation(I, Rr, P) {
   // tanah
   // baris tipis sejenis yang bersambung digambar sebagai satu pita (label = rata-rata tebal) supaya label tidak bertumpuk
   const bands = []
-  I.layers.forEach((ly) => { const b = bands[bands.length - 1]; if (b && b.type === ly.type) { b.cu += ly.cu * ly.h; b.phi += ly.phi * ly.h; b.h += ly.h; b.n++ } else bands.push({ type: ly.type, h: ly.h, cu: ly.cu * ly.h, phi: ly.phi * ly.h, n: 1 }) })
+  I.layers.forEach((ly) => { const b = bands[bands.length - 1]; if (b && b.type === ly.type && !!b.fill === !!ly.fill) { b.cu += ly.cu * ly.h; b.phi += ly.phi * ly.h; b.h += ly.h; b.n++ } else bands.push({ type: ly.type, fill: !!ly.fill, h: ly.h, cu: ly.cu * ly.h, phi: ly.phi * ly.h, n: 1 }) })
   let z = 0
   bands.forEach((ly) => {
     const y0 = Z(z), y1 = Z(Math.min(z + ly.h, depth)), cu = ly.cu / ly.h, phi = ly.phi / ly.h, pre = ly.n > 1 ? "≈ " : ""
-    R(s, x0, y0, x1 - x0, y1 - y0, ly.type === "clay" ? P.clay : P.sand, null, { op: 0.55 })
-    if (y1 - y0 >= 22) T(s, x0 + 8, y0 + 18, ly.type === "clay" ? `${L("Lempung", "Clay")} cu ${pre}${nf(toDisp("Q", cu), 0)} ${uName("Q")}` : `${L("Pasir", "Sand")} φ ${pre}${nf(phi, 0)}°`, { c: P.ink, fs: 12, b: true })
+    R(s, x0, y0, x1 - x0, y1 - y0, ly.fill ? P.fillS : ly.type === "clay" ? P.clay : P.sand, null, { op: ly.fill ? 0.8 : 0.55 })
+    if (y1 - y0 >= 22) T(s, x0 + 8, y0 + 18, (ly.fill ? L("Timbunan · ", "Fill · ") : "") + (ly.type === "clay" ? `${L("Lempung", "Clay")} cu ${pre}${nf(toDisp("Q", cu), 0)} ${uName("Q")}` : `${L("Pasir", "Sand")} φ ${pre}${nf(phi, 0)}°`), { c: P.ink, fs: 12, b: true })
     z += ly.h
   })
   s.append(sv("line", { x1: x0, y1: Z(0), x2: x1, y2: Z(0), stroke: P.ink, "stroke-width": 2 }))

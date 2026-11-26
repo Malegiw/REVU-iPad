@@ -150,3 +150,6 @@
 .pj-pastemsg .bad { color: var(--dz-bad); }
 .pj-apply { align-self: flex-start; min-height: 42px; padding: 0 18px; border-radius: 12px; border: 0; color: #fff; font-weight: 700; background: linear-gradient(135deg, var(--btn1), var(--btn2)); }
 .pj-apply:disabled { opacity: .45; }
+/* timbunan, gesekan negatif & pegas (tab Tanah) */
+.dz-note.pj-warn { color: var(--ink); background: color-mix(in srgb, var(--dz-warn, #b7791f) 12%, var(--field)); border: 1px solid color-mix(in srgb, var(--dz-warn, #b7791f) 45%, transparent); border-radius: 12px; padding: 8px 12px; }
+table.dz-res tr.hi td { background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 700; }

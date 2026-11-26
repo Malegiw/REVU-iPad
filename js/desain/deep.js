@@ -3,7 +3,7 @@
 // (α/β, N-SPT, CPT), efisiensi kelompok, lateral (Broms umum + Winkler kepala jepit), struktur tiang (AISC 360 pipa / SNI 2847 bor), pons tiang
 // pada cap, pelat tangki di atas tiang, kekakuan tiang (indikatif) untuk pondasi mesin, dan penurunan kelompok (rakit ekuivalen + pemendekan elastis).
 import { L, chk, nf, toDisp, uName, barA, GAMMA_C, clamp, govern } from "./core.js"
-import { pileAxial, pileLayers, settleGroup, settleShallow, shallowQa, AXIAL_METHOD, QA_METHOD, soilBlocks } from "./soil.js"
+import { pileAxial, pileLayers, settleGroup, settleShallow, shallowQa, AXIAL_METHOD, QA_METHOD, soilBlocks, nsfModel, fillName, layerAt } from "./soil.js"
 import { winkler, bromsGeneral, nhAuto, profile, pmGroup, convLab, topZone } from "./pile.js"
 import { pipeCapacity, h1, E_STEEL } from "./steel.js"
 import { pmCapacity, circlePoly, barsOnCircle, vcTwo, vcOne, asFlex, pickBars, phiMn, rhoTS } from "./rc.js"
@@ -130,11 +130,38 @@ export function singlePile(s, ds, z0) {
   const lt = lateral({ ...s, psx: 3 * pp.D }, ds, pp, { piles: [{ x: 0, y: 0 }], Df: z0 })
   const Hd = s.pyAllow / 1000 / Math.max(lt.uH.y0, 1e-12)
   const Ha = Math.min(lt.Hal, Hd)
-  let Pstr, strTxt
-  if (pp.bored) { const Ag = Math.PI * s.pD ** 2 / 4; Pstr = (0.33 * s.pfc * Ag + 0.4 * 420 * pp.rc.Ast) / 1000; strTxt = "0,33·fc'·Ag + 0,4·fy·As" }
-  else { const Le = Math.max(lt.Lf, 0.5), cs = pipeCapacity(s.pD, s.pt, s.pFy, 1.2 * Le * 1000, Le * 1000); Pstr = cs.phiPn / 0.9 / 1.67; strTxt = "Pn/Ω (AISC, Ω = 1,67)" }
-  const Qac = pp.ax.Qc / s.pfsC, Qat = pp.ax.Qt / s.pfsT
-  return { pp, ax: pp.ax, D: pp.D, Qac, Qat, Hal: lt.Hal, Hd, Ha, Pstr, strTxt, Qad: Math.min(Qac, Pstr), govStr: Pstr < Qac, lt, z0 }
+  const { Pstr, strTxt, ns } = lt
+  const Qac = pp.ax.Qc / s.pfsC, Qat = pp.ax.Qt / s.pfsT, Q0 = Math.min(Qac, Pstr), Qad = ns ? Math.min(ns.Qad, Q0) : Q0
+  return { pp, ax: pp.ax, D: pp.D, Qac, Qat, Hal: lt.Hal, Hd, Ha, Pstr, strTxt, Qad, govStr: Pstr < Qac && !(ns && ns.Qad < Q0 - 1e-6), govNsf: !!(ns && ns.Qad < Q0 - 1e-6), ns, lt, z0 }
+}
+// kapasitas struktur izin tiang (ASD): bor 0,33·fc'·Ag + 0,4·fy·As; pipa Pn/Ω (AISC, panjang tekuk dari titik jepit Lf)
+function pileStr(s, pp, Lf) {
+  if (pp.bored) { const Ag = Math.PI * s.pD ** 2 / 4; return { Pstr: (0.33 * s.pfc * Ag + 0.4 * 420 * pp.rc.Ast) / 1000, strTxt: "0,33·fc'·Ag + 0,4·fy·As" } }
+  const Le = Math.max(Lf, 0.5), cs = pipeCapacity(s.pD, s.pt, s.pFy, 1.2 * Le * 1000, Le * 1000)
+  return { Pstr: cs.phiPn / 0.9 / 1.67, strTxt: "Pn/Ω (AISC, Ω = 1,67)" }
+}
+// ---------------------------------------------------------------- Qa tiang tunggal dengan GESEKAN NEGATIF (timbunan / penurunan MAT di tab Tanah)
+// Bidang netral dihitung pada beban tetap Qd = qd·Qa (iterasi, karena NP bergantung pada beban).
+// unified (Fellenius 2004; AASHTO LRFD §3.11.8/§10.7.3.7; FHWA GEC 12): gaya seret TIDAK mengurangi kapasitas geoteknik (Qa,geo = Qu/FS),
+//   tetapi struktur di NP harus memikul Qd + Qn ≤ Pa, dan penurunan downdrag diperiksa (masuk penurunan kelompok).
+// conv (konvensional, Tomlinson / FHWA lama): gesek di atas NP tidak dihitung dan Qn dianggap beban: Qa = (Qu − Rs,atas NP)/FS − Qn,
+//   Qa + Qn ≤ Pa.
+export function nsfDesign(ds, pp, s, Pstr) {
+  const f = ds.fill
+  const md = f ? nsfModel(ds, pp.ax, { EA: pp.Ap * pp.Ep }) : null
+  if (!md) return null
+  const FS = s.pfsC, Qu = pp.ax.Qc, Q0 = Math.min(Qu / FS, Pstr), run = (Qa) => md.solve(f.qd * Qa)
+  // akar terbesar Qa ∈ [0, Q0] dengan h(Qa) ≤ 0 (h naik monoton)
+  const bis = (h) => { if (h(Q0) <= 0) return Q0; if (h(0) > 0) return 0; let lo = 0, hi = Q0; for (let k = 0; k < 50; k++) { const m = (lo + hi) / 2; if (h(m) <= 0) lo = m; else hi = m } return lo }
+  const qU = bis((Qa) => run(Qa).Qmax - Pstr), rU = run(qU)
+  const capC = (r) => Math.min((Qu - r.RsAbove) / FS - r.Qn, Pstr - r.Qn)
+  const qC = bis((Qa) => Qa - capC(run(Qa))), rC = run(qC)
+  const uni = { Qa: qU, r: rU, Qgeo: Qu / FS, gov: qU < Q0 - 1e-6 ? "str" : Qu / FS <= Pstr ? "geo" : "pa" }
+  const conv = { Qa: qC, r: rC, Qgeo: (Qu - rC.RsAbove) / FS - rC.Qn, gov: (Qu - rC.RsAbove) / FS <= Pstr ? "geo" : "str" }
+  const use = f.meth === "conv" ? conv : uni
+  // Qa kelompok (efisiensi Eg hanya pada bagian kapasitas, bukan pada gaya seret)
+  const QacEg = (Eg) => (f.meth === "conv" ? Math.min(Eg * (Qu - rC.RsAbove) / FS - rC.Qn, Pstr - rC.Qn) : Math.min(Eg * Qu / FS, qU))
+  return { uni, conv, meth: f.meth, Qad: use.Qa, r: use.r, model: md, fsl: md.fsl, Pstr, QacEg, qd: f.qd, beta: [f.bC, f.bS] }
 }
 // pons tiang ke atas menembus cap (tiang tepi: keliling terpotong) — rasio terburuk dari kombinasi LRFD
 function pilePunch(m, r, D, fc) {
@@ -266,7 +293,7 @@ function lateral(s, ds, pp, m) {
   const D = pp.D, n = m.piles.length, z0 = pp.z0
   const nx = m.eqGrid ? m.eqGrid[0] : distinct(m.piles.map((p) => p.x)), ny = m.eqGrid ? m.eqGrid[1] : distinct(m.piles.map((p) => p.y))
   const Eg = n > 1 ? convLab(nx, ny, D, s.psx) : 1
-  const Qac = pp.ax.Qc * Eg / s.pfsC, Qat = pp.ax.Qt / s.pfsT
+  const Qat = pp.ax.Qt / s.pfsT
   const lay = pileLayers(ds, z0), gw = Math.max(ds.gwt - z0, 0), P0 = profile(lay, gw)
   const pmF = n > 1 ? Math.min(pmGroup(Math.max(nx, 1), s.psx / D), pmGroup(Math.max(ny, 1), s.psx / D)) : 1
   const kD = (z) => { const l = P0.at(z); return pmF * (l.type === "clay" ? 67 * l.cu : nhAuto(l.phi, z > gw) * z) }
@@ -276,7 +303,9 @@ function lateral(s, ds, pp, m) {
   const Lf = top.type === "sand" ? 1.8 * Tch : 1.4 * Rch
   const My = pp.bored ? pp.rc.My0 : pp.sec.Mp
   const br = bromsGeneral(lay, gw, D, s.pL, 0, My, pmF), Hal = br.fixed / s.pfsL
-  return { nx, ny, Eg, Qac, Qat, lay, gw, pmF, uH, Tch, Rch, Lf, br, Hal }
+  const { Pstr, strTxt } = pileStr(s, pp, Lf), ns = ds.fill ? nsfDesign(ds, pp, s, Pstr) : null
+  const Qac = ns ? ns.QacEg(Eg) : pp.ax.Qc * Eg / s.pfsC
+  return { nx, ny, Eg, Qac, Qat, lay, gw, pmF, uH, Tch, Rch, Lf, br, Hal, Pstr, strTxt, ns }
 }
 const groupDims = (m, D) => { const xs = m.piles.map((p) => p.x), ys = m.piles.map((p) => p.y); return [Math.max(...xs) - Math.min(...xs) + D, Math.max(...ys) - Math.min(...ys) + D] }
 // Kekakuan kelompok tiang (indikatif, untuk pondasi mesin): vertikal dari penurunan tiang tunggal (Vesic) dengan rasio kelompok √(Bg/D),
@@ -284,7 +313,7 @@ const groupDims = (m, D) => { const xs = m.piles.map((p) => p.x), ys = m.piles.m
 export function groupStiffness(s, ctx, m, Q) {
   const ds = ctx.soil, pp = pileProps(s, ds, m.Df), lt = lateral(s, ds, pp, m), n = m.piles.length
   const [Bg, Lg] = groupDims(m, pp.D)
-  const st = settleGroup(ds, { D: pp.D, Lp: s.pL, Ap: pp.ApSt, Ep: pp.bored ? pp.Ep : E_STEEL * 1000, n, Bg, Lg, Q: Math.max(Q, n), Qb: pp.ax.Qb, Qu: pp.ax.Qc, qb: pp.ax.q, z0: m.Df, driven: !pp.bored }, ctx.settle)
+  const st = settleGroup(ds, { D: pp.D, Lp: s.pL, Ap: pp.ApSt, Ep: pp.bored ? pp.Ep : E_STEEL * 1000, n, Bg, Lg, Q: Math.max(Q, n), Qb: pp.ax.Qb, Qu: pp.ax.Qc, qb: pp.ax.q, z0: m.Df, driven: !pp.bored, ax: pp.ax }, ctx.settle)
   return { ...pileStiffness({ st, Bg, D: pp.D, n, uH: lt.uH }, m), pp, lt }
 }
 
@@ -294,7 +323,7 @@ export function deepFooting(s, ctx, m, r, crit = {}) {
   const ds = ctx.soil, z0 = m.Df, pp = pileProps(s, ds, z0), D = pp.D, n = m.piles.length
   const g = { checks: [], warn: [] }
   const gG = L("Tiang — geoteknik (ASD)", "Piles — geotechnical (ASD)"), gS = L("Tiang — struktur (LRFD)", "Piles — structural (LRFD)"), gC = L("Pile cap — pons tiang (LRFD)", "Pile cap — pile punching (LRFD)")
-  const { nx, ny, Eg, Qac, Qat, lay, gw, pmF, uH, Tch, Rch, Lf, br, Hal } = lateral(s, ds, pp, m)
+  const { nx, ny, Eg, Qac, Qat, lay, gw, pmF, uH, Tch, Rch, Lf, br, Hal, Pstr, ns } = lateral(s, ds, pp, m)
   // ASD
   const tf = crit.tempFac ?? 1
   const rows = r.asd.map((a) => { const fac = a.c.temp ? tf : 1; return { a, fac, y: a.pk.H * uH.y0 * 1000, okC: a.pk.max <= Qac * fac + 1e-9, okT: a.pk.min >= -Qat * fac - 1e-9, okH: a.pk.H <= Hal * fac + 1e-9 } })
@@ -307,6 +336,7 @@ export function deepFooting(s, ctx, m, r, crit = {}) {
     g.checks.push(chk(gG, L("Lateral per tiang ≤ Hu/FS (Broms, kepala jepit)", "Lateral per pile ≤ Hu/FS (Broms, fixed head)"), "Broms (1964)", wH.a.pk.H, Hal * wH.fac, "F", { note: wH.a.c.id, d: 2 }))
     g.checks.push(chk(gG, L("Defleksi lateral kepala tiang (layan)", "Pile-head lateral deflection (service)"), L("kriteria proyek", "project criteria"), wY.y, s.pyAllow, "mm", { note: wY.a.c.id, d: 1 }))
     Object.assign(g, { wC, wT, wH })
+    if (ns) g.nsfC = nsfCheck(ns, wC.a.pk.max, gG, wC.a.c.id, g.checks)
   }
   if (n > 1) g.checks.push(chk(gG, L("Jarak tiang ≥ 2,5D", "Pile spacing ≥ 2.5D"), "SNI 8460 / AASHTO", s.psx / D, 2.5, "D", { mode: "ge", d: 2 }))
   const minEdge = Math.min(...m.piles.map((p) => edgeDist(m.shape, m.B, m.L, p)))
@@ -337,8 +367,8 @@ export function deepFooting(s, ctx, m, r, crit = {}) {
   // penurunan kelompok (A1 = D + Do, beban tetap)
   const a1 = r.asd.find((a) => a.c.base === "A1") || r.asd[0]
   const [Bg, Lg] = groupDims(m, D)
-  const st = settleGroup(ds, { D, Lp: s.pL, Ap: pp.ApSt, Ep: pp.bored ? pp.Ep : E_STEEL * 1000, n, Bg, Lg, Q: a1 ? a1.R.P : 0, Qb: pp.ax.Qb, Qu: pp.ax.Qc, qb: pp.ax.q, z0, driven: !pp.bored }, ctx.settle)
-  Object.assign(g, { pp, ax: pp.ax, Eg, Qac, Qat, Hal, br, uH, Lf, Tch, Rch, pmF, n, nx, ny, Bg, Lg, st, wS, wP, rows, a1, D, minEdge })
+  const st = settleGroup(ds, { D, Lp: s.pL, Ap: pp.ApSt, Ep: pp.bored ? pp.Ep : E_STEEL * 1000, n, Bg, Lg, Q: a1 ? a1.R.P : 0, Qb: pp.ax.Qb, Qu: pp.ax.Qc, qb: pp.ax.q, z0, driven: !pp.bored, ax: pp.ax }, ctx.settle)
+  Object.assign(g, { pp, ax: pp.ax, Eg, Qac, Qat, Hal, br, uH, Lf, Tch, Rch, pmF, n, nx, ny, Bg, Lg, st, wS, wP, rows, a1, D, minEdge, Pstr, ns })
   return g
 }
 
@@ -392,6 +422,41 @@ export function piledSlab(I, Tk, combos, tot, ctx) {
   return { ...out, kind: "piled", m, asd, lrfd, Ds, d, top, bot, Mneg, Mpos, Vu, wu, geo: { A: Math.PI * Ds * Ds / 4 }, Wsl: Math.PI * Ds * Ds / 4 * I.sh * GAMMA_C }
 }
 
+// pemeriksaan gesekan negatif untuk reaksi tiang terbesar P (ASD): unified → struktur di NP qd·P + Qn ≤ Pa;
+// konvensional → P + Qn ≤ Pa (struktur). Kapasitas geoteknik sudah tercakup di Qa. Mengembalikan hasil NP pada beban itu.
+export function nsfCheck(ns, P, grp, note, checks) {
+  const r = ns.model.solve(ns.qd * Math.max(P, 0)), conv = ns.meth === "conv"
+  const dem = conv ? Math.max(P, 0) + r.Qn : r.Qmax
+  checks.push(chk(grp, conv ? L(`Struktur tiang: P + Qn ≤ Pa (gesekan negatif, NP ${nf(r.zn, 2)} m)`, `Pile structure: P + Qn ≤ Pa (negative skin friction, NP ${nf(r.zn, 2)} m)`)
+    : L(`Struktur tiang di bidang netral: Qd + Qn ≤ Pa (NP ${nf(r.zn, 2)} m, Qd = ${nf(ns.qd, 2)}·P)`, `Pile structure at neutral plane: Qd + Qn ≤ Pa (NP ${nf(r.zn, 2)} m, Qd = ${nf(ns.qd, 2)}·P)`),
+    conv ? "Tomlinson / FHWA" : "Fellenius (2004) · AASHTO LRFD §3.11.8", dem, ns.Pstr, "F", { note, d: 1 }))
+  return { ...r, P, dem }
+}
+// ---------------------------------------------------------------- KOEFISIEN PEGAS TIANG TUNGGAL (model struktur SAP2000 / ETABS / STAAD)
+// Vertikal: kv = Q/s1 dengan s1 = se + sp + ss (Vesic, pada Q = Qa desain) dan pembanding EA/L (pemendekan saja, batas atas dukung ujung).
+// Lateral (Winkler, 120 elemen; kD = 67cu lempung (Davisson), nh·z pasir (Terzaghi); p-multiplier pm untuk kelompok):
+//  - kepala jepit: Kh = H/y;  kepala bebas: fleksibilitas [[y_H, y_M], [θ_H, θ_M]] → matriks kekakuan K = F⁻¹ (y searah H, θ = dy/dz, z ke bawah)
+//  - pegas per titik sepanjang tiang (Δz): k_i = ∫ kD dz pada daerah pengaruh titik (kN/m); kh = kD/D (kN/m³).
+export function pileSprings(s, ds, z0, o = {}) {
+  const pp = pileProps(s, ds, z0), D = pp.D, pm = o.pm ?? 1, Lp = s.pL
+  const lay = pileLayers(ds, z0), gw = Math.max(ds.gwt - z0, 0), P0 = profile(lay, gw)
+  const kD = (z) => { const l = P0.at(z); return pm * (l.type === "clay" ? 67 * l.cu : nhAuto(l.phi, z > gw) * z) }
+  const uF = winkler(pp.EI, 0, Lp, kD, "fixed", 1, 0), uH = winkler(pp.EI, 0, Lp, kD, "free", 1, 0), uM = winkler(pp.EI, 0, Lp, kD, "free", 0, 1)
+  const f11 = uH.y0, f12 = uM.y0, f21 = uH.th0, f22 = uM.th0, det = f11 * f22 - f12 * f21
+  const K = det !== 0 ? [[f22 / det, -f12 / det], [-f21 / det, f11 / det]] : [[0, 0], [0, 0]]
+  const Q = o.Q > 0 ? o.Q : pp.ax.Qc / (s.pfsC || 2.5), EA = pp.Ap * pp.Ep
+  const st = settleGroup(ds, { D, Lp, Ap: pp.ApSt, Ep: pp.bored ? pp.Ep : E_STEEL * 1000, n: 1, Bg: D, Lg: D, Q, Qb: pp.ax.Qb, Qu: pp.ax.Qc, qb: pp.ax.q, z0, driven: !pp.bored }, o.settle || {})
+  const dz = o.dz > 0 ? o.dz : 1, N = Math.max(1, Math.round(Lp / dz)), h = Lp / N, nodes = []
+  for (let i = 0; i <= N; i++) {
+    const a = Math.max(0, (i - 0.5) * h), b = Math.min(Lp, (i + 0.5) * h), m = 8
+    let k = 0
+    for (let j = 0; j < m; j++) k += kD(a + (b - a) * (j + 0.5) / m) * (b - a) / m
+    const z = i * h, zi = clamp(z, 1e-6, Lp - 1e-6), l = P0.at(zi), dl = layerAt(ds, z0 + zi)   // titik di batas lapis: sifat lapis di dalam tiang
+    nodes.push({ z, zAbs: z0 + z, type: l.type, name: fillName(dl), trib: b - a, kD: kD(i === N ? zi : z), kh: kD(i === N ? zi : z) / D, k })
+  }
+  return { pp, D, Lp, z0, pm, EA, Q, s1: st.s1, se: st.se, sp: st.sp, ss: st.ss, kv: Q / Math.max(st.s1, 1e-6), kEA: EA / Lp,
+    KhFix: 1 / Math.max(uF.y0, 1e-12), MfixH: uF.Mhead, KhFree: 1 / Math.max(f11, 1e-12), KthFree: 1 / Math.max(Math.abs(f22), 1e-12), K, F: [[f11, f12], [f21, f22]], nodes, dz: h }
+}
 // ---------------------------------------------------------------- kekakuan kelompok tiang (indikatif) untuk pondasi mesin
 export function pileStiffness(g, m) {
   const s1 = g.st.s1 > 0 ? g.st.s1 : 1e-3, k1 = g.st.Qpile / s1, Rs = Math.sqrt(Math.max(g.Bg, g.D) / g.D)
@@ -412,7 +477,10 @@ export function deepTables(s, g) {
     [L("Qu tarik (+ berat tiang)", "Qu tension (+ pile weight)"), toDisp("F", ax.Qt), uF], [L("Efisiensi kelompok Eg (Converse–Labarre)", "Group efficiency Eg (Converse–Labarre)"), g.Eg, "–"],
     [`Qa ${L("tekan", "comp.")} = Qu·Eg/${nf(s.pfsC, 1)}`, toDisp("F", g.Qac), uF], [`Qa ${L("tarik", "tension")} = Qu,t/${nf(s.pfsT, 1)}`, toDisp("F", g.Qat), uF],
     [`Ha = Hu/${nf(s.pfsL, 1)} (Broms ${L("jepit", "fixed")})`, toDisp("F", g.Hal), uF], [L("Defleksi kepala per 1 kN (Winkler jepit)", "Head deflection per 1 kN (fixed Winkler)"), g.uH.y0 * 1000, "mm"],
-    [L("Titik jepit Lf (Davisson–Robinson)", "Fixity depth Lf (Davisson–Robinson)"), g.Lf, "m"]], dec: [null, 3, null], align: ["l", "r", "l"] })
+    [L("Titik jepit Lf (Davisson–Robinson)", "Fixity depth Lf (Davisson–Robinson)"), g.Lf, "m"],
+    ...(g.ns && g.nsfC ? [[L("Gesekan negatif — metode", "Negative skin friction — method"), g.ns.meth === "conv" ? L("konvensional (Qn = beban)", "conventional (Qn as load)") : L("terpadu Fellenius (NP)", "Fellenius unified (NP)"), ""],
+      [L("Bidang netral NP (pada P maks)", "Neutral plane NP (at max P)"), g.nsfC.zn, "m"], [L("Gaya seret Qn", "Drag force Qn"), toDisp("F", g.nsfC.Qn), uF], [L("Gaya aksial maks di NP", "Max axial force at NP"), toDisp("F", g.nsfC.dem), uF],
+      [L("Pa struktur tiang", "Pile structural Pa"), toDisp("F", g.Pstr), uF], [L("Penurunan downdrag kepala tiang", "Pile-head downdrag settlement"), g.nsfC.sHead * 1000, "mm"]] : [])], dec: [null, 3, null], align: ["l", "r", "l"] })
   t.push({ title: L("Reaksi tiang per kombinasi ASD (cap kaku)", "Pile reactions per ASD combination (rigid cap)"), cols: [L("Kode", "Code"), L("Rumus", "Formula"), `P ${L("total", "total")} (${uF})`, `P ${L("maks", "max")} (${uF})`, `P ${L("min", "min")} (${uF})`, `H/${L("tiang", "pile")} (${uF})`, "y (mm)", "Status"],
     rows: g.rows.map((x) => { const ok = x.okC && x.okT && x.okH; return { cells: [x.a.c.id, x.a.c.formula, toDisp("F", x.a.pk.P), toDisp("F", x.a.pk.max), toDisp("F", x.a.pk.min), toDisp("F", x.a.pk.H), x.y, ok ? "OK" : "NOT OK"], cls: ok ? "" : "bad" } }),
     dec: [null, null, 1, 1, 1, 2, 2, null], align: ["l", "l", "r", "r", "r", "r", "r", "l"] })
@@ -421,7 +489,11 @@ export function deepTables(s, g) {
 export function deepKv(s, g) {
   return { title: L("Pondasi dalam (tiang)", "Deep foundation (piles)"), rows: [[L("Jenis tiang", "Pile type"), s.pk === "bored" ? `${L("Bor beton", "Bored")} Ø${nf(s.pD, 0)} mm, fc' ${s.pfc} MPa, ${Math.round(s.pn)} D${s.pdb}` : `${L("Pipa baja", "Steel pipe")} Ø${nf(s.pD, 1)} × ${nf(s.pt, 1)} mm, Fy ${s.pFy} MPa, ${s.popen ? L("ujung terbuka", "open end") : L("ujung tertutup", "closed end")}`],
     [L("Panjang di bawah cap", "Length below cap"), s.pL, "m", 2], [L("Jumlah & tata letak", "Number & layout"), `${g.n} (${g.nx} × ${g.ny} grid, s ${nf(s.psx, 2)} m, ce ${nf(s.pce, 2)} m)`],
-    [L("Metode aksial", "Axial method"), AXIAL_METHOD()[s.pmeth]], ["FS " + L("tekan/tarik/lateral", "comp./tension/lateral"), `${s.pfsC} / ${s.pfsT} / ${s.pfsL}`]] }
+    [L("Metode aksial", "Axial method"), AXIAL_METHOD()[s.pmeth]], ["FS " + L("tekan/tarik/lateral", "comp./tension/lateral"), `${s.pfsC} / ${s.pfsT} / ${s.pfsL}`],
+    ...(g.st && g.st.s1 > 0 ? (() => { const k1 = g.st.Qpile / g.st.s1, Rs = Math.sqrt(Math.max(g.Bg, g.D) / g.D); return [
+      [L("Pegas vertikal tiang kv = Q/s1 (Vesic)", "Pile vertical spring kv = Q/s1 (Vesic)"), `${nf(k1, 0)} kN/m (Q ${nf(toDisp("F", g.st.Qpile), 0)} ${uName("F")}, s1 ${nf(g.st.s1 * 1000, 2)} mm)`],
+      [L("kv per tiang dalam kelompok (÷ √(Bg/D))", "kv per pile in group (÷ √(Bg/D))"), `${nf(k1 / Rs, 0)} kN/m`]] })() : []),
+    ...(g.uH ? [[L("Pegas lateral kepala jepit kh = H/y (dengan p-multiplier)", "Fixed-head lateral spring kh = H/y (with p-multiplier)"), `${nf(1 / Math.max(g.uH.y0, 1e-12), 0)} kN/m (pm ${nf(g.pmF ?? 1, 2)})`]] : [])] }
 }
 export function deepSteps(s, g) {
   const F = (v) => `${nf(toDisp("F", v), 1)} ${uName("F")}`, ax = g.ax
@@ -432,13 +504,19 @@ export function deepSteps(s, g) {
     ["Qu", "Qs + q·Ag", "", F(ax.Qc)], ["Eg", "1 − θ·[(n−1)m + (m−1)n]/(90·m·n), θ = atan(D/s)", `m ${g.nx}, n ${g.ny}, s ${nf(s.psx, 2)}`, nf(g.Eg, 3)],
     ["Qa", "Qu·Eg/FS", `FS ${s.pfsC}`, F(g.Qac)], ["Pi", "P/n ± My·x/Σx² ± Mx·y/Σy²", `n = ${g.n}`, g.wC ? `${L("maks", "max")} ${F(g.wC.a.pk.max)} (${g.wC.a.c.id})` : "–"],
     [L("Lateral", "Lateral"), "Hu Broms (jepit) / FS", `FS ${s.pfsL}`, F(g.Hal)],
+    ...(g.ns && g.nsfC ? [
+      [L("Gesek negatif satuan", "Unit negative skin friction"), "qn = β·σ'v (σ'v " + L("sesudah timbunan", "after fill") + ")", `β ${nf(g.ns.beta[0], 2)} (${L("kohesif", "cohesive")}) / ${nf(g.ns.beta[1], 2)} (${L("granular", "granular")})`, ""],
+      [L("Bidang netral NP", "Neutral plane NP"), L("Qd + Qn(zn) = Rs(zn→ujung) + Rt; s_tiang = s_tanah", "Qd + Qn(zn) = Rs(zn→toe) + Rt; s_pile = s_soil"), `Qd ${F(g.nsfC.Qd)}`, `${nf(g.nsfC.zn, 2)} m`],
+      [L("Gaya seret Qn", "Drag force Qn"), "Σ qn·πD·Δz (z0 → NP)", "", F(g.nsfC.Qn)],
+      [L("Pemeriksaan struktur", "Structural check"), g.ns.meth === "conv" ? "P + Qn ≤ Pa" : "Qd + Qn ≤ Pa", `Pa ${F(g.Pstr)}`, F(g.nsfC.dem)]] : []),
   ]
   const st = g.st, srows = [
     [L("Beban layan (A1)", "Service load (A1)"), "Q = D + Do + berat cap", "", F(g.a1 ? g.a1.R.P : 0)],
     [L("Pemendekan elastis", "Elastic shortening"), "se = (Qp + 0,5Qs)·L/(Ap·Ep)", `Qp ${nf(st.Qp, 1)}, Qs ${nf(st.Qs, 1)} kN`, `${nf(st.se * 1000, 2)} mm`],
     [L("Rakit ekuivalen", "Equivalent raft"), st.endB ? L("di ujung tiang", "at pile tip") : "z = z0 + 2L/3, 1H:4V", `B×L = ${nf(st.Br, 2)} × ${nf(st.Lr, 2)} m @ z ${nf(st.zr, 2)} m`, `q = ${nf(st.qnet, 1)} kPa`],
     [L("Penurunan rakit (segera + konsolidasi)", "Raft settlement (immediate + consolidation)"), "Steinbrenner + Terzaghi", st.raft ? `si ${nf(st.raft.si * 1000, 1)} + sc ${nf(st.raft.sc * 1000, 1)} mm` : st.error || "", st.raft ? `${nf(st.raft.s_life * 1000, 1)} mm` : "–"],
-    [L("Total kelompok", "Group total"), "se + s,rakit", "", `${nf(st.total * 1000, 1)} mm`], [L("Pembanding Vesic", "Vesic comparison"), "sg = s1·√(Bg/D)", `s1 ${nf(st.s1 * 1000, 2)} mm`, `${nf(st.sgV * 1000, 1)} mm`]]
+    ...(st.dd ? [[L("Downdrag (timbunan / MAT)", "Downdrag (fill / groundwater)"), L("s_tanah sisa pada bidang netral", "remaining soil settlement at neutral plane"), `NP ${nf(st.dd.zn, 2)} m (${st.dd.how === "np" ? L("analisis terpadu", "unified analysis") : st.dd.how})`, `${nf(st.sdd * 1000, 1)} mm`]] : []),
+    [L("Total kelompok", "Group total"), st.dd ? "se + s,rakit + s,downdrag" : "se + s,rakit", "", `${nf(st.total * 1000, 1)} mm`], [L("Pembanding Vesic", "Vesic comparison"), "sg = s1·√(Bg/D)", `s1 ${nf(st.s1 * 1000, 2)} mm`, `${nf(st.sgV * 1000, 1)} mm`]]
   return [{ h: L("Pondasi dalam — kapasitas & reaksi tiang", "Deep foundation — pile capacity & reactions"), rows }, { h: L("Pondasi dalam — penurunan kelompok tiang", "Deep foundation — pile group settlement"), rows: srows }]
 }
 
@@ -449,25 +527,28 @@ export function settleOf(kind, ctx, data, allowMm, label, mod) {
   if (kind === "deep") {
     const st = data.st, allow = allowMm > 0 ? allowMm : (o.allowDeep ?? 25)
     const check = chk(grp, L(`Penurunan kelompok tiang (${nf(o.life ?? 20, 0)} th) ≤ izin`, `Pile group settlement (${nf(o.life ?? 20, 0)} yr) ≤ allowable`), L("SNI 8460:2017 §10 · rakit ekuivalen", "SNI 8460:2017 §10 · equivalent raft"), st.total * 1000, allow, "mm",
-      { d: 1, note: `se ${nf(st.se * 1000, 1)} + si ${nf(st.si * 1000, 1)} + sc ${nf(st.sc * 1000, 1)} mm` })
+      { d: 1, note: `se ${nf(st.se * 1000, 1)} + si ${nf(st.si * 1000, 1)} + sc ${nf(st.sc * 1000, 1)}${st.sdd ? ` + downdrag ${nf(st.sdd * 1000, 1)}` : ""} mm` })
     return { kind, label, mod, allow, life: o.life ?? 20, s: st.total * 1000, si: (st.se + st.si) * 1000, sc: st.sc * 1000, check, st, group: data.group }
   }
   const r = settleShallow(ctx.soil, data, o), allow = allowMm > 0 ? allowMm : (o.allow ?? 50)
   if (r.error) return { kind, label, mod, allow, life: o.life ?? 20, error: r.error, check: chk(grp, L("Penurunan pondasi", "Foundation settlement"), "SNI 8460:2017", 0, 1, "", { info: true, note: r.error }), foot: data }
-  const x = r.res
-  const check = chk(grp, L(`Penurunan total (${nf(o.life ?? 20, 0)} th) ≤ izin`, `Total settlement (${nf(o.life ?? 20, 0)} yr) ≤ allowable`), "SNI 8460:2017 §9 · Steinbrenner + Terzaghi", x.s_life * 1000, allow, "mm",
-    { d: 1, note: `si ${nf(x.si * 1000, 1)} + sc ${nf(x.sc * 1000, 1)} mm` })
-  return { kind, label, mod, allow, life: o.life ?? 20, s: x.s_life * 1000, si: x.si * 1000, sc: (x.s_life - x.si) * 1000, check, res: x, foot: data }
+  const x = r.res, sf = r.sf || 0
+  const check = chk(grp, L(`Penurunan total (${nf(o.life ?? 20, 0)} th) ≤ izin`, `Total settlement (${nf(o.life ?? 20, 0)} yr) ≤ allowable`), "SNI 8460:2017 §9 · Steinbrenner + Terzaghi", (x.s_life + sf) * 1000, allow, "mm",
+    { d: 1, note: `si ${nf(x.si * 1000, 1)} + sc ${nf((x.s_life - x.si) * 1000, 1)}${sf ? ` + ${L("timbunan", "fill")} ${nf(sf * 1000, 1)}` : ""} mm` })
+  return { kind, label, mod, allow, life: o.life ?? 20, s: (x.s_life + sf) * 1000, si: x.si * 1000, sc: (x.s_life - x.si) * 1000, sf: sf * 1000, check, res: x, foot: data }
 }
 export function settleTable(sb) {
   if (sb.error) return null
   const rows = sb.kind === "deep" ? [
     [L("Pemendekan elastis tiang se", "Pile elastic shortening se"), `${nf(sb.st.se * 1000, 1)} mm`], [L("Rakit ekuivalen", "Equivalent raft"), `${nf(sb.st.Br, 2)} × ${nf(sb.st.Lr, 2)} m @ z = ${nf(sb.st.zr, 2)} m`],
     [L("Segera si (rakit)", "Immediate si (raft)"), `${nf(sb.st.si * 1000, 1)} mm`], [L("Konsolidasi sc (rakit)", "Consolidation sc (raft)"), `${nf(sb.st.sc * 1000, 1)} mm`],
+    ...(sb.st.dd ? [[L("Downdrag di bidang netral", "Downdrag at neutral plane"), `${nf(sb.st.sdd * 1000, 1)} mm (NP ${nf(sb.st.dd.zn, 2)} m)`]] : []),
     [L("Total kelompok", "Group total"), `${nf(sb.s, 1)} mm`], [L("Pembanding Vesic", "Vesic comparison"), `${nf(sb.st.sgV * 1000, 1)} mm`], [L("Batas izin", "Allowable"), `${nf(sb.allow, 0)} mm`]]
     : [[L("Bentuk & ukuran", "Shape & size"), sb.foot.shape === "lingkaran" ? `Ø ${nf(sb.foot.B, 2)} m` : `${nf(sb.foot.B, 2)} × ${nf(sb.foot.L, 2)} m`], [L("Kedalaman dasar Df", "Base depth Df"), `${nf(sb.foot.Df, 2)} m`],
       [L("q bruto / bersih", "Gross / net q"), `${nf(toDisp("Q", sb.res.q_gross), 1)} / ${nf(toDisp("Q", sb.res.q_net), 1)} ${uName("Q")}`], [L("Penurunan segera si", "Immediate settlement si"), `${nf(sb.res.si * 1000, 1)} mm`],
-      [L("Konsolidasi sc (+ sekunder)", "Consolidation sc (+ secondary)"), `${nf(sb.sc, 1)} mm`], [L(`Total ${nf(sb.life, 0)} tahun`, `Total ${nf(sb.life, 0)} years`), `${nf(sb.s, 1)} mm`], ["t90", sb.res.t90 == null ? "–" : `${nf(sb.res.t90, 2)} ${L("tahun", "yr")}`], [L("Batas izin", "Allowable"), `${nf(sb.allow, 0)} mm`]]
+      [L("Konsolidasi sc (+ sekunder)", "Consolidation sc (+ secondary)"), `${nf(sb.sc, 1)} mm`], ...(sb.sf ? [[L("Sisa penurunan tanah akibat timbunan / MAT", "Remaining ground settlement from fill / groundwater"), `${nf(sb.sf, 1)} mm`]] : []),
+      [L(`Total ${nf(sb.life, 0)} tahun`, `Total ${nf(sb.life, 0)} years`), `${nf(sb.s, 1)} mm`], ["t90", sb.res.t90 == null ? "–" : `${nf(sb.res.t90, 2)} ${L("tahun", "yr")}`], [L("Batas izin", "Allowable"), `${nf(sb.allow, 0)} mm`],
+      ...(sb.res.si > 1e-6 ? [[L("Koefisien reaksi tanah ks = q_net/s (segera / jangka panjang)", "Subgrade modulus ks = q_net/s (immediate / long-term)"), `${nf(sb.res.q_net / sb.res.si, 0)} / ${nf(sb.res.q_net / Math.max(sb.res.s_life, 1e-6), 0)} kN/m³`]] : [])]
   return { title: L("Penurunan pondasi (data tanah, terhubung ke tab Penurunan)", "Foundation settlement (soil data, linked to Settlement tab)"), cols: [L("Besaran", "Quantity"), L("Nilai", "Value")], rows, align: ["l", "r"],
     note: L("Profil & parameter tanah dari tab Tanah; umur rencana, metode tegangan dan batas izin dari tab Penurunan.", "Soil profile & parameters from the Soil tab; design life, stress method and limits from the Settlement tab.") }
 }
@@ -509,7 +590,7 @@ export function flowDeep(o) {
   const sp = o.sp1, I = o.I, cs = chkSum(o.checks)
   const govN = o.gov ? ` · ${L("penentu", "governing")}: ${o.gov}` : ""
   return [
-    { ic: "pile", t: L("Kapasitas tiang tunggal", "Single pile capacity"), v: `Qa ${F_(sp.Qad)}`, f: L("Qa = min(Qu/FS; Pa struktur)", "Qa = min(Qu/FS; structural Pa)"), sub: `${I.pk === "bored" ? L("bor", "bored") : L("pipa", "pipe")} Ø${nf(I.pD, 0)} · L ${nf(I.pL, 1)} m · ${AXIAL_METHOD()[I.pmeth].split(" (")[0]} · ${L("tarik", "tension")} ${F_(sp.Qat)} · ${L("lateral", "lateral")} ${F_(sp.Ha, 1)}${I.pSrc !== "own" ? " · " + L("tab Tanah", "Soil tab") : ""}` },
+    { ic: "pile", t: L("Kapasitas tiang tunggal", "Single pile capacity"), v: `Qa ${F_(sp.Qad)}`, f: sp.ns ? (sp.ns.meth === "conv" ? L("Qa = (Qu − Rs,atas NP)/FS − Qn ≤ Pa − Qn", "Qa = (Qu − Rs,above NP)/FS − Qn ≤ Pa − Qn") : L("Qa = min(Qu/FS; Pa), Qd + Qn ≤ Pa di NP", "Qa = min(Qu/FS; Pa), Qd + Qn ≤ Pa at NP")) : L("Qa = min(Qu/FS; Pa struktur)", "Qa = min(Qu/FS; structural Pa)"), sub: `${I.pk === "bored" ? L("bor", "bored") : L("pipa", "pipe")} Ø${nf(I.pD, 0)} · L ${nf(I.pL, 1)} m · ${AXIAL_METHOD()[I.pmeth].split(" (")[0]} · ${L("tarik", "tension")} ${F_(sp.Qat)} · ${L("lateral", "lateral")} ${F_(sp.Ha, 1)}${sp.ns ? ` · ${L("gesekan negatif", "neg. skin friction")}: NP ${nf(sp.ns.r.zn, 1)} m, Qn ${F_(sp.ns.r.Qn)}` : ""}${I.pSrc !== "own" ? " · " + L("tab Tanah", "Soil tab") : ""}` },
     { ic: "loads", t: L("Beban struktur atas", "Superstructure loads"), v: `P ${F_(o.P)}`, f: L("P = Σ beban + berat cap & urugan (ASD terbesar)", "P = Σ loads + cap & backfill weight (max ASD)"), sub: `${o.loadSub || ""}${o.cP ? ` · ${o.cP}` : ""}${o.M ? ` · M ${nf(toDisp("M", o.M), 0)} ${uName("M")}` : ""}` },
     { ic: "group", t: L("Kebutuhan tiang", "Required piles"), v: `n = ${o.n}`, f: L("n ≥ P/(Qa·Eg), cek momen: Pi = P/n ± M·x/Σx²", "n ≥ P/(Qa·Eg), moment check: Pi = P/n ± M·x/Σx²"), sub: `P/Qa = ${nf(o.nAx, 2)} → ${o.layout}${o.auto ? govN : " (" + L("manual", "manual") + ")"}` },
     { ic: "found", t: o.capTitle || L("Ukuran pile cap", "Pile cap size"), v: o.cap, f: o.capF || L("B = (nx−1)s + 2ce ≥ denah peralatan; tebal dari geser & pons", "B = (nx−1)s + 2ce ≥ equipment footprint; depth from shear & punching"), sub: o.capSub || "" },
@@ -574,7 +655,7 @@ export function pileSection(m, s0, g, ds, P) {
   const Bx = m.B, depth = m.Df + s0.pL + 2, kx = (W - 280) / Math.max(Bx, 1), ky = (H - 70) / depth, cx = (W - 120) / 2, top = 40
   const X = (x) => cx + x * kx, Y = (z) => top + z * ky
   T(s, 20, 26, L("Potongan · tiang & profil tanah", "Section · piles & soil profile"), { c: P.ink, fs: 14, b: true })
-  for (const l of soilBlocks(ds)) { if (l.z0 > depth) break; const hh = (Math.min(l.z1, depth) - l.z0) * ky; Rect(s, 20, Y(l.z0), W - 40, hh, l.coh ? P.clay : P.sand, null, { op: 0.45 }); if (hh >= 18) T(s, W - 26, Y(l.z0) + 16, `${l.n > 1 ? "≈ " : ""}${l.coh ? "cu " + nf(l.cu, 0) : "φ " + nf(l.phi, 0) + "°"} · N60 ${nf(l.N60, 0)}`, { c: P.ink, fs: 10.5, a: "end" }) }
+  for (const l of soilBlocks(ds)) { if (l.z0 > depth) break; const hh = (Math.min(l.z1, depth) - l.z0) * ky; Rect(s, 20, Y(l.z0), W - 40, hh, l.fill ? P.fillS || P.sand : l.coh ? P.clay : P.sand, null, { op: l.fill ? 0.8 : 0.45 }); if (hh >= 18) T(s, W - 26, Y(l.z0) + 16, `${l.fill ? L("Timbunan", "Fill") + " · " : ""}${l.n > 1 ? "≈ " : ""}${l.coh ? "cu " + nf(l.cu, 0) : "φ " + nf(l.phi, 0) + "°"} · N60 ${nf(l.N60, 0)}`, { c: P.ink, fs: 10.5, a: "end" }) }
   if (ds.gwt < depth) { s.append(sv("line", { x1: 20, x2: W - 20, y1: Y(ds.gwt), y2: Y(ds.gwt), stroke: P.water, "stroke-width": 2, "stroke-dasharray": "8 5" })); T(s, 26, Y(ds.gwt) - 5, `▽ MAT ${nf(ds.gwt, 1)} m`, { c: P.water, fs: 11 }) }
   s.append(sv("line", { x1: 20, x2: W - 20, y1: Y(0), y2: Y(0), stroke: P.ink, "stroke-width": 2 }))
   Rect(s, X(-Bx / 2), Y(m.Df - m.t), Bx * kx, m.t * ky, P.conc, P.ink, { sw: 2 })

@@ -1,7 +1,7 @@
 // Data proyek bersama untuk alur Tanah → Gempa → Desain → Penurunan → Laporan: info proyek, data tanah (N-SPT/CPT), parameter gempa,
 // metode daya dukung, dan kriteria penurunan. Disimpan di localStorage ("ymd.project.v1"); semua tab membaca dari sini.
 import { L, AUTHOR, seismicParams, nf } from "./desain/core.js"
-import { defaultSoil, deriveSoil, siteClass, SETTLE_OPT, OVR } from "./desain/soil.js"
+import { defaultSoil, deriveSoil, siteClass, SETTLE_OPT, OVR, FILL0 } from "./desain/soil.js"
 import { ico } from "./icons.js"
 
 const KEY = "ymd.project.v1"
@@ -12,7 +12,7 @@ export function projDefaults() {
     soil: defaultSoil(),
     bear: { method: "spt", FS: 3, Df: 1.5, B: 2.5 },
     // tiang rencana proyek (acuan kapasitas tiang tunggal untuk semua modul Desain dengan pondasi dalam)
-    pile: { kind: "pipe", D: 406.4, t: 12.7, open: true, Fy: 310, fc: 30, n: 8, db: 19, L: 18, method: "api", z0: 1.5, fsC: 2.5, fsT: 3.0, fsL: 2.5, yAllow: 12, Lmax: 30 },
+    pile: { kind: "pipe", D: 406.4, t: 12.7, open: true, Fy: 310, fc: 30, n: 8, db: 19, L: 18, method: "api", z0: 1.5, fsC: 2.5, fsT: 3.0, fsL: 2.5, yAllow: 12, Lmax: 30, sdz: "1.0" },
     seis: { Ss: 0.8, S1: 0.35, TL: 8, clsMode: "auto", cls: "SD", risk: "III" },
     settle: { ...SETTLE_OPT, manual: [], sel: "" },
     codes: { wind: "7-22", aci: "19" },
@@ -36,6 +36,7 @@ export function projLoad() {
   const soil = { ...d.soil, ...(s.soil || {}) }
   if (!Array.isArray(soil.layers) || !soil.layers.length) soil.layers = d.soil.layers
   soil.layers = soil.layers.map((l) => ({ ...d.soil.layers[0], ...Object.fromEntries(OVR.map((k) => [k, 0])), ...l }))
+  soil.fill = { ...FILL0, ...(s.soil && s.soil.fill && typeof s.soil.fill === "object" ? s.soil.fill : {}) }
   return { info: { ...d.info, ...(s.info || {}) }, soil, bear: { ...d.bear, ...(s.bear || {}) }, pile: { ...d.pile, ...(s.pile || {}) }, seis: { ...d.seis, ...(s.seis || {}) },
     settle: { ...d.settle, ...(s.settle || {}), manual: Array.isArray((s.settle || {}).manual) ? s.settle.manual : [] }, codes: { ...d.codes, ...(s.codes || {}) } }
 }
@@ -43,8 +44,8 @@ export const projSave = (P) => { try { localStorage.setItem(KEY, JSON.stringify(
 
 let memo = { k: "", v: null }
 export function soilDS(P) {
-  const k = JSON.stringify(P.soil)
-  if (memo.k !== k) memo = { k, v: deriveSoil(P.soil) }
+  const life = (P.settle && P.settle.life) ?? 20, k = JSON.stringify(P.soil) + "|" + life
+  if (memo.k !== k) { const v = deriveSoil(P.soil); if (v.fill) v.fill.life = life; memo = { k, v } }
   return memo.v
 }
 // SNI 1726:2019 Tabel 8 & 9 (+ §6.5 S1 ≥ 0,75)
