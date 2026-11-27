@@ -5,7 +5,7 @@ import { palette, dynDraw, footingPlan } from "./draw.js"
 import { skDyn } from "./sketch.js"
 import { dynSteps } from "./steps.js"
 import { footFrom } from "./settle.js"
-import { DEEP0, fdSection, qaFor, qaNote, isDeep, deepBundle, shallowSettle, groupStiffness, pileLayout, effPile, autoCap, singlePile, flowDeep, flowShallow, flowStep, maxLoad } from "./deep.js"
+import { DEEP0, fdSection, qaFor, qaNote, isDeep, deepBundle, shallowSettle, groupStiffness, pileLayout, effPile, autoCap, singlePile, flowDeep, flowShallow, flowStep, maxLoad, soilSection } from "./deep.js"
 import { avgOver } from "./soil.js"
 
 export const id = "dinamis"
@@ -39,9 +39,10 @@ export function form(s) {
       { k: "H", lab: L("Tebal blok H", "Block depth H"), u: "m", lo: 0.4, hi: 5 }, { k: "emb", lab: L("Kedalaman tertanam De", "Embedment depth De"), u: "m", lo: 0, hi: 5 },
       { k: "fc", lab: "fc'", u: "MPa", lo: 17, hi: 50 }, { k: "fy", lab: "fy", u: "MPa", lo: 280, hi: 550 }, { k: "db", type: "sel", lab: L("Tulangan", "Bars"), opts: BAR },
     ] },
+    soilSection(s),
     fdSection(s, { block: true }),
     { id: "soil", icon: "🧱", t: L("Tanah dinamis & kriteria", "Dynamic soil & criteria"), fields: [
-      { k: "Gmode", type: "seg", lab: L("Kekakuan tanah dari", "Soil stiffness from"), opts: { soil: L("N-SPT tab Tanah (Imai)", "Soil tab N-SPT (Imai)"), Vs: "Vs", G: L("G langsung", "G direct") }, show: (x) => !isDeep(x) },
+      { k: "Gmode", type: "seg", lab: L("Kekakuan tanah dari", "Soil stiffness from"), opts: { soil: L("N-SPT data tanah (Imai)", "Soil data N-SPT (Imai)"), Vs: "Vs", G: L("G langsung", "G direct") }, show: (x) => !isDeep(x) },
       { k: "xiP", lab: L("Redaman kelompok tiang ξ", "Pile group damping ξ"), u: "", lo: 0.02, hi: 0.2, show: isDeep, help: L("Konservatif 0,05 (tanpa redaman radiasi tiang).", "Conservative 0.05 (no pile radiation damping).") },
       { k: "red", lab: L("Reduksi G (regangan)", "G reduction (strain)"), u: "", lo: 0.2, hi: 1, show: (x) => x.Gmode === "soil" && !isDeep(x) },
       { k: "Vs", lab: L("Kecepatan gelombang geser Vs", "Shear-wave velocity Vs"), u: "m/s", lo: 50, hi: 1500, show: (x) => x.Gmode === "Vs" && !isDeep(x) }, { k: "red", lab: L("Reduksi G (regangan)", "G reduction (strain)"), u: "", lo: 0.2, hi: 1, show: (x) => x.Gmode === "Vs" && !isDeep(x) },

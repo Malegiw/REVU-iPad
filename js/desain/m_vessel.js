@@ -5,7 +5,7 @@ import { ANCHOR, ANCHOR_D } from "./steel.js"
 import { pmCurve } from "./rc.js"
 import { loadsEditor, addUserLoads } from "./ui.js"
 import { footFrom } from "./settle.js"
-import { DEEP0, fdSection, qaFor, qaNote, isDeep, deepBundle, shallowSettle, effPile, autoCap, autoFoot, singlePile, flowDeep, flowShallow, flowStep, maxLoad } from "./deep.js"
+import { DEEP0, fdSection, qaFor, qaNote, isDeep, deepBundle, shallowSettle, effPile, autoCap, autoFoot, singlePile, flowDeep, flowShallow, flowStep, maxLoad, soilSection } from "./deep.js"
 import { palette, vesselDraw, footingPlan, pmChart } from "./draw.js"
 import { skVessel, skVesselFound } from "./sketch.js"
 import { vesselSteps } from "./steps.js"
@@ -48,6 +48,7 @@ export function form(s) {
       { k: "fc", lab: "fc'", u: "MPa", lo: 17, hi: 60 }, { k: "fy", lab: "fy", u: "MPa", lo: 280, hi: 550 }, { k: "cover", lab: L("Selimut bawah", "Bottom cover"), u: "mm", lo: 50, hi: 100 },
       { k: "db", type: "sel", lab: L("Tulangan telapak", "Footing bars"), opts: BAR }, { k: "nBars", lab: L("Jumlah tulangan pedestal", "Pedestal bar count"), u: "", lo: 4, hi: 80 }, { k: "dbP", type: "sel", lab: L("Diameter tulangan pedestal", "Pedestal bar size"), opts: BAR },
     ] },
+    soilSection(s),
     fdSection(s, { autoShallow: true }),
     { id: "anc", icon: "🔩", t: L("Baut angkur", "Anchor bolts"), fields: [
       { k: "nb", lab: v(s) ? L("Jumlah baut", "Number of bolts") : L("Baut per saddle", "Bolts per saddle"), u: "", lo: 2, hi: 48 },
@@ -163,6 +164,6 @@ export function run(s, ctx) {
     : flowShallow({ q: qs, P: ml.P, M: ml.M, cP: ml.cP, loadSub, A: r0.geo.A * out.res.length, gov: sizing ? sizing[0].gov : "", size: I.kind === "v" && I.fShape === "oct" ? `${L("oktagon", "octagon")} ${nf(I.B, 2)} m × t ${nf(I.t, 2)} m` : `${nf(I.B, 2)} × ${nf(I.Lf, 2)} × ${nf(I.t, 2)} m${out.res.length > 1 ? " ×2" : ""}`, auto: !!sizing,
       rebar: `X ${r0.reinf.x.bot.txt} · Y ${r0.reinf.y.bot.txt}`, rebarSub: `d = ${nf(r0.d, 0)} mm`, checks: out.checks, settle })
   return { file: "Pondasi_" + nm.replace(/\s+/g, ""), title: `${L("Desain Pondasi", "Foundation Design")} ${nm}`, sub: (deep ? `${L("Pondasi tiang", "Piled")} · ` : "") + (I.kind === "v" ? `Ø${nf(I.D, 2)} × ${nf(I.H, 2)} m · ${L("pedestal", "pedestal")} ${I.pedShape} · ${L("telapak", "footing")} ${I.fShape}` : `Ø${nf(I.D, 2)} × ${nf(I.Ltt, 2)} m T/T · Ls ${nf(I.Ls, 2)} m · ${I.fType === "comb" ? L("telapak gabungan", "combined footing") : L("telapak terpisah", "isolated footings")}`),
-    refs: codes, metrics, checks: out.checks, kv, tables, notes: [...notes, deep ? L("Pondasi dalam: telapak menjadi pile cap kaku; reaksi tiang Pi = P/n ± M·x/Σx²; kapasitas dari tab Tanah; cap didesain dengan reaksi tiang sebagai beban titik (§13.4.2.5).", "Deep foundation: the footing acts as a rigid pile cap; pile reactions Pi = P/n ± M·x/Σx²; capacity from the Soil tab; cap designed with pile reactions as point loads (§13.4.2.5).") : qaNote(qs)],
+    refs: codes, metrics, checks: out.checks, kv, tables, notes: [...notes, deep ? L("Pondasi dalam: telapak menjadi pile cap kaku; reaksi tiang Pi = P/n ± M·x/Σx²; kapasitas dari data tanah; cap didesain dengan reaksi tiang sebagai beban titik (§13.4.2.5).", "Deep foundation: the footing acts as a rigid pile cap; pile reactions Pi = P/n ± M·x/Σx²; capacity from the soil data; cap designed with pile reactions as point loads (§13.4.2.5).") : qaNote(qs)],
     drawings, cases, combos, out, settle, fdType: deep ? "deep" : "shallow", flow, steps: [flowStep(flow), ...(deep ? [] : qs && qs.r ? [{ h: L("Daya dukung izin dari data tanah", "Allowable bearing from soil data"), rows: qs.r.rows }] : []), ...vesselSteps(I, meta, out), ...(deep ? DB.steps : [])] }
 }

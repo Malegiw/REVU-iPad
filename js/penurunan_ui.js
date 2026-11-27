@@ -5,7 +5,7 @@ import { L, lang, nf, toDisp, uName } from "./desain/core.js"
 import { el, field, exportBar, reveal, tableView, urClass } from "./desain/ui.js"
 import { palette, root, T, R as Rect } from "./desain/draw.js"
 import { lineChart } from "./desain/chart.js"
-import { projLoad, projSave, soilDS, stepper } from "./project.js"
+import { projLoad, projSave, soilDS, soilDSOf, stepper } from "./project.js"
 import { settleShallow, settleGroup, pileAxial, typeName, AXIAL_METHOD, soilBlocks } from "./desain/soil.js"
 import { TV90 } from "./penurunan.js"
 import { initUnits, hero, card, footer, nextBtn } from "./pj_ui.js"
@@ -19,19 +19,19 @@ export async function collectCases(P, lng) {
   const out = []
   try {
     const D = await import("./desain_ui.js")
-    const { mods } = D.runAll(lng, { P })
+    const { S, mods } = D.runAll(lng, { P })
     for (const { m, out: o, error } of mods) {
       if (error || !o || !o.settle) continue
-      const sb = o.settle
-      out.push({ id: "mod:" + m.id, src: "mod", icon: MOD_ICO[m.id], title: m.title(), sub: o.sub, kind: sb.kind, foot: sb.foot, group: sb.group, allowOv: sb.allow, href: "#/desain/" + m.id })
+      const sb = o.settle, st = S.m[m.id], ds = D.ownSoil(st) ? soilDSOf(st.soilOwn, P) : null
+      out.push({ id: "mod:" + m.id, src: "mod", icon: MOD_ICO[m.id], title: m.title(), sub: ds ? `${o.sub} · ${L("data tanah modul", "module soil data")} (${ds.name || "–"})` : o.sub, kind: sb.kind, foot: sb.foot, group: sb.group, allowOv: sb.allow, href: "#/desain/" + m.id, ds })
     }
   } catch (e) { console.error(e) }
   ;(P.settle.manual || []).forEach((c, i) => out.push({ id: "man:" + i, src: "man", idx: i, icon: c.kind === "deep" ? "pile" : "found", title: c.label || `${L("Kasus manual", "Manual case")} ${i + 1}`, sub: c.kind === "deep" ? L("tiang (manual)", "piles (manual)") : L("dangkal (manual)", "shallow (manual)"), kind: c.kind, man: c }))
   return out
 }
 // hitung satu kasus memakai kriteria tab ini
-export function computeCase(P, ds, c) {
-  const o = P.settle
+export function computeCase(P, ds0, c) {
+  const o = P.settle, ds = c.ds || ds0
   if (c.kind === "deep") {
     let g = c.group
     if (c.src === "man") {
@@ -127,7 +127,7 @@ export function mountPenurunan(box, ctx) {
         const ur = r.s / r.allow
         const v = el("div", "pj-case-v"); v.append(el("b", urClass(ur), `${nf(r.s, 1)} mm`), el("span", null, `/ ${nf(r.allow, 0)} mm`))
         const bar = el("div", "dz-bar"), fill = el("i", urClass(ur)); fill.style.transform = `scaleX(${Math.min(ur, 1.2) / 1.2})`; const mk = el("b"); mk.style.left = `${100 / 1.2}%`; bar.append(fill, mk)
-        a.append(v, bar, el("small", null, `si ${nf(r.si, 1)} · sc ${nf(r.sc, 1)} mm`))
+        a.append(v, bar, el("small", null, `si ${nf(r.si, 1)} · sc ${nf(r.sc, 1)} mm${c.ds ? ` · ${L("data tanah modul", "module soil data")}` : ""}`))
       }
       a.onclick = () => { o.sel = c.id; projSave(P); drawList(); drawDetail(); detBox.scrollIntoView({ behavior: "smooth", block: "start" }) }
       grid.append(a)
@@ -192,7 +192,7 @@ function buildOut(P, ds, results, it) {
       drawings.push({ detail: true, make: (m) => { const Pp = palette(m); return lineChart(Pp, { title: L("Tegangan di bawah pusat pondasi", "Stress below foundation centre"), xLab: uQ, yLab: L("kedalaman di bawah dasar (m)", "depth below base (m)"), yDown: true, legendRight: true,
         series: [{ name: "Δσ", c: Pp.bad, w: 3, pts: x.stress.map(([z, d]) => [toDisp("Q", d), z]) }, { name: "σ'v0", c: Pp.steel, dash: "6 4", pts: x.stress.map(([z, , s0]) => [toDisp("Q", s0), z]) }, { name: "0,1σ'v0", c: Pp.mut, dash: "2 4", w: 1.6, pts: x.stress.map(([z, , s0]) => [toDisp("Q", 0.1 * s0), z]) }] }) }, cap: L("Distribusi Δσ dan σ'v0 di bawah pusat (kedalaman pengaruh: Δσ ≈ 0,1σ'v0)", "Δσ and σ'v0 below the centre (influence depth: Δσ ≈ 0.1σ'v0)"), maxH: 300 })
     }
-    drawings.push({ detail: true, make: (m) => sectionDraw(ds, it, palette(m)), cap: L("Potongan pondasi & profil tanah (tab Tanah)", "Foundation section & soil profile (Soil tab)"), maxH: 300 })
+    drawings.push({ detail: true, make: (m) => sectionDraw(it.c.ds || ds, it, palette(m)), cap: it.c.ds ? L("Potongan pondasi & profil tanah (data tanah modul)", "Foundation section & soil profile (module soil data)") : L("Potongan pondasi & profil tanah (tab Tanah)", "Foundation section & soil profile (Soil tab)"), maxH: 300 })
     if (r.kind === "deep") steps.push({ h: L("Penurunan kelompok tiang", "Pile group settlement"), rows: [
       [L("Beban per tiang", "Load per pile"), "Q/n", `${nf(r.g.Q, 1)} / ${r.g.n}`, `${nf(r.st.Qpile, 1)} kN`],
       [L("Bagian ujung / selimut", "Tip / shaft share"), "Qp = Q·Qb/Qu ; Qs = Q − Qp", `Qb/Qu = ${nf(r.st.ratioB, 3)}`, `${nf(r.st.Qp, 1)} / ${nf(r.st.Qs, 1)} kN`],

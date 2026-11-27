@@ -4,7 +4,7 @@ import { PRESETS, tankLoads, tankCases, analyzeTank } from "./tank.js"
 import { palette, tankDraw } from "./draw.js"
 import { skTank, skTankFound } from "./sketch.js"
 import { tankSteps } from "./steps.js"
-import { DEEP0, fdSection, qaFor, qaNote, isDeep, settleOf, settleTable, deepTables, deepKv, pilePlan, pileSection, effPile, flowDeep, flowShallow, flowStep, maxLoad } from "./deep.js"
+import { DEEP0, fdSection, qaFor, qaNote, isDeep, settleOf, settleTable, deepTables, deepKv, pilePlan, pileSection, effPile, flowDeep, flowShallow, flowStep, maxLoad, soilSection } from "./deep.js"
 
 export const id = "tangki"
 export const icon = "🛢️"
@@ -37,6 +37,7 @@ export function form(s) {
       { k: "anchored", type: "chk", lab: L("Tangki diangkur mekanis (Rwi = 4)", "Mechanically anchored tank (Rwi = 4)") }, { k: "Ie", lab: L("Faktor keutamaan Ie (API E)", "Importance factor Ie (API E)"), u: "", lo: 1, hi: 1.5 },
       { k: "z0", lab: L("Elevasi dasar tangki di atas tanah z0", "Tank base above grade z0"), u: "m", lo: 0, hi: 3 },
     ] },
+    soilSection(s),
     fdSection(s, { tank: true }),
     { id: "fd", sketch: skTankFound, icon: "🏗️", t: L("Ringwall / pelat", "Ringwall / slab"), badge: isDeep(s) ? L("PELAT DI ATAS TIANG", "SLAB ON PILES") : ring(s) ? "RINGWALL" : L("PELAT PENUH", "FULL SLAB"), note: L(`Otomatis: D ≤ <b>${nf(s.dLim, 1)} m</b> → pelat penuh (mat); D > batas → ringwall beton (PIP STE03020 / API 650 Annex B).`, `Auto: D ≤ <b>${nf(s.dLim, 1)} m</b> → full slab (mat); D > limit → concrete ringwall (PIP STE03020 / API 650 Annex B).`), fields: [
       { k: "found", type: "seg", lab: L("Pilihan", "Choice"), opts: { auto: L("Otomatis dari D", "Auto from D"), slab: L("Pelat penuh", "Full slab"), ring: "Ringwall" }, wide: true, show: (x) => !isDeep(x) },
@@ -118,7 +119,7 @@ export function run(s, ctx) {
     L("Gempa: API 650 Annex E (massa impulsif & konvektif, Mrw untuk ringwall, Ms untuk pelat), Ev = 0,14SDS (ASD) / 0,2SDS (LRFD). Angin: SNI 1727:2020 Bab 29 dengan Cf penampang bulat.", "Seismic: API 650 Annex E (impulsive & convective masses, Mrw for ringwall, Ms for slab), Ev = 0.14SDS (ASD) / 0.2SDS (LRFD). Wind: SNI 1727:2020 Ch. 29 with round-section Cf."),
     L("Penurunan tangki dihitung dengan profil tanah & kriteria dari tab Penurunan (pusat tangki, q = tekanan kontak operasi). Batas: tidak mencakup desain shell/annular plate, baut angkur tangki (bila J > 1,54), penurunan tepi/miring API 653 Annex B, dan pelat di atas tanah elastis (Winkler).", "Tank settlement uses the soil profile & criteria from the Settlement tab (tank centre, q = operating contact pressure). Limits: shell/annular plate design, tank anchor bolts (if J > 1.54), API 653 Annex B edge/tilt settlement and plate-on-elastic-foundation analysis are not covered."),
   ]
-  notes.push(piled ? L("Pondasi dalam: pelat penuh kaku di atas kelompok tiang (reaksi Pi = P/n ± M·x/Σx²), lentur pelat datar terbalik (metode desain langsung, panel s × s), pons tiang; kapasitas dari tab Tanah.", "Deep foundation: rigid full slab on a pile group (Pi = P/n ± M·x/Σx²), inverted flat-plate flexure (direct design, s × s panels), pile punching; capacity from the Soil tab.") : qaNote(qs))
+  notes.push(piled ? L("Pondasi dalam: pelat penuh kaku di atas kelompok tiang (reaksi Pi = P/n ± M·x/Σx²), lentur pelat datar terbalik (metode desain langsung, panel s × s), pons tiang; kapasitas dari data tanah.", "Deep foundation: rigid full slab on a pile group (Pi = P/n ± M·x/Σx²), inverted flat-plate flexure (direct design, s × s panels), pile punching; capacity from the soil data.") : qaNote(qs))
   const drawings = [{ make: (m) => tankDraw(I, out, palette(m)), cap: L("Gambar 1 — Tangki, pondasi, dan tekanan tanah", "Figure 1 — Tank, foundation and soil pressure") }]
   if (piled) drawings.push({ make: (m) => pilePlan(Rr.m, Rr, palette(m), L("Denah tiang di bawah pelat tangki", "Pile layout under tank slab")), cap: L("Gambar 2 — Denah tiang & reaksi (ASD penentu)", "Figure 2 — Pile layout & reactions (governing ASD)"), maxH: 320 },
     { make: (m) => pileSection(Rr.m, I, Rr, ctx.soil, palette(m)), cap: L("Gambar 3 — Potongan tiang & profil tanah", "Figure 3 — Pile section & soil profile"), maxH: 300 })
