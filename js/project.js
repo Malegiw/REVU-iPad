@@ -48,6 +48,23 @@ export function soilDS(P) {
   if (memo.k !== k) { const v = deriveSoil(P.soil); if (v.fill) v.fill.life = life; memo = { k, v } }
   return memo.v
 }
+// data tanah milik modul Desain ("Isi di modul ini"): diturunkan sama seperti data proyek, memo per isi data
+const memoOwn = new Map()
+export function soilDSOf(so, P) {
+  const life = (P && P.settle && P.settle.life) ?? 20, k = JSON.stringify(so) + "|" + life
+  let v = memoOwn.get(k)
+  if (!v) {
+    const d = defaultSoil(), src = so && typeof so === "object" ? so : d
+    const layers = Array.isArray(src.layers) && src.layers.length ? src.layers.map((l) => ({ ...d.layers[0], ...Object.fromEntries(OVR.map((x) => [x, 0])), ...l })) : d.layers
+    v = deriveSoil({ ...d, ...src, layers, fill: { ...FILL0, ...(src.fill || {}) } })
+    if (v.fill) v.fill.life = life
+    if (memoOwn.size > 16) memoOwn.clear()
+    memoOwn.set(k, v)
+  }
+  return v
+}
+// salinan data tanah proyek (untuk mulai mengisi data tanah modul)
+export const soilCopy = (P) => JSON.parse(JSON.stringify((P || projLoad()).soil))
 // SNI 1726:2019 Tabel 8 & 9 (+ §6.5 S1 ≥ 0,75)
 export function sdc(SDS, SD1, S1, risk) {
   const iv = risk === "IV", ord = "ABCDEF"
@@ -57,8 +74,9 @@ export function sdc(SDS, SD1, S1, risk) {
   if (S1 >= 0.75) c = iv ? "F" : "E"
   return c
 }
-export function seisSite(P) {
-  const s = P.seis, sc = siteClass(soilDS(P))
+// ds: data tanah lain (mis. data tanah modul) untuk kelas situs otomatis; bawaan = data tanah proyek
+export function seisSite(P, ds) {
+  const s = P.seis, sc = siteClass(ds || soilDS(P))
   const cls = s.clsMode === "auto" ? sc.cls : s.cls
   const sp = seismicParams(s.Ss, s.S1, cls)
   const Ie = RISK_IE[s.risk] ?? 1.0

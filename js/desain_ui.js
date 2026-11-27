@@ -7,7 +7,7 @@ import * as tangki from "./desain/m_tangki.js"
 import * as vessel from "./desain/m_vessel.js"
 import * as dinamis from "./desain/m_dinamis.js"
 import * as trafo from "./desain/m_trafo.js"
-import { projLoad, projSave, soilDS, seisSite, stepper } from "./project.js"
+import { projLoad, projSave, soilDS, soilDSOf, seisSite, stepper } from "./project.js"
 import { ico, MOD_ICO } from "./icons.js"
 import { QA_METHOD } from "./desain/soil.js"
 
@@ -22,12 +22,28 @@ function defaults() {
 }
 
 // konteks hitung bersama: angin dari data lokasi Desain, gempa & tanah & kriteria penurunan dari data proyek (tab Gempa / Tanah / Penurunan)
-export function designCtx(S, P, cmb) {
+// st: masukan modul — bila st.soilSrc = "own", data tanah modul itu (st.soilOwn) dipakai untuk qa, tiang, penurunan, dan kelas situs otomatis
+export const ownSoil = (st) => !!(st && st.soilSrc === "own" && st.soilOwn && Array.isArray(st.soilOwn.layers) && st.soilOwn.layers.length)
+export function designCtx(S, P, cmb, st) {
   setCode(P.codes)
-  const ss = seisSite(P)
+  const own = ownSoil(st), soil = own ? soilDSOf(st.soilOwn, P) : soilDS(P)
+  const ss = seisSite(P, own ? soil : null)
   const sc = siteCtx({ ...S.site, Ss: ss.Ss, S1: ss.S1, cls: ss.cls, TL: ss.TL })
-  return { ...sc, ss, soil: soilDS(P), bear: P.bear, settle: P.settle, pile: P.pile, cmbOpts: { SDS: sc.sp.SDS, wpFrac: cmb.wp, ortho: cmb.ortho, enabled: cmb.en, factors: cmb.fx } }
+  return { ...sc, ss, soil, soilOwn: own, bear: P.bear, settle: P.settle, pile: P.pile, cmbOpts: { SDS: sc.sp.SDS, wpFrac: cmb.wp, ortho: cmb.ortho, enabled: cmb.en, factors: cmb.fx } }
 }
+// ringkasan sumber data tanah di bagian "Ringkasan data masukan" (ikut lembar hitung, PDF & Excel)
+function withSoil(m, out, st, c) {
+  if (!c.soil || (m.id === "tiang" && st.soilSrc === "manual")) return out
+  const ds = c.soil, f = ds.fill
+  out.kv = [{ title: L("Data tanah", "Soil data"), rows: [
+    [L("Sumber data tanah", "Soil data source"), c.soilOwn ? L("diisi di modul ini", "entered in this module") : L("tab Tanah (proyek)", "Soil tab (project)")],
+    [L("Titik penyelidikan", "Investigation point"), `${ds.name || "–"} · ${ds.test === "cpt" ? "CPT" : "N-SPT"} · ${ds.layers.length} ${L("baris", "rows")} · ${nf(ds.depth, 1)} m`],
+    [L("Muka air tanah", "Groundwater"), ds.gwt, "m", 2],
+    [L("Kelas situs (gempa)", "Site class (seismic)"), `${c.ss.cls}${c.ss.auto ? ` — ${L("otomatis dari data tanah ini", "automatic from this soil data")}, N̄ ${nf(c.ss.sc.Nbar, 1)}` : ` — ${L("manual (tab Gempa)", "manual (Seismic tab)")}`}`],
+    ...(f ? [[L("Timbunan / penurunan MAT", "Fill / groundwater lowering"), `H ${nf(f.H, 2)} m · ΔMAT ${nf(f.dGwt, 2)} m · ${f.meth === "conv" ? L("konvensional", "conventional") : L("terpadu Fellenius", "Fellenius unified")}`]] : [])] }, ...(out.kv || [])]
+  return out
+}
+export const runMod = (m, st, c) => withSoil(m, relabel(m.run(st, c)), st, c)
 export function loadDesign() {
   const S = loadState(defaults)
   for (const m of MODS) S.cmb[m.id] = { ...CMB0(), ...(S.cmb[m.id] || {}) }
@@ -52,7 +68,7 @@ export function runAll(lng, opts = {}) {
   const S = loadDesign(), P = opts.P || projLoad()
   const mods = MODS.map((m) => {
     try {
-      const out = relabel(m.run(S.m[m.id], designCtx(S, P, S.cmb[m.id])))
+      const out = runMod(m, S.m[m.id], designCtx(S, P, S.cmb[m.id], S.m[m.id]))
       return { m, out }
     } catch (e) { console.error(e); return { m, error: e.message } }
   })
@@ -218,7 +234,7 @@ function page(root, S, mod) {
   root.append(head, status, tools, projBox, formBox, cmbWrap, resBox, expBox, footer())
 
   let last = null, timer = 0, onlyBad = false, drawIx = 0
-  const ctx = () => designCtx(S, PJ, cmb)
+  const ctx = () => designCtx(S, PJ, cmb, st)
   const changed = (structural) => {
     saveState(S)
     if (structural) drawForm()
@@ -232,7 +248,7 @@ function page(root, S, mod) {
   function compute(redrawCmb) {
     if (formBox.__refresh) formBox.__refresh()
     let out
-    try { out = relabel(mod.run(st, ctx())); codesEl.textContent = edLabel(mod.codes) } catch (e) {
+    try { out = runMod(mod, st, ctx()); codesEl.textContent = edLabel(mod.codes) } catch (e) {
       console.error(e)
       resBox.textContent = ""; resBox.append(el("div", "err", L("Perhitungan gagal: ", "Calculation failed: ") + e.message))
       status.className = "dz-status bad"; status.textContent = "⚠️ " + e.message

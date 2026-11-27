@@ -9,7 +9,7 @@ import { palette, pileElevation, pileConnection, pmChart } from "./draw.js"
 import { pileSteps } from "./steps.js"
 import { skPileSection, skPileSoil, skPileGroup, skPileConn } from "./sketch.js"
 import { pileAxial, pileLayers, AXIAL_METHOD, typeName, fillName, settleGroup, nsfModel } from "./soil.js"
-import { settleOf, settleTable } from "./deep.js"
+import { settleOf, settleTable, soilFields } from "./deep.js"
 import { E_STEEL, pipeCapacity } from "./steel.js"
 
 export const id = "tiang"
@@ -20,7 +20,7 @@ export const codes = "SNI 8460:2017 · API RP 2GEO · ICC-ES AC358 · AISC 360-1
 
 export function defaults() {
   return {
-    soilSrc: "project", ameth: "api", zHead: 1.5, sAllow: 0,
+    soilSrc: "project", soilOwn: null, ameth: "api", zHead: 1.5, sAllow: 0,
     type: "pipe", D: 406.4, t: 12.7, grade: "A252_3", Fy: 310, ca: 2, open: true, L: 24, e: 0,
     ds: 141.3, ts: 9.5, helices: [300, 350, 400], zTip: 9, ratio: 3, Kt: 23, T: 0, plateCap: 0, shaft: false,
     layers: [{ h: 3, type: "clay", g: 17, cu: 30, phi: 0, nh: 0 }, { h: 7, type: "sand", g: 19, cu: 0, phi: 32, nh: 0 }, { h: 16, type: "clay", g: 18, cu: 110, phi: 0, nh: 0 }], gwt: 1.5,
@@ -55,17 +55,18 @@ export function form(s, onChange) {
       { k: "plateCap", lab: L("Kapasitas pelat helix pabrikan (0 = abaikan)", "Manufacturer helix plate capacity (0 = ignore)"), u: "F", lo: 0, hi: 5000, show: hel },
       { k: "shaft", type: "chk", lab: L("Hitung gesek shaft di atas helix teratas", "Include shaft friction above top helix"), show: hel },
     ] },
-    { id: "soil", sketch: skPileSoil, icon: "🧱", t: L("Panjang tiang & profil tanah", "Pile length & soil profile"), badge: s.soilSrc === "project" ? L("TAB TANAH", "SOIL TAB") : "MANUAL",
-      note: s.soilSrc === "project" ? L("Profil tanah diambil dari <b>tab Tanah</b> (N-SPT/CPT → cu, φ). Kepala tiang (dasar pile cap) pada kedalaman zh dari muka tanah; kapasitas aksial memakai metode yang dipilih.", "Soil profile from the <b>Soil tab</b> (N-SPT/CPT → cu, φ). Pile head (cap soffit) at depth zh below grade; axial capacity uses the selected method.")
+    { id: "soil", sketch: skPileSoil, icon: "🧱", t: L("Panjang tiang & profil tanah", "Pile length & soil profile"), badge: s.soilSrc === "project" ? L("TAB TANAH", "SOIL TAB") : s.soilSrc === "own" ? L("DATA MODUL", "MODULE DATA") : "MANUAL",
+      note: s.soilSrc === "own" ? L("Profil tanah dari <b>data tanah modul ini</b> (N-SPT/CPT → cu, φ, sama seperti tab Tanah). Kepala tiang (dasar pile cap) pada kedalaman zh dari muka tanah.", "Soil profile from <b>this module's soil data</b> (N-SPT/CPT → cu, φ, same as the Soil tab). Pile head (cap soffit) at depth zh below grade.")
+        : s.soilSrc === "project" ? L("Profil tanah diambil dari <b>tab Tanah</b> (N-SPT/CPT → cu, φ). Kepala tiang (dasar pile cap) pada kedalaman zh dari muka tanah; kapasitas aksial memakai metode yang dipilih.", "Soil profile from the <b>Soil tab</b> (N-SPT/CPT → cu, φ). Pile head (cap soffit) at depth zh below grade; axial capacity uses the selected method.")
         : L("Kedalaman diukur dari <b>kepala tiang (dasar pile cap)</b>. Lempung: metode α (API), Davisson k = 67cu. Pasir: metode β (API, δ = φ − 5°), nh Terzaghi otomatis bila 0.", "Depths are measured from the <b>pile head (pile-cap soffit)</b>. Clay: α-method (API), Davisson k = 67cu. Sand: β-method (API, δ = φ − 5°), Terzaghi nh automatic when 0."), fields: [
-      { k: "soilSrc", type: "seg", lab: L("Sumber data tanah", "Soil data source"), opts: { project: L("Tab Tanah (proyek)", "Soil tab (project)"), manual: L("Manual (lapisan di sini)", "Manual (layers here)") }, wide: true },
-      { k: "ameth", type: "seg", lab: L("Metode kapasitas aksial", "Axial capacity method"), opts: { api: "α/β API", spt: "N-SPT", cpt: "CPT" }, show: (x) => x.soilSrc === "project" && pipe(x) },
-      { k: "zHead", lab: L("Kedalaman kepala tiang zh (dasar cap)", "Pile head depth zh (cap soffit)"), u: "m", lo: 0, hi: 10, show: (x) => x.soilSrc === "project" },
+      ...soilFields({ extra: { manual: L("Manual (cu, φ per lapis)", "Manual (cu, φ per layer)") } }),
+      { k: "ameth", type: "seg", lab: L("Metode kapasitas aksial", "Axial capacity method"), opts: { api: "α/β API", spt: "N-SPT", cpt: "CPT" }, show: (x) => x.soilSrc !== "manual" && pipe(x) },
+      { k: "zHead", lab: L("Kedalaman kepala tiang zh (dasar cap)", "Pile head depth zh (cap soffit)"), u: "m", lo: 0, hi: 10, show: (x) => x.soilSrc !== "manual" },
       { k: "L", lab: L("Panjang tertanam L", "Embedded length L"), u: "m", lo: 3, hi: 80, show: pipe },
       { k: "e", lab: L("Panjang bebas di atas tanah e", "Free length above ground e"), u: "m", lo: 0, hi: 20, help: L("0 bila dasar pile cap di muka tanah.", "0 when the cap soffit is at ground level.") },
-      { k: "gwt", lab: L("Muka air tanah zw dari kepala tiang", "Groundwater zw below pile head"), u: "m", lo: 0, hi: 99, show: (x) => x.soilSrc !== "project" },
+      { k: "gwt", lab: L("Muka air tanah zw dari kepala tiang", "Groundwater zw below pile head"), u: "m", lo: 0, hi: 99, show: (x) => x.soilSrc === "manual" },
       { k: "sAllow", lab: L("Batas penurunan kelompok (0 = ikut tab Penurunan)", "Group settlement limit (0 = use Settlement tab)"), u: "mm", lo: 0, hi: 500 },
-      { type: "layers", render: (st, oc) => layersEditor(st, "layers", oc), show: (x) => x.soilSrc !== "project" },
+      { type: "layers", render: (st, oc) => layersEditor(st, "layers", oc), show: (x) => x.soilSrc === "manual" },
     ] },
     { id: "grp", sketch: skPileGroup, icon: "🧩", t: L("Kelompok tiang & pile cap", "Pile group & pile cap"), fields: [
       { k: "nx", lab: L("Jumlah tiang arah X", "Piles in X"), u: "", lo: 1, hi: 8, struct: true }, { k: "ny", lab: L("Jumlah tiang arah Y", "Piles in Y"), u: "", lo: 1, hi: 8, struct: true },
@@ -102,7 +103,7 @@ export function run(s, ctx) {
   const cases = addUserLoads({}, s.loads, 1)
   const combos = expandCombos(cases, 5, ctx.cmbOpts)
   const I = { ...s, nx: Math.max(1, Math.round(s.nx)), ny: Math.max(1, Math.round(s.ny)), nd: Math.max(3, Math.round(s.nd)) }
-  const proj = s.soilSrc === "project" && !!ctx.soil, ds = ctx.soil
+  const proj = s.soilSrc !== "manual" && !!ctx.soil, ds = ctx.soil
   let axS = null
   if (proj) {
     const Lp0 = s.type === "helical" ? s.zTip : s.L
@@ -139,7 +140,7 @@ export function run(s, ctx) {
     { title: L("Kelompok & pile cap", "Group & cap"), rows: [[L("Susunan", "Layout"), `${I.nx} × ${I.ny} = ${R.n}`], [L("Jarak", "Spacing"), `${nf(I.sx, 2)} × ${nf(I.sy, 2)} m`], [L("Pile cap", "Pile cap"), `${nf(R.Bc, 2)} × ${nf(R.Lc, 2)} × ${nf(I.hc, 2)} m`], [L("Berat cap + urugan", "Cap + backfill weight"), toDisp("F", R.Wcap), uF, 1], ["fc' / fy", `${I.fcc} / ${I.fyc} MPa`]] },
     { title: L("Sambungan kepala tiang", "Pile-head connection"), rows: [[L("Jenis", "Type"), I.conn === "fixed" ? L("Jepit dengan beton isi bertulang", "Fixed, reinforced infill") : L("Sendi (tanam pendek + dowel)", "Pinned (short embed + dowels)")], [L("Penanaman", "Embedment"), I.emb, "mm", 0], [L("Panjang beton isi", "Infill length"), I.Lp, "mm", 0], ["Dowel", `${I.nd} D${I.dbd} (fy ${I.fyd} MPa)${I.hook ? ", " + L("berkait", "hooked") : ""}`], [L("Lingkar dowel", "Dowel circle"), R.conn.Dc, "mm", 0]] },
   ]
-  if (proj) kv[1] = { title: L("Tanah (tab Tanah)", "Soil (Soil tab)"), rows: [[L("Penyelidikan", "Investigation"), `${ds.name || "BH"} · ${ds.test === "cpt" ? "CPT" : "N-SPT"}`], [L("Kepala tiang zh", "Pile head zh"), s.zHead, "m", 2], [L("Muka air tanah", "Groundwater"), ds.gwt, "m", 2],
+  if (proj) kv[1] = { title: s.soilSrc === "own" ? L("Tanah (data modul)", "Soil (module data)") : L("Tanah (tab Tanah)", "Soil (Soil tab)"), rows: [[L("Penyelidikan", "Investigation"), `${ds.name || "BH"} · ${ds.test === "cpt" ? "CPT" : "N-SPT"}`], [L("Kepala tiang zh", "Pile head zh"), s.zHead, "m", 2], [L("Muka air tanah", "Groundwater"), ds.gwt, "m", 2],
     ...(R.isH ? [] : [[L("Metode aksial", "Axial method"), AXIAL_METHOD()[s.ameth]]]),
     ...ds.layers.filter((l) => l.z1 > s.zHead).map((l) => [`${nf(l.z0, 1)}–${nf(l.z1, 1)} m`, `${fillName(l)} · N60 ${nf(l.N60, 0)} · ${l.coh ? "cu " + nf(toDisp("Q", l.cu), 0) + " " + uQ : "φ " + nf(l.phi, 1) + "°"} · E ${nf(l.E / 1000, 1)} MPa`])] }
   // penurunan kelompok tiang (A1 = D + Do, beban tetap) — data tanah proyek
@@ -152,7 +153,7 @@ export function run(s, ctx) {
     if (ds.fill && axS && R.govC) {
       const md = nsfModel(ds, axS, { EA: Ast * E_STEEL * 1000 }), Pm = Math.max(R.govC.r.max, 0), r = md.solve(ds.fill.qd * Pm)
       const Le = Math.max(R.Le, 0.5), Pa = pipeCapacity(R.Dmm, R.tmm, I.Fy, 1.2 * Le * 1000, Le * 1000).phiPn / 0.9 / 1.67
-      const gN = L("Gesekan negatif (tab Tanah)", "Negative skin friction (Soil tab)"), conv = ds.fill.meth === "conv"
+      const gN = L("Gesekan negatif (data tanah)", "Negative skin friction (soil data)"), conv = ds.fill.meth === "conv"
       if (conv) R.checks.push(chk(gN, L(`Geoteknik: P + Qn ≤ (Qu − Rs,atas NP)/FS (NP ${nf(r.zn, 2)} m)`, `Geotechnical: P + Qn ≤ (Qu − Rs,above NP)/FS (NP ${nf(r.zn, 2)} m)`), "Tomlinson / FHWA", Pm + r.Qn, (axS.Qc - r.RsAbove) / I.fsC, "F", { note: R.govC.c.id, d: 1 }))
       R.checks.push(chk(gN, conv ? L("Struktur: P + Qn ≤ Pa", "Structure: P + Qn ≤ Pa") : L(`Struktur di bidang netral: Qd + Qn ≤ Pa (NP ${nf(r.zn, 2)} m)`, `Structure at neutral plane: Qd + Qn ≤ Pa (NP ${nf(r.zn, 2)} m)`),
         conv ? "Tomlinson / FHWA" : "Fellenius (2004) · AASHTO LRFD §3.11.8", conv ? Pm + r.Qn : r.Qmax, Pa, "F", { note: R.govC.c.id, d: 1 }))
@@ -203,7 +204,7 @@ export function run(s, ctx) {
     L("Kapasitas aksial: API RP 2GEO (α untuk lempung, β untuk pasir dengan batas fs dan q), ujung terbuka dicek tersumbat/tidak; helical: individual bearing (AC358, Nq = 1 + 0,56(12φ)^(φ/54)) dan korelasi torsi bila diisi.", "Axial capacity: API RP 2GEO (α for clay, β for sand with fs and q limits), open-end plugged/unplugged; helical: individual bearing (AC358, Nq = 1 + 0.56(12φ)^(φ/54)) and torque correlation when given."),
     L("Lateral: Broms umum (pu = 3Kp·σ'v·D pasir; 9cu·D di bawah 1,5D lempung) sebagai kapasitas ultimit, Winkler/elemen hingga linear (nh Terzaghi, k = 67cu Davisson) untuk defleksi & momen layan/terfaktor.", "Lateral: generalised Broms (pu = 3Kp·σ'v·D sand; 9cu·D below 1.5D clay) for ultimate capacity, linear Winkler/finite elements (Terzaghi nh, Davisson k = 67cu) for service/factored deflection & moment."),
     L("Struktur: AISC 360-16 (SNI 1729:2020) dengan penampang setelah korosi; interaksi H1-1 memakai amplifikasi B1 = 1/(1 − Pr/Pe).", "Structure: AISC 360-16 (SNI 1729:2020) on the corroded section; H1-1 interaction with B1 = 1/(1 − Pr/Pe)."),
-    ...(R.nsf ? [L(`Gesekan negatif: metode ${ds.fill.meth === "conv" ? "konvensional" : "terpadu Fellenius"} dari timbunan/penurunan MAT tab Tanah — NP ${nf(R.nsf.zn, 2)} m, Qn ${nf(toDisp("F", R.nsf.Qn), 0)} ${uF}, downdrag kepala ${nf(R.nsf.sHead * 1000, 1)} mm (masuk penurunan kelompok).`, `Negative skin friction: ${ds.fill.meth === "conv" ? "conventional" : "Fellenius unified"} method from the Soil tab fill/groundwater lowering — NP ${nf(R.nsf.zn, 2)} m, Qn ${nf(toDisp("F", R.nsf.Qn), 0)} ${uF}, head downdrag ${nf(R.nsf.sHead * 1000, 1)} mm (included in group settlement).`)] : []),
+    ...(R.nsf ? [L(`Gesekan negatif: metode ${ds.fill.meth === "conv" ? "konvensional" : "terpadu Fellenius"} dari timbunan/penurunan MAT data tanah — NP ${nf(R.nsf.zn, 2)} m, Qn ${nf(toDisp("F", R.nsf.Qn), 0)} ${uF}, downdrag kepala ${nf(R.nsf.sHead * 1000, 1)} mm (masuk penurunan kelompok).`, `Negative skin friction: ${ds.fill.meth === "conv" ? "conventional" : "Fellenius unified"} method from the soil data fill/groundwater lowering — NP ${nf(R.nsf.zn, 2)} m, Qn ${nf(toDisp("F", R.nsf.Qn), 0)} ${uF}, head downdrag ${nf(R.nsf.sHead * 1000, 1)} mm (included in group settlement).`)] : []),
     L("Batas: tanpa analisis p-y nonlinear, penurunan kelompok, gesek negatif, pancang (driveability), dan likuefaksi. Verifikasi dengan uji beban (PDA/statik) sesuai SNI 8460:2017.", "Limits: no nonlinear p-y, group settlement, downdrag, driveability or liquefaction. Verify with load tests (PDA/static) per SNI 8460:2017."),
     ...R.warn,
   ]

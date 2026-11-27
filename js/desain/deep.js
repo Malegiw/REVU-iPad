@@ -9,16 +9,63 @@ import { pipeCapacity, h1, E_STEEL } from "./steel.js"
 import { pmCapacity, circlePoly, barsOnCircle, vcTwo, vcOne, asFlex, pickBars, phiMn, rhoTS } from "./rc.js"
 import { inside, planPoly, weights, resultant, pileGroup, pileReact, analyzeFooting } from "./footing.js"
 import { root, T, R as Rect, dim, palette } from "./draw.js"
-import { projLoad, soilDS } from "../project.js"
-import { sv } from "./ui.js"
+import { projLoad, soilDS, soilDSOf, soilCopy } from "../project.js"
+import { sv, el } from "./ui.js"
+import { soilEditor } from "../soil_ui.js"
+import { siteClass } from "./soil.js"
 
 // pSrc: "proj" = tiang rencana dari tab Tanah (acuan kapasitas) | "own" = diatur di modul; pLay: "auto" = jumlah tiang & ukuran cap dari kebutuhan
 // beban | "grid" = tata letak manual (s, ce) di telapak yang diisi; psD/pceD: jarak tiang & tepi dalam kelipatan D; tAuto: tebal cap/pelat dari geser & pons
-export const DEEP0 = { fdType: "shallow", qaSrc: "soil", fSize: "auto", pSrc: "proj", pLay: "auto", psD: 3, pceD: 1, psMax: 0, tAuto: true,
+export const DEEP0 = { soilSrc: "project", soilOwn: null, fdType: "shallow", qaSrc: "soil", fSize: "auto", pSrc: "proj", pLay: "auto", psD: 3, pceD: 1, psMax: 0, tAuto: true,
   pk: "pipe", pD: 406.4, pt: 12.7, popen: true, pFy: 310, pL: 18, pmeth: "api", psx: 1.25, pce: 0.5,
   pfc: 30, pn: 8, pdb: 19, pfsC: 2.5, pfsT: 3.0, pfsL: 2.5, pyAllow: 12, sAllow: 0 }
 const BAR = { 13: "D13", 16: "D16", 19: "D19", 22: "D22", 25: "D25", 29: "D29", 32: "D32" }
 export const isDeep = (s) => s.fdType === "deep"
+
+// ---------------------------------------------------------------- formulir bersama: sumber data tanah
+// "project" = data tab Tanah (proyek, sama untuk semua modul) | "own" = data tanah diisi di modul ini (mis. titik bor lain di lokasi
+// peralatan ini). Data modul dipakai untuk qa, kapasitas tiang, gesekan negatif, penurunan, dan kelas situs otomatis modul tersebut.
+const ownOn = (x) => x.soilSrc === "own"
+export const SOIL_SRC = () => ({ project: L("Tab Tanah (proyek)", "Soil tab (project)"), own: L("Isi di modul ini", "Enter in this module") })
+export function soilSection(s) {
+  return { id: "soil", icon: "🧱", t: L("Data tanah", "Soil data"), badge: ownOn(s) ? L("DATA MODUL", "MODULE DATA") : L("TAB TANAH", "SOIL TAB"), fields: soilFields() }
+}
+export function soilFields(o = {}) {
+  return [
+    { k: "soilSrc", type: "seg", lab: L("Sumber data tanah", "Soil data source"), opts: { ...SOIL_SRC(), ...(o.extra || {}) }, wide: true, on: (st, v) => { if (v === "own" && !(st.soilOwn && st.soilOwn.layers)) st.soilOwn = soilCopy() } },
+    { type: "custom", show: (x) => x.soilSrc === "project", render: () => projSoilCard() },
+    { type: "custom", show: ownOn, render: (st, oc) => ownSoilBox(st, oc) },
+  ]
+}
+// ringkasan data tanah proyek (tab Tanah)
+function projSoilCard() {
+  const box = el("div", "pj-pilecard")
+  try {
+    const P = projLoad(), ds = soilDS(P), sc = siteClass(ds)
+    box.innerHTML = `<b>${L("Data tanah dari tab Tanah", "Soil data from the Soil tab")}</b><span>${ds.name || "–"} · ${ds.test === "cpt" ? "CPT" : "N-SPT"} · ${ds.layers.length} ${L("baris", "rows")} · ${nf(ds.depth, 1)} m · MAT ${nf(ds.gwt, 2)} m · ${L("kelas situs", "site class")} ${sc.cls}${ds.fill ? ` · ${L("timbunan", "fill")} ${nf(ds.fill.H, 1)} m` : ""}</span>`
+      + `<a href="#/tanah">${L("Ubah di tab Tanah →", "Edit in Soil tab →")}</a><small class="hint">${L("Pilih <i>Isi di modul ini</i> bila peralatan ini memakai titik bor / sondir sendiri.", "Choose <i>Enter in this module</i> when this equipment has its own borehole / CPT.")}</small>`
+  } catch (e) { box.textContent = e.message }
+  return box
+}
+// editor data tanah modul (sama dengan tab Tanah) + salin ulang dari tab Tanah (ketuk dua kali)
+function ownSoilBox(st, oc) {
+  if (!(st.soilOwn && Array.isArray(st.soilOwn.layers))) st.soilOwn = soilCopy()
+  const box = el("div", "pj-ownsoil"), bar = el("div", "pj-row pj-soilbar"), info = el("span", "hint pj-soilinfo")
+  const upd = () => {
+    try { const ds = soilDSOf(st.soilOwn, projLoad()), sc = siteClass(ds); info.textContent = `${ds.layers.length} ${L("baris", "rows")} · ${nf(ds.depth, 1)} m · MAT ${nf(ds.gwt, 2)} m · ${L("kelas situs", "site class")} ${sc.cls} (N̄ ${nf(sc.Nbar, 1)})` } catch (e) { info.textContent = "" }
+  }
+  const oc2 = (x) => { upd(); oc(x) }
+  upd()
+  const cp = el("button", "dz-add ghost", L("⟲ Salin ulang dari tab Tanah", "⟲ Copy again from Soil tab")); cp.type = "button"
+  let armed = 0
+  cp.onclick = () => {
+    if (!armed) { armed = setTimeout(() => { armed = 0; cp.classList.remove("warn"); cp.textContent = L("⟲ Salin ulang dari tab Tanah", "⟲ Copy again from Soil tab") }, 3500); cp.classList.add("warn"); cp.textContent = L("Ketuk lagi: timpa data modul", "Tap again: overwrite module data"); return }
+    clearTimeout(armed); armed = 0; st.soilOwn = soilCopy(); oc(true)
+  }
+  bar.append(cp, info)
+  box.append(el("p", "dz-note", L("Data tanah khusus modul ini (tidak mengubah tab Tanah). Isian, alat bantu, dan korelasinya sama dengan tab Tanah. Kelas situs gempa modul ini dihitung dari data ini bila kelas situs di tab Gempa otomatis.", "Soil data for this module only (the Soil tab is unchanged). Inputs, tools and correlations are the same as the Soil tab. This module's seismic site class comes from this data when the Seismic tab site class is automatic.")), bar, soilEditor(st.soilOwn, oc2))
+  return box
+}
 
 // ---------------------------------------------------------------- formulir bersama: tipe pondasi
 // o: { tank, autoShallow (vessel/trafo), block (pondasi mesin: ukuran blok tetap) }
@@ -26,15 +73,15 @@ export function fdSection(s, o = {}) {
   const sh = (x) => !isDeep(x), dp = (x) => isDeep(x), man = (x) => !isDeep(x) && x.qaSrc === "manual"
   const own = (x) => isDeep(x) && x.pSrc === "own", pipe = (x) => own(x) && x.pk === "pipe", bor = (x) => own(x) && x.pk === "bored"
   const grid = (x) => isDeep(x) && x.pLay === "grid", auto = (x) => isDeep(x) && x.pLay !== "grid"
-  const projCard = { type: "custom", show: (x) => isDeep(x) && x.pSrc !== "own", render: () => projPileCard() }
+  const projCard = { type: "custom", show: (x) => isDeep(x) && x.pSrc !== "own", render: (st) => projPileCard(st) }
   return { id: "fdt", icon: isDeep(s) ? "📍" : "🧱", sketch: (st) => skFound(st, o), badge: isDeep(s) ? L("DALAM · TIANG", "DEEP · PILES") : L("DANGKAL", "SHALLOW"),
     t: L("Tipe pondasi & alur desain", "Foundation type & design flow"),
     note: isDeep(s)
       ? L(`Alur: <b>kapasitas tiang tunggal</b> (tiang rencana tab Tanah) → <b>beban</b> → <b>jumlah tiang</b> n ≥ P/(Qa·Eg) dicek dengan momen → <b>ukuran pile cap</b> dari jarak s & tepi ce${o.tank ? " (tangki: susunan <b>radial</b> cincin konsentris)" : ""} → <b>tebal & tulangan</b> → pemeriksaan → penurunan.`, `Flow: <b>single pile capacity</b> (Soil tab design pile) → <b>loads</b> → <b>number of piles</b> n ≥ P/(Qa·Eg) checked with moments → <b>pile cap size</b> from spacing s & edge ce${o.tank ? " (tank: <b>radial</b> concentric rings)" : ""} → <b>depth & reinforcement</b> → checks → settlement.`)
-      : L(`Alur: <b>qa dari tab Tanah</b> (N-SPT / CPT / Vesic) → <b>beban</b> → <b>ukuran telapak</b> A ≥ P/qa${o.autoShallow ? " (otomatis)" : ""} → <b>tebal & tulangan</b> → pemeriksaan → penurunan.`, `Flow: <b>qa from Soil tab</b> (N-SPT / CPT / Vesic) → <b>loads</b> → <b>footing size</b> A ≥ P/qa${o.autoShallow ? " (automatic)" : ""} → <b>depth & reinforcement</b> → checks → settlement.`),
+      : L(`Alur: <b>qa dari data tanah</b> (N-SPT / CPT / Vesic) → <b>beban</b> → <b>ukuran telapak</b> A ≥ P/qa${o.autoShallow ? " (otomatis)" : ""} → <b>tebal & tulangan</b> → pemeriksaan → penurunan.`, `Flow: <b>qa from soil data</b> (N-SPT / CPT / Vesic) → <b>loads</b> → <b>footing size</b> A ≥ P/qa${o.autoShallow ? " (automatic)" : ""} → <b>depth & reinforcement</b> → checks → settlement.`),
     fields: [
       { k: "fdType", type: "seg", lab: L("Tipe pondasi", "Foundation type"), opts: { shallow: L("Dangkal (telapak/mat)", "Shallow (footing/mat)"), deep: L("Dalam (tiang)", "Deep (piles)") }, wide: true },
-      { k: "qaSrc", type: "seg", lab: L("Sumber daya dukung qa", "Bearing capacity source"), opts: { soil: L("Data tanah (tab Tanah)", "Soil data (Soil tab)"), manual: L("Manual", "Manual") }, show: sh },
+      { k: "qaSrc", type: "seg", lab: L("Sumber daya dukung qa", "Bearing capacity source"), opts: { soil: L("Data tanah (N-SPT / CPT)", "Soil data (SPT / CPT)"), manual: L("Manual", "Manual") }, show: sh },
       { k: "qa", lab: L("Daya dukung izin qa", "Allowable bearing qa"), u: "Q", lo: 20, hi: 2000, show: man },
       ...(o.autoShallow ? [{ k: "fSize", type: "seg", lab: L("Ukuran telapak", "Footing size"), opts: { auto: L("Otomatis dari beban & qa", "Automatic from loads & qa"), manual: L("Manual (isian B, L, t)", "Manual (B, L, t inputs)") }, show: sh, wide: true, struct: true }] : []),
       { k: "pSrc", type: "seg", lab: L("Tiang", "Pile"), opts: { proj: L("Tiang rencana (tab Tanah)", "Design pile (Soil tab)"), own: L("Atur di modul ini", "Set in this module") }, show: dp, wide: true, struct: true },
@@ -63,14 +110,14 @@ export function fdSection(s, o = {}) {
     ] }
 }
 // ringkasan tiang rencana proyek (tab Tanah) di formulir modul
-function projPileCard() {
+function projPileCard(st) {
   const box = document.createElement("div"); box.className = "pj-pilecard"
   try {
-    const P = projLoad(), ds = soilDS(P), p = P.pile
+    const P = projLoad(), own = st && st.soilSrc === "own" && st.soilOwn && st.soilOwn.layers, ds = own ? soilDSOf(st.soilOwn, P) : soilDS(P), p = P.pile
     const I = effPile({ pSrc: "proj" }, { pile: p }), sp = singlePile(I, ds, p.z0)
     box.innerHTML = `<b>${L("Tiang rencana dari tab Tanah", "Design pile from Soil tab")}</b><span>${p.kind === "bored" ? L("Bor beton", "Bored") : L("Pipa baja", "Steel pipe")} Ø${nf(p.D, 0)}${p.kind === "pipe" ? " × " + nf(p.t, 1) : ""} mm · L ${nf(p.L, 1)} m · ${AXIAL_METHOD()[p.method].split(" (")[0]}</span>`
       + `<span class="pj-kv"><i>Qa ${L("tekan", "comp.")}</i> ${F_(sp.Qad)} <i>${L("tarik", "tension")}</i> ${F_(sp.Qat)} <i>${L("lateral", "lateral")}</i> ${F_(sp.Ha, 1)}</span><a href="#/tanah">${L("Ubah di tab Tanah →", "Edit in Soil tab →")}</a>`
-      + `<small class="hint">${L(`Nilai di atas pada kepala tiang z0 = ${nf(p.z0, 2)} m (tab Tanah). Modul ini menghitung ulang Qa pada dasar pondasinya sendiri — lihat langkah 1 di Alur perhitungan.`, `Values above at pile head z0 = ${nf(p.z0, 2)} m (Soil tab). This module recomputes Qa at its own foundation base — see step 1 of the Calculation flow.`)}</small>`
+      + `<small class="hint">${L(`Nilai di atas pada kepala tiang z0 = ${nf(p.z0, 2)} m, ${own ? "memakai data tanah modul ini" : "data tanah tab Tanah"}. Modul ini menghitung ulang Qa pada dasar pondasinya sendiri — lihat langkah 1 di Alur perhitungan.`, `Values above at pile head z0 = ${nf(p.z0, 2)} m, ${own ? "using this module's soil data" : "Soil tab soil data"}. This module recomputes Qa at its own foundation base — see step 1 of the Calculation flow.`)}</small>`
   } catch (e) { box.textContent = e.message }
   return box
 }
@@ -81,7 +128,7 @@ export function qaFor(s, ctx, B, Lf, Df) {
   return { qa: r.qa, src: "soil", r }
 }
 export function qaNote(q) {
-  return q.src === "soil" ? L(`qa = ${nf(toDisp("Q", q.qa), 1)} ${uName("Q")} dari tab Tanah — ${q.r.txt}, FS ${nf(q.r.FS, 1)} (${q.r.gov}).`, `qa = ${nf(toDisp("Q", q.qa), 1)} ${uName("Q")} from Soil tab — ${q.r.txt}, FS ${nf(q.r.FS, 1)} (${q.r.gov}).`)
+  return q.src === "soil" ? L(`qa = ${nf(toDisp("Q", q.qa), 1)} ${uName("Q")} dari data tanah — ${q.r.txt}, FS ${nf(q.r.FS, 1)} (${q.r.gov}).`, `qa = ${nf(toDisp("Q", q.qa), 1)} ${uName("Q")} from soil data — ${q.r.txt}, FS ${nf(q.r.FS, 1)} (${q.r.gov}).`)
     : L("qa diisi manual.", "qa entered manually.")
 }
 
@@ -550,7 +597,7 @@ export function settleTable(sb) {
       [L(`Total ${nf(sb.life, 0)} tahun`, `Total ${nf(sb.life, 0)} years`), `${nf(sb.s, 1)} mm`], ["t90", sb.res.t90 == null ? "–" : `${nf(sb.res.t90, 2)} ${L("tahun", "yr")}`], [L("Batas izin", "Allowable"), `${nf(sb.allow, 0)} mm`],
       ...(sb.res.si > 1e-6 ? [[L("Koefisien reaksi tanah ks = q_net/s (segera / jangka panjang)", "Subgrade modulus ks = q_net/s (immediate / long-term)"), `${nf(sb.res.q_net / sb.res.si, 0)} / ${nf(sb.res.q_net / Math.max(sb.res.s_life, 1e-6), 0)} kN/m³`]] : [])]
   return { title: L("Penurunan pondasi (data tanah, terhubung ke tab Penurunan)", "Foundation settlement (soil data, linked to Settlement tab)"), cols: [L("Besaran", "Quantity"), L("Nilai", "Value")], rows, align: ["l", "r"],
-    note: L("Profil & parameter tanah dari tab Tanah; umur rencana, metode tegangan dan batas izin dari tab Penurunan.", "Soil profile & parameters from the Soil tab; design life, stress method and limits from the Settlement tab.") }
+    note: L("Profil & parameter tanah dari data tanah; umur rencana, metode tegangan dan batas izin dari tab Penurunan.", "Soil profile & parameters from the soil data; design life, stress method and limits from the Settlement tab.") }
 }
 
 // ---------------------------------------------------------------- paket untuk modul berbasis telapak (vessel, trafo, dinamis)
@@ -567,7 +614,7 @@ export function deepBundle(s, ctx, res, crit, mod, nm, sAllow) {
   const tables = gs.flatMap((g, i) => deepTables(s, g).map((t) => (lab(i) ? { ...t, title: `${t.title} · ${lab(i)}` } : t)))
   const stt = settleTable(settle); if (stt) tables.push(stt)
   const drawings = res.map(({ m }, i) => ({ make: (md) => pilePlan(m, gs[i], palette(md), lab(i) ? `${L("Denah pile cap", "Pile cap plan")} · ${lab(i)}` : undefined), cap: `${L("Denah tiang & reaksi (ASD penentu)", "Pile layout & reactions (governing ASD)")}${lab(i) ? " · " + lab(i) : ""}`, maxH: 300 }))
-  drawings.push({ make: (md) => pileSection(res[0].m, s, g0, ctx.soil, palette(md)), cap: L("Potongan tiang & profil tanah (tab Tanah)", "Pile section & soil profile (Soil tab)"), maxH: 300 })
+  drawings.push({ make: (md) => pileSection(res[0].m, s, g0, ctx.soil, palette(md)), cap: L("Potongan tiang & profil tanah", "Pile section & soil profile"), maxH: 300 })
   const uF = uName("F")
   const metrics = [
     { lab: L("Qa tekan / tiang", "Qa compression / pile"), val: toDisp("F", g0.Qac), d: 0, unit: uF },
@@ -603,7 +650,7 @@ export function flowDeep(o) {
 export function flowShallow(o) {
   const cs = chkSum(o.checks)
   return [
-    { ic: "soil", t: L("Daya dukung izin tanah", "Allowable soil bearing"), v: `qa ${Q_(o.q.qa)}`, f: o.q.src === "soil" ? o.q.r.txt : L("manual", "manual"), sub: o.q.src === "soil" ? `${L("tab Tanah", "Soil tab")} · FS ${nf(o.q.r.FS, 1)} · ${o.q.r.gov}` : L("diisi manual", "entered manually") },
+    { ic: "soil", t: L("Daya dukung izin tanah", "Allowable soil bearing"), v: `qa ${Q_(o.q.qa)}`, f: o.q.src === "soil" ? o.q.r.txt : L("manual", "manual"), sub: o.q.src === "soil" ? `${L("data tanah", "soil data")} · FS ${nf(o.q.r.FS, 1)} · ${o.q.r.gov}` : L("diisi manual", "entered manually") },
     { ic: "loads", t: L("Beban struktur atas", "Superstructure loads"), v: `P ${F_(o.P)}`, f: L("P = Σ beban + berat pondasi & urugan (ASD terbesar)", "P = Σ loads + foundation & backfill weight (max ASD)"), sub: `${o.loadSub || ""}${o.cP ? ` · ${o.cP}` : ""}${o.M ? ` · M ${nf(toDisp("M", o.M), 0)} ${uName("M")}` : ""}` },
     { ic: "found", t: L("Ukuran telapak", "Footing size"), v: o.size, f: L("A ≥ P/qa, lalu cek eksentrisitas, kontak, guling, geser", "A ≥ P/qa, then eccentricity, contact, overturning, sliding"), sub: `A ${L("perlu", "req.")} ≈ ${nf(o.P / Math.max(o.q.qa, 1), 2)} m² · A ${L("pakai", "used")} ${nf(o.A, 2)} m²${o.sizeNote ? " · " + o.sizeNote : o.auto ? ` · ${L("otomatis", "automatic")}${o.gov ? ` · ${L("penentu", "governing")}: ${o.gov}` : ""}` : " · " + L("manual", "manual")}` },
     { ic: "ruler", t: L("Tebal & penulangan", "Depth & reinforcement"), v: o.rebar, f: L("tebal dari geser satu arah & pons; As dari Mu", "depth from one-way & punching shear; As from Mu"), sub: o.rebarSub || "" },
@@ -700,7 +747,7 @@ export function skFound(st, o = {}) {
   } else {
     for (let i = 0; i <= 8; i++) { const x = fx + 8 + i * (fw - 16) / 8; s.append(sv("line", { x1: x, y1: fy + ft + 34, x2: x, y2: fy + ft + 8, stroke: P.arw, "stroke-width": 2 })); s.append(sv("polygon", { points: `${x},${fy + ft + 4} ${x - 4},${fy + ft + 12} ${x + 4},${fy + ft + 12}`, fill: P.arw })) }
     s.append(sv("line", { x1: fx, x2: fx + fw, y1: fy + ft + 34, y2: fy + ft + 34, stroke: P.arw, "stroke-width": 2 }))
-    T(s, fx + fw / 2, fy + ft + 56, st.qaSrc === "manual" ? `qa = ${nf(toDisp("Q", st.qa), 0)} ${uName("Q")} (manual)` : L("qa dari tab Tanah — memakai B, L, Df pondasi ini", "qa from Soil tab — using this footing's B, L, Df"), { c: P.acc, fs: 11.5, b: true, a: "middle" })
+    T(s, fx + fw / 2, fy + ft + 56, st.qaSrc === "manual" ? `qa = ${nf(toDisp("Q", st.qa), 0)} ${uName("Q")} (manual)` : L("qa dari data tanah — memakai B, L, Df pondasi ini", "qa from soil data — using this footing's B, L, Df"), { c: P.acc, fs: 11.5, b: true, a: "middle" })
     s.append(sv("line", { x1: fx, x2: fx + fw, y1: fy - 12, y2: fy - 12, stroke: P.mut })); T(s, fx + fw / 2 + 52, fy - 16, "B × L", { c: P.acc, fs: 11.5, b: true, a: "middle" })
     T(s, 14, 44, L("Tekanan kontak q ≤ qa (tanpa tarik), stabilitas guling/geser", "Contact pressure q ≤ qa (no tension), overturning/sliding stability"), { c: P.mut, fs: 11 })
   }

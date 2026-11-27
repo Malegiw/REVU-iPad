@@ -6,7 +6,7 @@ import { palette, trafoDraw, footingPlan } from "./draw.js"
 import { skTrafo } from "./sketch.js"
 import { trafoSteps } from "./steps.js"
 import { footFrom } from "./settle.js"
-import { DEEP0, fdSection, qaFor, qaNote, isDeep, deepBundle, shallowSettle, effPile, autoCap, autoFoot, singlePile, flowDeep, flowShallow, flowStep, maxLoad } from "./deep.js"
+import { DEEP0, fdSection, qaFor, qaNote, isDeep, deepBundle, shallowSettle, effPile, autoCap, autoFoot, singlePile, flowDeep, flowShallow, flowStep, maxLoad, soilSection } from "./deep.js"
 
 export const id = "trafo"
 export const icon = "⚡"
@@ -32,6 +32,7 @@ export function form(s) {
       { k: "Df", lab: L("Kedalaman dasar Df", "Base depth Df"), u: "m", lo: 0.3, hi: 5 }, { k: "fc", lab: "fc'", u: "MPa", lo: 17, hi: 60 }, { k: "fy", lab: "fy", u: "MPa", lo: 280, hi: 550 },
       { k: "db", type: "sel", lab: L("Tulangan telapak", "Footing bars"), opts: BAR },
     ] },
+    soilSection(s),
     fdSection(s, { autoShallow: true }),
     { id: "pit", icon: "🛢", t: L("Bak penampung oli & instalasi", "Oil pit & installation"), fields: [
       { k: "Lpit", lab: L("Bak oli dalam Lpit (X)", "Pit inside Lpit (X)"), u: "m", lo: 1, hi: 40 }, { k: "Bpit", lab: L("Bak oli dalam Bpit (Y)", "Pit inside Bpit (Y)"), u: "m", lo: 1, hi: 40 }, { k: "hpit", lab: L("Kedalaman bak hpit", "Pit depth hpit"), u: "m", lo: 0.2, hi: 3 },
@@ -108,7 +109,7 @@ export function run(s, ctx) {
     L("Gempa: peralatan kaku 0,3·SDS·Ie (SNI 1726 §15.4.2), Ie = 1,5 untuk gardu esensial; trafo harus diikat ke pelat tanam/stopper (IEEE 693) — gesek tidak diandalkan.", "Seismic: rigid equipment 0.3·SDS·Ie (SNI 1726 §15.4.2), Ie = 1.5 for essential substations; the transformer must be tied to embeds/stoppers (IEEE 693) — friction is not relied on."),
     L("Dongkrak: dua dongkrak mengangkat satu ujung (W/2 per titik, faktor 1,4) — cek tumpu & pons di plinth; tempatkan titik dongkrak sesuai gambar vendor.", "Jacking: two jacks lift one end (W/2 per point, factor 1.4) — bearing & punching on the plinth; locate jacking points per vendor drawing."),
   ]
-  notes.push(deep ? L("Pondasi dalam: telapak menjadi pile cap kaku di bawah plinth; kapasitas tiang dari tab Tanah.", "Deep foundation: the footing acts as a rigid pile cap under the plinth; pile capacity from the Soil tab.") : qaNote(qs))
+  notes.push(deep ? L("Pondasi dalam: telapak menjadi pile cap kaku di bawah plinth; kapasitas tiang dari data tanah.", "Deep foundation: the footing acts as a rigid pile cap under the plinth; pile capacity from the soil data.") : qaNote(qs))
   const drawings = [{ make: (m) => trafoDraw(I, out, palette(m)), cap: L("Gambar 1 — Trafo, plinth, bak oli, dan telapak", "Figure 1 — Transformer, plinth, oil pit and footing") }]
   if (deep) DB.drawings.forEach((d, i) => drawings.push({ ...d, cap: `${L("Gambar", "Figure")} ${i + 2} — ${d.cap}` }))
   else drawings.push({ make: (m) => footingPlan(r, out.m, palette(m)), cap: L("Gambar 2 — Denah telapak dan tekanan tanah", "Figure 2 — Footing plan and soil pressure"), maxH: 300 })

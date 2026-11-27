@@ -7,7 +7,10 @@ import * as ft from "../js/desain/footing.js"
 import { pileLayout, singlePile, effPile, pileSprings } from "../js/desain/deep.js"
 import { TV90, uOfTv } from "../js/penurunan.js"
 import { analyze, overburden } from "../js/penurunan.js"
-import { projDefaults } from "../js/project.js"
+import { projDefaults, soilDSOf, soilDS } from "../js/project.js"
+import { designCtx, runMod, ownSoil } from "../js/desain_ui.js"
+import * as mVessel from "../js/desain/m_vessel.js"
+import * as mTiang from "../js/desain/m_tiang.js"
 import { sdc, spectrum } from "../js/project.js"
 import { seismicParams } from "../js/desain/core.js"
 
@@ -245,4 +248,19 @@ export async function run({ check }) {
   near("pegas lateral lempung: k titik tengah = 67·cu·Δz, kh = 67·cu/D", psK.nodes[5].k, 67 * 60 * 1, 1e-9)
   truthy("pegas titik ujung = ½Δz; kh lempung = 67cu/D", Math.abs(psK.nodes[0].k - 67 * 60 * 0.5) < 1e-9 && Math.abs(psK.nodes[3].kh - 67 * 60 / 0.4064) < 1e-9 && psK.nodes.length === 16)
   near("pegas vertikal kv = Q/s1 (Vesic)", psK.kv, 300 / psK.s1, 1e-12)
+
+  // ---- sumber data tanah per modul Desain: tab Tanah (proyek) atau diisi di modul
+  const PJ = projDefaults(), SD = { site: { V: 32, exp: "C", Kzt: 1, Kd: 0.95, TL: 8 } }, CM = { en: {}, fx: {}, ortho: false, wp: 0.5 }
+  const soft = JSON.parse(JSON.stringify(PJ.soil)); soft.name = "BH-MOD"; soft.layers = soft.layers.map((l) => ({ ...l, N: Math.min(l.N, 4) }))
+  const stP = { ...mVessel.defaults() }, stO = { ...mVessel.defaults(), soilSrc: "own", soilOwn: soft }
+  truthy("ownSoil: hanya bila dipilih 'Isi di modul ini' dan ada lapisan", !ownSoil(stP) && ownSoil(stO) && !ownSoil({ soilSrc: "own", soilOwn: { layers: [] } }) && !ownSoil(undefined))
+  const cP = designCtx(SD, PJ, CM, stP), cO = designCtx(SD, PJ, CM, stO)
+  truthy("konteks: tab Tanah → data proyek; modul → data modul", cP.soil === soilDS(PJ) && !cP.soilOwn && cO.soilOwn && cO.soil.name === "BH-MOD" && cO.soil.layers[0].N60 <= 4)
+  truthy("kelas situs otomatis dari data tanah modul (tanah lunak → SE)", cP.ss.cls === "SD" && cO.ss.cls === "SE" && cO.ss.sp.SDS !== cP.ss.sp.SDS)
+  truthy("soilDSOf: memo untuk data sama, hitung ulang bila data berubah", soilDSOf(soft, PJ) === soilDSOf(JSON.parse(JSON.stringify(soft)), PJ) && soilDSOf({ ...soft, gwt: 3 }, PJ).gwt === 3)
+  const oP = runMod(mVessel, stP, cP), oO = runMod(mVessel, stO, cO)
+  truthy("modul memakai data tanahnya: qa lebih kecil & telapak lebih besar pada tanah lunak modul", parseFloat(oO.flow[0].v.replace(/[^0-9.]/g, "")) < parseFloat(oP.flow[0].v.replace(/[^0-9.]/g, "")) && oO.settle.s > oP.settle.s)
+  truthy("ringkasan masukan mencatat sumber data tanah", oO.kv[0].rows[0][1].includes("modul") && oP.kv[0].rows[0][1].includes("Tanah"))
+  const tO = runMod(mTiang, { ...mTiang.defaults(), soilSrc: "own", soilOwn: soft }, designCtx(SD, PJ, CM, { soilSrc: "own", soilOwn: soft })), tP = runMod(mTiang, mTiang.defaults(), cP)
+  truthy("modul tiang: opsi data modul memakai profil N-SPT/CPT modul (Qa lebih kecil)", tO.R.Qac < tP.R.Qac)
 }
