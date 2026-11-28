@@ -9,7 +9,7 @@ import { palette, pileElevation, pileConnection, pmChart } from "./draw.js"
 import { pileSteps } from "./steps.js"
 import { skPileSection, skPileSoil, skPileGroup, skPileConn } from "./sketch.js"
 import { pileAxial, pileLayers, AXIAL_METHOD, typeName, fillName, settleGroup, nsfModel } from "./soil.js"
-import { settleOf, settleTable, soilFields } from "./deep.js"
+import { settleOf, settleTable, soilFields, soilBadge } from "./deep.js"
 import { E_STEEL, pipeCapacity } from "./steel.js"
 
 export const id = "tiang"
@@ -20,7 +20,7 @@ export const codes = "SNI 8460:2017 · API RP 2GEO · ICC-ES AC358 · AISC 360-1
 
 export function defaults() {
   return {
-    soilSrc: "project", soilOwn: null, ameth: "api", zHead: 1.5, sAllow: 0,
+    soilSrc: "project", soilPt: "", soilOwn: null, ameth: "api", zHead: 1.5, sAllow: 0,
     type: "pipe", D: 406.4, t: 12.7, grade: "A252_3", Fy: 310, ca: 2, open: true, L: 24, e: 0,
     ds: 141.3, ts: 9.5, helices: [300, 350, 400], zTip: 9, ratio: 3, Kt: 23, T: 0, plateCap: 0, shaft: false,
     layers: [{ h: 3, type: "clay", g: 17, cu: 30, phi: 0, nh: 0 }, { h: 7, type: "sand", g: 19, cu: 0, phi: 32, nh: 0 }, { h: 16, type: "clay", g: 18, cu: 110, phi: 0, nh: 0 }], gwt: 1.5,
@@ -55,9 +55,9 @@ export function form(s, onChange) {
       { k: "plateCap", lab: L("Kapasitas pelat helix pabrikan (0 = abaikan)", "Manufacturer helix plate capacity (0 = ignore)"), u: "F", lo: 0, hi: 5000, show: hel },
       { k: "shaft", type: "chk", lab: L("Hitung gesek shaft di atas helix teratas", "Include shaft friction above top helix"), show: hel },
     ] },
-    { id: "soil", sketch: skPileSoil, icon: "🧱", t: L("Panjang tiang & profil tanah", "Pile length & soil profile"), badge: s.soilSrc === "project" ? L("TAB TANAH", "SOIL TAB") : s.soilSrc === "own" ? L("DATA MODUL", "MODULE DATA") : "MANUAL",
+    { id: "soil", sketch: skPileSoil, icon: "🧱", t: L("Panjang tiang & profil tanah", "Pile length & soil profile"), badge: soilBadge(s),
       note: s.soilSrc === "own" ? L("Profil tanah dari <b>data tanah modul ini</b> (N-SPT/CPT → cu, φ, sama seperti tab Tanah). Kepala tiang (dasar pile cap) pada kedalaman zh dari muka tanah.", "Soil profile from <b>this module's soil data</b> (N-SPT/CPT → cu, φ, same as the Soil tab). Pile head (cap soffit) at depth zh below grade.")
-        : s.soilSrc === "project" ? L("Profil tanah diambil dari <b>tab Tanah</b> (N-SPT/CPT → cu, φ). Kepala tiang (dasar pile cap) pada kedalaman zh dari muka tanah; kapasitas aksial memakai metode yang dipilih.", "Soil profile from the <b>Soil tab</b> (N-SPT/CPT → cu, φ). Pile head (cap soffit) at depth zh below grade; axial capacity uses the selected method.")
+        : s.soilSrc === "project" ? L("Profil tanah diambil dari <b>titik bor / sondir yang dipilih di bank data tanah</b> (tab Tanah; N-SPT/CPT → cu, φ). Kepala tiang (dasar pile cap) pada kedalaman zh dari muka tanah; kapasitas aksial memakai metode yang dipilih.", "Soil profile from the <b>borehole / CPT point selected in the soil data bank</b> (Soil tab; N-SPT/CPT → cu, φ). Pile head (cap soffit) at depth zh below grade; axial capacity uses the selected method.")
         : L("Kedalaman diukur dari <b>kepala tiang (dasar pile cap)</b>. Lempung: metode α (API), Davisson k = 67cu. Pasir: metode β (API, δ = φ − 5°), nh Terzaghi otomatis bila 0.", "Depths are measured from the <b>pile head (pile-cap soffit)</b>. Clay: α-method (API), Davisson k = 67cu. Sand: β-method (API, δ = φ − 5°), Terzaghi nh automatic when 0."), fields: [
       ...soilFields({ extra: { manual: L("Manual (cu, φ per lapis)", "Manual (cu, φ per layer)") } }),
       { k: "ameth", type: "seg", lab: L("Metode kapasitas aksial", "Axial capacity method"), opts: { api: "α/β API", spt: "N-SPT", cpt: "CPT" }, show: (x) => x.soilSrc !== "manual" && pipe(x) },
@@ -140,7 +140,7 @@ export function run(s, ctx) {
     { title: L("Kelompok & pile cap", "Group & cap"), rows: [[L("Susunan", "Layout"), `${I.nx} × ${I.ny} = ${R.n}`], [L("Jarak", "Spacing"), `${nf(I.sx, 2)} × ${nf(I.sy, 2)} m`], [L("Pile cap", "Pile cap"), `${nf(R.Bc, 2)} × ${nf(R.Lc, 2)} × ${nf(I.hc, 2)} m`], [L("Berat cap + urugan", "Cap + backfill weight"), toDisp("F", R.Wcap), uF, 1], ["fc' / fy", `${I.fcc} / ${I.fyc} MPa`]] },
     { title: L("Sambungan kepala tiang", "Pile-head connection"), rows: [[L("Jenis", "Type"), I.conn === "fixed" ? L("Jepit dengan beton isi bertulang", "Fixed, reinforced infill") : L("Sendi (tanam pendek + dowel)", "Pinned (short embed + dowels)")], [L("Penanaman", "Embedment"), I.emb, "mm", 0], [L("Panjang beton isi", "Infill length"), I.Lp, "mm", 0], ["Dowel", `${I.nd} D${I.dbd} (fy ${I.fyd} MPa)${I.hook ? ", " + L("berkait", "hooked") : ""}`], [L("Lingkar dowel", "Dowel circle"), R.conn.Dc, "mm", 0]] },
   ]
-  if (proj) kv[1] = { title: s.soilSrc === "own" ? L("Tanah (data modul)", "Soil (module data)") : L("Tanah (tab Tanah)", "Soil (Soil tab)"), rows: [[L("Penyelidikan", "Investigation"), `${ds.name || "BH"} · ${ds.test === "cpt" ? "CPT" : "N-SPT"}`], [L("Kepala tiang zh", "Pile head zh"), s.zHead, "m", 2], [L("Muka air tanah", "Groundwater"), ds.gwt, "m", 2],
+  if (proj) kv[1] = { title: s.soilSrc === "own" ? L("Tanah (data modul)", "Soil (module data)") : L(`Tanah (titik ${ds.name || "BH"}, tab Tanah)`, `Soil (point ${ds.name || "BH"}, Soil tab)`), rows: [[L("Penyelidikan", "Investigation"), `${ds.name || "BH"} · ${ds.test === "cpt" ? "CPT" : "N-SPT"}`], [L("Kepala tiang zh", "Pile head zh"), s.zHead, "m", 2], [L("Muka air tanah", "Groundwater"), ds.gwt, "m", 2],
     ...(R.isH ? [] : [[L("Metode aksial", "Axial method"), AXIAL_METHOD()[s.ameth]]]),
     ...ds.layers.filter((l) => l.z1 > s.zHead).map((l) => [`${nf(l.z0, 1)}–${nf(l.z1, 1)} m`, `${fillName(l)} · N60 ${nf(l.N60, 0)} · ${l.coh ? "cu " + nf(toDisp("Q", l.cu), 0) + " " + uQ : "φ " + nf(l.phi, 1) + "°"} · E ${nf(l.E / 1000, 1)} MPa`])] }
   // penurunan kelompok tiang (A1 = D + Do, beban tetap) — data tanah proyek

@@ -392,7 +392,7 @@ export function exportBar(box, getOut, S) {
       if (o.chapters) {
         rep.sections = []
         for (let i = 0; i < o.chapters.length; i++) {
-          const ch = o.chapters[i], letter = "ABCDEFGHIJ"[i]
+          const ch = o.chapters[i], letter = i < 26 ? String.fromCharCode(65 + i) : `Z${i - 25}`
           rep.sections.push({ h: `${letter}. ${ch.title}`, text: ch.sub ? [ch.sub] : undefined })
           rep.sections.push(...pdfSections(ch.out, ch.noImg ? [] : await shoot(ch.out), letter + "."))
         }

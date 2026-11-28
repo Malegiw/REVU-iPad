@@ -107,7 +107,7 @@ export function layersTable(so, changed) {
   function intervalPanel(so, apply) {
     const st = intSt
     if (!st.touched) st.zmax = Math.max(30, Math.ceil(so.layers.reduce((s2, l) => s2 + (+l.h || 0), 0)))
-    const w = el("div", "pj-us.tool dz-in on"), g = el("div", "dz-grid")
+    const w = el("div", "pj-tool dz-in on"), g = el("div", "dz-grid")
     g.append(field({ k: "dz", type: "seg", lab: L("Interval Δz", "Interval Δz"), opts: { 0.2: "0,2 m", 0.25: "0,25 m", 0.5: "0,5 m", 1: "1 m", 1.5: "1,5 m", 2: "2 m" }, obj: st }, st, () => draw()),
       field({ k: "zmax", lab: L("Sampai kedalaman", "Down to depth"), u: "m", lo: 1, hi: 150, obj: st }, st, () => { st.touched = true }),
       field({ k: "blank", type: "chk", lab: L("Kosongkan N/qc/fs (isi sendiri per baris; yang kosong diinterpolasi)", "Clear N/qc/fs (fill per row; empty cells are interpolated)"), obj: st }, st, () => {}))
@@ -124,7 +124,7 @@ export function layersTable(so, changed) {
   // ---- panel: tempel dari Excel / CSV
   function pastePanel(so, apply) {
     const cpt = so.test === "cpt", st = pasteSt
-    const w = el("div", "pj-us.tool dz-in on"), ta = el("textarea", "pj-paste")
+    const w = el("div", "pj-tool dz-in on"), ta = el("textarea", "pj-paste")
     ta.rows = 7; ta.spellcheck = false; ta.value = st.text
     ta.placeholder = cpt ? L("Kedalaman ⇥ qc ⇥ fs ⇥ jenis\n0,2 ⇥ 8,5 ⇥ 25\n0,4 ⇥ 9,1 ⇥ 31 ⇥ pasir", "Depth ⇥ qc ⇥ fs ⇥ type\n0.2 ⇥ 8.5 ⇥ 25\n0.4 ⇥ 9.1 ⇥ 31 ⇥ sand") : L("Kedalaman ⇥ N-SPT ⇥ jenis\n0,5 ⇥ 4 ⇥ lempung\n1,0 ⇥ ⇥ lempung\n1,5 ⇥ 6", "Depth ⇥ SPT N ⇥ type\n0.5 ⇥ 4 ⇥ clay\n1.0 ⇥ ⇥ clay\n1.5 ⇥ 6")
     const g = el("div", "dz-grid")

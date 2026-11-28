@@ -5,7 +5,8 @@ import { L, lang, nf, toDisp, uName, uFac } from "./desain/core.js"
 import { el, sv, field, exportBar, reveal, tableView, isConv, uLab } from "./desain/ui.js"
 import { palette, root, T, R as Rect } from "./desain/draw.js"
 import { lineChart } from "./desain/chart.js"
-import { projLoad, projSave, soilDS, seisSite, stepper } from "./project.js"
+import { projLoad, projSave, soilDS, seisSite, stepper, editSoil } from "./project.js"
+import { bankBody, bulkMsg, locFields, bankTable, hasPlan, planDraw, overlayDraw, dsOf, usage } from "./bank_ui.js"
 import { typeName, siteClass, shallowQa, pileAxial, QA_METHOD, AXIAL_METHOD, FILL0, fillOn, fillName, fillSettle, shallowSprings, SETTLE_OPT } from "./desain/soil.js"
 import { singlePile, effPile, pileSprings } from "./desain/deep.js"
 import { initUnits, hero, card, footer, nextBtn } from "./pj_ui.js"
@@ -18,31 +19,68 @@ export function mountTanah(box, ctx) {
   initUnits()
   const P = projLoad()
   box.textContent = ""
-  const inBox = el("div"), resBox = el("div"), expBox = el("div", "dz-expbox dz-in")
+  const qBox = el("div"), bankWrap = el("div"), inBox = el("div"), resBox = el("div"), expBox = el("div", "dz-expbox dz-in")
   box.append(stepper("tanah", P), hero(L("Langkah 1 · data proyek", "Step 1 · project data"), L("Data Tanah", "Soil Data"),
-    L("Masukkan hasil penyelidikan tanah per lapis (N-SPT bor atau CPT/sondir). Parameter desain dikorelasikan otomatis dan bisa ditimpa. Profil ini dipakai untuk daya dukung pondasi dangkal, kapasitas tiang, kelas situs gempa, dan penurunan.",
-      "Enter the site investigation per layer (SPT borehole or CPT). Design parameters are correlated automatically and can be overridden. This profile drives shallow bearing capacity, pile capacity, seismic site class and settlement."),
-    ["SNI 8460:2017", "SNI 1726:2019 Tabel 5", "N-SPT · CPT", "Meyerhof · Vesic · LCPC"]), inBox, resBox, expBox, nextBtn("#/gempa", L("Lanjut: parameter gempa", "Next: seismic parameters"), L("kelas situs dari data tanah ini", "site class from this soil data")), footer())
-  let timer = 0, last = null
-  const changed = (structural) => { projSave(P); if (structural) drawInputs(); clearTimeout(timer); timer = setTimeout(drawResults, structural ? 0 : 160) }
+    L("Bank data tanah proyek: semua titik bor (N-SPT) dan sondir (CPT) — mis. BH-1 … BH-10 dan S-1 … S-10. Isi tiap titik per lapis; parameter desain dikorelasikan otomatis dan bisa ditimpa. Modul Desain memilih titik yang dipakai untuk daya dukung, kapasitas tiang, kelas situs gempa, dan penurunan.",
+      "Project soil data bank: every borehole (SPT) and CPT point — e.g. BH-1 … BH-10 and S-1 … S-10. Fill each point per layer; design parameters are correlated automatically and can be overridden. Design modules pick the point used for bearing capacity, pile capacity, seismic site class and settlement."),
+    ["SNI 8460:2017", "SNI 1726:2019 Tabel 5", "N-SPT · CPT", "Meyerhof · Vesic · LCPC"]), qBox, bankWrap, inBox, resBox, expBox, nextBtn("#/gempa", L("Lanjut: parameter gempa", "Next: seismic parameters"), L("kelas situs dari titik acuan ★", "site class from reference point ★")), footer())
+  let timer = 0, last = null, bankSig = ""
+  const quota = (ok) => {
+    qBox.textContent = ""
+    if (!ok) qBox.append(el("p", "warn dz-in", L("⚠ Penyimpanan iPad penuh — perubahan terakhir belum tersimpan. Hapus titik atau simpanan perhitungan yang tidak dipakai (tombol Simpan di Desain), atau unduh file simpanan sebagai cadangan.", "⚠ iPad storage is full — the latest change was not saved. Delete unused points or saved calculations (Save button in Design), or download a save file as a backup.")))
+  }
+  const changed = (structural) => { quota(projSave(P)); if (structural) drawInputs(); clearTimeout(timer); timer = setTimeout(drawResults, structural ? 0 : 160) }
+  const pick = (id) => { if (P.soilEdit === id) return; P.soilEdit = id; projSave(P); drawInputs(); drawResults() }
+  // kartu bank titik: digambar ulang hanya bila tampilannya berubah (nama, jenis, kedalaman, MAT, acuan, ⚠, pemakaian)
+  function drawBank(force) {
+    const so = editSoil(P), u = usage(P)
+    const sig = JSON.stringify([P.soilEdit, P.soilRef, P.soils.map((x) => [x.id, x.name, x.test, x.gwt, x.tpl, x.layers.reduce((a, l) => a + (+l.h || 0), 0), u.get(x.id)]), lang.cur])
+    if (!force && sig === bankSig) return
+    bankSig = sig
+    const nb = P.soils.filter((x) => x.test !== "cpt").length, nc = P.soils.length - nb, m = bulkMsg()
+    bankWrap.textContent = ""
+    bankWrap.append(card("t-bank", "soil", L("Titik penyelidikan proyek — bank data tanah", "Project investigation points — soil data bank"), `${P.soils.length} ${L("titik", "points")} · ${nb} ${L("bor", "BH")} · ${nc} ${L("sondir", "CPT")} · ★ ${P.soil.name}`,
+      [bankBody(P, so, { pick, changed }), ...(m ? [el("p", "dz-note pj-ok", m)] : [])]))
+  }
   function drawInputs() {
+    drawBank(true)
     inBox.textContent = ""
-    const so = P.soil, g = invFields(so, changed)
-    inBox.append(card("t-inv", "🔎", L("Penyelidikan tanah", "Site investigation"), so.test === "cpt" ? "CPT" : "N-SPT", g))
-    inBox.append(card("t-lay", "🧱", L("Lapisan tanah / data per kedalaman (dari muka tanah ke bawah)", "Soil layers / data by depth (from grade down)"), `${so.layers.length} ${L("baris", "rows")} · ${nf(so.layers.reduce((a, l) => a + (+l.h || 0), 0), 1)} m`, layersTable(so, changed)))
+    const so = editSoil(P), g = invFields(so, changed)
+    const sub = (t) => el("div", "dz-sub", t)
+    inBox.append(card("t-inv", "🔎", L(`Penyelidikan tanah — ${so.name}`, `Site investigation — ${so.name}`), `${so.test === "cpt" ? "CPT" : "N-SPT"}${so.id === P.soilRef ? " · ★ " + L("acuan", "reference") : ""}`,
+      [...(so.tpl ? [el("p", "dz-note pj-warn", L(`⚠ ${so.name} masih berisi data contoh (templat / salinan). Isi atau tempel hasil penyelidikan titik ini di tabel lapisan — tanda ⚠ hilang setelah lapisan diubah.`, `⚠ ${so.name} still holds sample data (template / copy). Enter or paste this point's investigation results in the layer table — the ⚠ mark clears once the layers are edited.`))] : []),
+        g, sub(L("Lokasi titik (opsional — untuk denah titik & laporan)", "Point location (optional — for the point plan & report)")), locFields(so, changed)]))
+    const lay = (x) => { if (so.tpl) delete so.tpl; changed(x) }
+    inBox.append(card("t-lay", "🧱", L(`Lapisan tanah ${so.name} / data per kedalaman (dari muka tanah ke bawah)`, `Soil layers ${so.name} / data by depth (from grade down)`), `${so.layers.length} ${L("baris", "rows")} · ${nf(so.layers.reduce((a, l) => a + (+l.h || 0), 0), 1)} m`, layersTable(so, lay)))
     if (!so.fill) so.fill = { ...FILL0 }
     inBox.append(card("t-fill", "📉", L("Timbunan & penurunan muka air tanah (gesekan negatif)", "Fill & groundwater lowering (negative skin friction)"),
-      fillOn(so.fill) ? [so.fill.H > 0 ? `${L("timbunan", "fill")} ${nf(so.fill.H, 1)} m` : "", so.fill.dGwt > 0 ? `ΔMAT ${nf(so.fill.dGwt, 1)} m` : ""].filter(Boolean).join(" · ") : L("tidak ada", "none"), fillInputs(so.fill, changed), fillOn(so.fill)))
+      fillOn(so.fill) ? [so.fill.H > 0 ? `${L("timbunan", "fill")} ${nf(so.fill.H, 1)} m` : "", so.fill.dGwt > 0 ? `ΔMAT ${nf(so.fill.dGwt, 1)} m` : ""].filter(Boolean).join(" · ") : L("tidak ada", "none"), fillInputs(so.fill, lay), fillOn(so.fill)))
   }
   function drawResults() {
-    const ds = soilDS(P), sc = siteClass(ds), out = buildOut(P, ds, sc)
+    drawBank()
+    const so = editSoil(P), ds = dsOf(P, so), sc = siteClass(ds), out = buildOut(P, ds, sc, so)
+    const multi = P.soils.length > 1, bt = multi ? bankTable(P) : null, plan = multi && hasPlan(P)
+    if (multi) {
+      out.tables.push(bt)
+      if (plan) out.drawings.push({ make: (m) => planDraw(P, palette(m), so.id), cap: L("Denah titik penyelidikan", "Investigation point plan"), maxH: 360 })
+      out.drawings.push({ make: (m) => overlayDraw(P, palette(m), so.id), cap: L("Perbandingan N60 (bor) dan qc (sondir) semua titik", "N60 (boreholes) and qc (CPT) of all points"), maxH: 340 })
+    }
     last = out
     resBox.textContent = ""
     // parameter turunan
     resBox.append(card("t-der", "🧮", L("Parameter desain turunan (otomatis / ✎ manual)", "Derived design parameters (auto / ✎ manual)"), null, [tableView(out.tables[1]), el("p", "dz-note", L("Korelasi: N60 = N·Er/60; N1(60) = N60·√(100/σ'v); lempung cu = 6·N60 (Stroud) atau (qc − σv)/Nkt, Eu = 300cu, e0 dari γsat & Gs, Cc = 0,30(e0 − 0,27) (Hough), OCR dari cu/σ'v = 0,22·OCR^0,8 (SHANSEP), Cα/Cc = 0,04 (NC); pasir φ = 27,1 + 0,3N1 − 0,00054N1² (Peck–Hanson–Thornburn) atau 17,6 + 11·log(qc1N) (Kulhawy–Mayne), E = 500(N60 + 15) kPa atau 2,5qc.", "Correlations: N60 = N·Er/60; N1(60) = N60·√(100/σ'v); clay cu = 6·N60 (Stroud) or (qc − σv)/Nkt, Eu = 300cu, e0 from γsat & Gs, Cc = 0.30(e0 − 0.27) (Hough), OCR from cu/σ'v = 0.22·OCR^0.8 (SHANSEP), Cα/Cc = 0.04 (NC); sand φ = 27.1 + 0.3N1 − 0.00054N1² (Peck–Hanson–Thornburn) or 17.6 + 11·log(qc1N) (Kulhawy–Mayne), E = 500(N60 + 15) kPa or 2.5qc."))]))
     // grafik profil
     const fig = el("figure", "dz-fig pj-fig"); fig.append(profileChart(ds, palette("screen")))
-    resBox.append(card("t-prof", "📈", L("Profil tanah", "Soil profile"), `${nf(ds.depth, 1)} m`, fig))
+    resBox.append(card("t-prof", "📈", L(`Profil tanah — ${so.name}`, `Soil profile — ${so.name}`), `${nf(ds.depth, 1)} m`, fig))
+    // perbandingan semua titik bank: tabel, denah, grafik N60 / qc
+    if (multi) {
+      const f2 = el("figure", "dz-fig pj-fig"); f2.append(overlayDraw(P, palette("screen"), so.id))
+      const parts = [tableView(bt)]
+      if (plan) { const f1 = el("figure", "dz-fig pj-fig"); f1.append(planDraw(P, palette("screen"), so.id)); parts.push(f1) }
+      else parts.push(el("p", "hint", L("Isi koordinat X / Y minimal dua titik (bagian Lokasi titik) untuk menampilkan denah titik.", "Enter X / Y coordinates of at least two points (Point location) to show the point plan.")))
+      parts.push(f2)
+      resBox.append(card("t-cmp", "📊", L("Perbandingan semua titik penyelidikan", "All investigation points compared"), `${P.soils.length} ${L("titik", "points")}`, parts))
+    }
     // kelas situs
     const sk = el("div", "pj-site")
     sk.append(el("div", "pj-site-cls", sc.cls), (() => { const d = el("div"); d.append(el("b", null, L(`Kelas situs ${sc.cls} — ${sc.cls === "SE" ? "tanah lunak" : sc.cls === "SD" ? "tanah sedang" : "tanah keras/sangat padat"}`, `Site class ${sc.cls} — ${sc.cls === "SE" ? "soft soil" : sc.cls === "SD" ? "stiff soil" : "very dense soil"}`)), el("span", null, sc.why), el("small", null, L("N̄ = Σdi / Σ(di/Ni) pada 30 m teratas (SNI 1726:2019 §5.4.2). Bila bor < 30 m, lapis terakhir diperpanjang. Dipakai tab Gempa bila mode otomatis.", "N̄ = Σdi / Σ(di/Ni) over the top 30 m (SNI 1726:2019 §5.4.2). If the boring is < 30 m the last layer is extended. Used by the Seismic tab in auto mode."))); return d })())
@@ -188,7 +226,7 @@ export function profileChart(ds, P) {
 }
 
 // ---------------------------------------------------------------- laporan (hasil untuk tampilan & ekspor)
-export function soilReport(P) { const ds = soilDS(P); return buildOut(P, ds, siteClass(ds)) }
+export function soilReport(P, so) { const s0 = so || P.soil, ds = dsOf(P, s0); return buildOut(P, ds, siteClass(ds), s0) }
 
 // ---------------------------------------------------------------- hasil timbunan: penurunan tanah, gesekan negatif, bidang netral
 function nsfOut(P, ds, sp, uF) {
@@ -285,7 +323,7 @@ function sprOut(P, ds, sp, b) {
     lead: L("Koefisien pegas untuk memodelkan tanah di program struktur: ks (pegas area pelat/telapak, SAFE/ETABS) dan pegas titik telapak; tiang: pegas vertikal kv, kekakuan kepala, dan pegas lateral per titik sepanjang tiang.", "Spring coefficients to model the soil in structural software: ks (area springs for slabs/footings, SAFE/ETABS) and footing point springs; piles: vertical spring kv, head stiffness, and lateral springs per node along the pile."),
     note: L("Satuan mengikuti pilihan SI / tf. Pegas tanah bersifat linear-elastis pada tingkat beban layan; nilai sebaiknya diberi batas atas/bawah (mis. 0,5× dan 2×) untuk studi sensitivitas.", "Units follow the SI / tf toggle. Soil springs are linear-elastic at service load level; bracket values (e.g. 0.5× and 2×) for a sensitivity study.") }
 }
-function buildOut(P, ds, sc) {
+function buildOut(P, ds, sc, so = P.soil) {
   const uQ = uName("Q"), uF = uName("F"), uG = uName("G")
   const b = P.bear, qa0 = shallowQa(ds, b.B, b.B, b.Df, b.method, b.FS)
   const Bs = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8]
@@ -308,7 +346,7 @@ function buildOut(P, ds, sc) {
     [L("Qa tarik", "Qa tension"), "(Qs·k + W tiang)/FS", `FS ${nf(pl.fsT, 1)}`, F1(sp.Qat)],
     [L("Ha lateral", "Ha lateral"), "min(Hu,Broms jepit/FS; H(y izin))", `${F1(sp.Hal, 1)} ; ${F1(sp.Hd, 1)} (y ${nf(pl.yAllow, 0)} mm)`, F1(sp.Ha, 1)]] }
   const auto = (l, k) => (l.auto[k] ? "" : " ✎")
-  const cptT = P.soil.test === "cpt"
+  const cptT = so.test === "cpt"
   const derived = { note: [ds.layers.some((l) => l.est.N || l.est.qc || l.est.g) ? L("≈ = nilai uji diinterpolasi dari baris berdata terdekat; γ kosong mengikuti baris di atas / nilai tipikal.", "≈ = test value interpolated from the nearest rows with data; empty γ follows the row above / a typical value.") : "",
     ds.fill && ds.fill.H > 0 ? L(`Kedalaman dari puncak timbunan (muka tanah asli = ${nf(ds.fill.H, 2)} m). σ'v = sesudah timbunan; korelasi memakai σ'v sebelum timbunan.`, `Depth from top of fill (original grade = ${nf(ds.fill.H, 2)} m). σ'v = after fill; correlations use σ'v before fill.`) : ""].filter(Boolean).join(" ") || undefined,
     title: L("Parameter desain turunan", "Derived design parameters"), cols: ["z (m)", L("Jenis", "Type"), "N60", "N1(60)", cptT ? "qc (MPa) · Ic" : "qc (MPa)", `σ'v (${uQ})`, `cu (${uQ})`, "φ (°)", "E (MPa)", "ν", "e0", "Cc", "OCR", "cv"],
@@ -330,10 +368,10 @@ function buildOut(P, ds, sc) {
   const fillNote = ds.fill ? ` · ${L("timbunan", "fill")} ${nf(ds.fill.H, 1)} m${ds.fill.dGwt ? ` · ΔMAT ${nf(ds.fill.dGwt, 1)} m` : ""}` : ""
   return {
     nsf, spr,
-    file: "Data_Tanah", suite: L("DATA TANAH", "SOIL DATA"), title: `${L("Data Tanah", "Soil Data")} — ${P.soil.name || "BH"}`, sub: `${P.soil.test === "cpt" ? "CPT" : "N-SPT"} · ${ds.layers.length} ${L("lapis", "layers")} · MAT ${nf(ds.gwt, 2)} m · ${L("kelas situs", "site class")} ${sc.cls} (N̄ ${nf(sc.Nbar, 1)})${fillNote}`,
+    file: "Data_Tanah", suite: L("DATA TANAH", "SOIL DATA"), title: `${L("Data Tanah", "Soil Data")} — ${so.name || "BH"}`, sub: `${so.test === "cpt" ? "CPT" : "N-SPT"} · ${ds.layers.length} ${L("lapis", "layers")} · MAT ${nf(ds.gwt, 2)} m · ${L("kelas situs", "site class")} ${sc.cls} (N̄ ${nf(sc.Nbar, 1)})${fillNote}`,
     refs: "SNI 8460:2017 · SNI 1726:2019 · SNI 4153 (SPT) · SNI 2827 (sondir) · Das · Bowles · FHWA GEC 10 · API RP 2GEO · LCPC",
     metrics: [{ lab: L("Kedalaman penyelidikan", "Investigation depth"), val: ds.depth, d: 1, unit: "m" }, { lab: "N̄ (30 m)", val: sc.Nbar, d: 1 }, { lab: L("Kelas situs", "Site class"), val: sc.cls }, { lab: `qa (B ${nf(b.B, 1)} m)`, val: toDisp("Q", qa0.qa), d: 0, unit: uQ }, { lab: L("SDS (tab Gempa)", "SDS (Seismic tab)"), val: ss.sp.SDS, d: 3 }],
-    checks: [], kv: [{ title: L("Penyelidikan", "Investigation"), rows: [[L("Titik", "Point"), P.soil.name || "–"], [L("Uji", "Test"), P.soil.test === "cpt" ? "CPT" : "N-SPT"], [L("Muka air tanah", "Groundwater"), ds.gwt, "m", 2], ["Er", P.soil.Er, "%", 0], ["Nkt", P.soil.Nkt, "", 0], [L("Kelas situs", "Site class"), `${sc.cls} — ${sc.why}`], [L("Metode daya dukung", "Bearing method"), QA_METHOD()[b.method]], ["FS", b.FS, "", 1],
+    checks: [], kv: [{ title: L("Penyelidikan", "Investigation"), rows: [[L("Titik", "Point"), so.name || "–"], [L("Uji", "Test"), so.test === "cpt" ? "CPT" : "N-SPT"], [L("Muka air tanah", "Groundwater"), ds.gwt, "m", 2], ["Er", so.Er, "%", 0], ["Nkt", so.Nkt, "", 0], [L("Kelas situs", "Site class"), `${sc.cls} — ${sc.why}`], [L("Metode daya dukung", "Bearing method"), QA_METHOD()[b.method]], ["FS", b.FS, "", 1],
       ...(ds.fill ? [[L("Timbunan baru", "New fill"), `H ${nf(ds.fill.H, 2)} m · γf ${nf(toDisp("G", ds.fill.g), 1)} ${uG} · q ${nf(toDisp("Q", ds.fill.q), 1)} ${uQ}`], [L("Penurunan MAT Δh", "Groundwater lowering Δh"), ds.fill.dGwt, "m", 1], [L("Jeda penimbunan → konstruksi", "Filling → construction"), ds.fill.tPre, L("tahun", "years"), 1]] : [])] }],
     tables: [input, derived, qaT, pT, ...(nsf ? [nsf.tStrata, ...(nsf.tNsf ? [nsf.tNsf] : [])] : []), spr.tKs, spr.tFoot, spr.tPile, spr.tNodes], qa0, pile: sp,
     notes: [L("Korelasi bersifat empiris; verifikasi dengan uji laboratorium (UU/CU, oedometer) dan uji beban tiang. Parameter yang ditimpa manual ditandai ✎.", "Correlations are empirical; verify with laboratory tests (UU/CU, oedometer) and pile load tests. Manually overridden parameters are marked ✎."),

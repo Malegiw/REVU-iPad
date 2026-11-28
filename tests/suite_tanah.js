@@ -7,7 +7,10 @@ import * as ft from "../js/desain/footing.js"
 import { pileLayout, singlePile, effPile, pileSprings } from "../js/desain/deep.js"
 import { TV90, uOfTv } from "../js/penurunan.js"
 import { analyze, overburden } from "../js/penurunan.js"
-import { projDefaults, soilDSOf, soilDS } from "../js/project.js"
+import { projDefaults, soilDSOf, soilDS, projLoad, projJSON, addSoil, addSoilRange, delSoil, setRef, sortSoils, modSoil, soilCopy, editSoil, MAX_PTS } from "../js/project.js"
+import { usage, bankTable, planDraw, overlayDraw, hasPlan } from "../js/bank_ui.js"
+import { palette } from "../js/desain/draw.js"
+import { collectCases, computeCase } from "../js/penurunan_ui.js"
 import { designCtx, runMod, ownSoil } from "../js/desain_ui.js"
 import * as mVessel from "../js/desain/m_vessel.js"
 import * as mTiang from "../js/desain/m_tiang.js"
@@ -263,4 +266,67 @@ export async function run({ check }) {
   truthy("ringkasan masukan mencatat sumber data tanah", oO.kv[0].rows[0][1].includes("modul") && oP.kv[0].rows[0][1].includes("Tanah"))
   const tO = runMod(mTiang, { ...mTiang.defaults(), soilSrc: "own", soilOwn: soft }, designCtx(SD, PJ, CM, { soilSrc: "own", soilOwn: soft })), tP = runMod(mTiang, mTiang.defaults(), cP)
   truthy("modul tiang: opsi data modul memakai profil N-SPT/CPT modul (Qa lebih kecil)", tO.R.Qac < tP.R.Qac)
+
+  // ---- bank data tanah: banyak titik bor / sondir per proyek, modul memilih titik
+  const KP = "ymd.project.v1", KD = "ymd.desain.v1", keep = [KP, KD].map((k) => [k, localStorage.getItem(k)])
+  try {
+    const P0 = projDefaults()
+    truthy("bawaan: satu titik, P.soil = titik acuan (objek yang sama)", P0.soils.length === 1 && P0.soil === P0.soils[0] && P0.soilRef === P0.soil.id && P0.soilEdit === P0.soil.id)
+    // migrasi data lama (satu titik di P.soil) → bank berisi titik itu
+    const old = JSON.parse(JSON.stringify(P0)); delete old.soils; delete old.soilRef; delete old.soilEdit; old.soil.name = "BH-LAMA"; delete old.soil.id; old.soil.layers[0].N = 7
+    localStorage.setItem(KP, JSON.stringify(old))
+    const Pm = projLoad()
+    truthy("migrasi: data tanah lama menjadi titik pertama & acuan", Pm.soils.length === 1 && Pm.soil === Pm.soils[0] && Pm.soil.name === "BH-LAMA" && Pm.soil.layers[0].N === 7 && Pm.soil.id === "bhlama" && Pm.soilRef === "bhlama")
+    // buat BH-1…BH-10 dan S-1…S-10 sekaligus
+    const P = projLoad()
+    const r1 = addSoilRange(P, { prefix: "BH-", from: 1, to: 10, pad: 1, test: "spt" }), r2 = addSoilRange(P, { prefix: "S-", from: 1, to: 10, pad: 1, test: "cpt" })
+    truthy("buat banyak titik: BH-1…BH-10 (N-SPT) + S-1…S-10 (CPT), ditandai data contoh", r1.made.length === 10 && r2.made.length === 10 && P.soils.length === 21 && r2.made.every((x) => x.test === "cpt" && x.tpl) && r1.made[9].name === "BH-10" && r1.made.every((x) => x.test === "spt"))
+    const r3 = addSoilRange(P, { prefix: "bh-", from: 9, to: 12, pad: 1, test: "spt" })
+    truthy("nama yang sudah ada dilewati (tanpa beda huruf besar/kecil)", r3.made.map((x) => x.name).join() === "bh-11,bh-12" && r3.skip.join() === "bh-9,bh-10" && new Set(P.soils.map((x) => x.id)).size === P.soils.length)
+    sortSoils(P)
+    truthy("urut nama alami: BH-2 sebelum BH-10", P.soils.findIndex((x) => x.name === "BH-2") < P.soils.findIndex((x) => x.name === "BH-10") && P.soils.findIndex((x) => x.name === "BH-10") < P.soils.findIndex((x) => x.name === "S-1"))
+    // titik lunak BH-3 dan titik keras BH-7
+    const bh3 = P.soils.find((x) => x.name === "BH-3"), bh7 = P.soils.find((x) => x.name === "BH-7")
+    bh3.layers = bh3.layers.map((l) => ({ ...l, N: Math.min(l.N, 4) })); delete bh3.tpl; bh3.x = 100; bh3.y = 50; bh3.elev = 2.5
+    bh7.layers = bh7.layers.map((l) => ({ ...l, N: Math.max(l.N, 45) })); delete bh7.tpl; bh7.x = 160; bh7.y = 90
+    // simpan hemat & muat ulang
+    const js = projJSON(P), back = JSON.parse(js)
+    truthy("penyimpanan: alias P.soil tidak ditulis, kolom lanjutan bernilai 0 dibuang", !("soil" in back) && back.soils.length === P.soils.length && !("cu" in back.soils[0].layers[0]) && js.length < JSON.stringify(P).length * 0.7)
+    localStorage.setItem(KP, js)
+    const P2 = projLoad(), b3 = P2.soils.find((x) => x.name === "BH-3")
+    truthy("muat ulang: semua titik, urutan, lokasi & kolom lanjutan (0 = otomatis) kembali", P2.soils.length === P.soils.length && P2.soils.map((x) => x.name).join() === P.soils.map((x) => x.name).join() && b3.x === 100 && b3.elev === 2.5 && b3.layers[0].cu === 0 && b3.layers[0].N <= 4 && P2.soil === P2.soils.find((x) => x.id === P2.soilRef))
+    // pemilihan titik per modul
+    truthy("modSoil: '' = titik acuan, id = titik itu, id terhapus → acuan, 'own' = data modul",
+      modSoil({ soilSrc: "project", soilPt: "" }, P).kind === "ref" && modSoil({ soilSrc: "project", soilPt: bh3.id }, P).so === bh3 && modSoil({ soilSrc: "project", soilPt: "hilang" }, P).lost === "hilang" && modSoil({ soilSrc: "own", soilOwn: soilCopy(P, bh3.id) }, P).kind === "own" && modSoil({ soilSrc: "project", soilPt: P.soilRef }, P).kind === "ref")
+    const cp = soilCopy(P, bh3.id)
+    truthy("salin titik ke data modul: isi titik terpilih tanpa id / tanda contoh", cp.name === "BH-3" && !("id" in cp) && !("tpl" in cp) && cp.layers !== bh3.layers && cp.layers[0].N === bh3.layers[0].N)
+    const st3 = { ...mVessel.defaults(), soilPt: bh3.id }, st7 = { ...mVessel.defaults(), soilPt: bh7.id }, stR = { ...mVessel.defaults() }
+    const c3 = designCtx(SD, P, CM, st3), c7 = designCtx(SD, P, CM, st7), cR = designCtx(SD, P, CM, stR)
+    truthy("konteks modul memakai titik terpilih; kelas situs otomatis dari titik itu", c3.soil.name === "BH-3" && c7.soil.name === "BH-7" && cR.soil === soilDS(P) && c3.ss.cls === "SE" && c7.ss.cls !== "SE" && c3.soilPt.kind === "pt")
+    const o3 = runMod(mVessel, st3, c3), o7 = runMod(mVessel, st7, c7), qa = (o) => parseFloat(o.flow[0].v.replace(/[^0-9.]/g, ""))
+    truthy("Gas Boot di BH-3 (lunak) → qa lebih kecil & penurunan lebih besar daripada di BH-7 (keras)", qa(o3) < qa(o7) && o3.settle.s > o7.settle.s)
+    truthy("ringkasan masukan mencatat titik & lokasinya", o3.kv[0].rows[0][1].includes("BH-3") && o3.kv[0].rows.some((r) => String(r[1]).includes("X 100")) && runMod(mVessel, stR, cR).kv[0].rows[0][1].includes("★"))
+    // titik acuan diganti → modul bersumber acuan ikut; modul yang memilih titik tetap
+    setRef(P, bh7.id)
+    truthy("ganti titik acuan: P.soil & modul 'titik acuan' ikut, modul dengan titik tertentu tetap", P.soil === bh7 && designCtx(SD, P, CM, stR).soil.name === "BH-7" && designCtx(SD, P, CM, st3).soil.name === "BH-3")
+    // hapus titik
+    const n0 = P.soils.length
+    truthy("hapus titik acuan → acuan pindah ke titik lain; titik terakhir tidak bisa dihapus", delSoil(P, bh7.id) && P.soils.length === n0 - 1 && P.soil !== bh7 && P.soilRef === P.soil.id && !delSoil({ soils: [P.soil] }, P.soil.id))
+    truthy("modul yang memilih titik terhapus kembali ke titik acuan (ditandai)", designCtx(SD, P, CM, st7).soilPt.lost === bh7.id && designCtx(SD, P, CM, st7).soil === soilDS(P))
+    // batas jumlah titik
+    const Pf = projDefaults(); addSoilRange(Pf, { prefix: "X", from: 1, to: 99, pad: 1, test: "spt" })
+    truthy(`bank dibatasi ${MAX_PTS} titik`, Pf.soils.length === MAX_PTS && addSoil(Pf, { name: "Z" }) === null)
+    // pemakaian titik oleh modul & kasus manual penurunan
+    localStorage.setItem(KD, JSON.stringify({ m: { vessel: { preset: "gasboot", soilSrc: "project", soilPt: bh3.id }, trafo: { soilSrc: "own", soilOwn: cp }, tiang: { soilSrc: "manual" } } }))
+    P.settle.manual = [{ kind: "shallow", label: "TK-1", shape: "persegi", B: 3, L: 3, Df: 1.5, q: 150, pt: bh3.id }]
+    const u = usage(P)
+    truthy("pemakaian: Gas Boot & kasus manual di BH-3; modul data sendiri / manual tidak dihitung", u.get(bh3.id).join() === "Gas Boot,Penurunan: TK-1" && u.get(P.soilRef).includes("Tangki") && !u.get(P.soilRef).includes("Trafo") && !u.get(P.soilRef).includes("Tiang"))
+    const bt = bankTable(P)
+    truthy("tabel ringkasan: satu baris per titik, data contoh ditandai ⚠", bt.rows.length === P.soils.length && bt.rows.find((r) => r.cells[0].startsWith("BH-3")).cells[11].includes("Gas Boot") && bt.rows.filter((r) => r.cells[0].includes("⚠")).length === P.soils.filter((x) => x.tpl).length)
+    localStorage.setItem(KP, projJSON(P))
+    const cases = await collectCases(P, "id"), man = cases.find((c) => c.src === "man"), gb = cases.find((c) => c.id === "mod:vessel")
+    const rMan = computeCase(P, soilDS(P), man), rRef = computeCase(P, soilDS(P), { ...man, ds: null })
+    truthy("penurunan: kasus manual & modul memakai titik terpilih (BH-3 lunak → penurunan lebih besar)", man.ds && man.ds.name === "BH-3" && gb.ds && gb.ds.name === "BH-3" && rMan.s > rRef.s && man.sub.includes("BH-3"))
+    truthy("denah & grafik perbandingan: simbol per titik berkoordinat & garis per titik", hasPlan(P) === false && (() => { const bx = P.soils.find((x) => x.name === "BH-4"); bx.x = 120; bx.y = 70; const sv = planDraw(P, palette("print"), bh3.id); return hasPlan(P) && sv.querySelectorAll("circle").length >= 2 })() && (() => { const ov = overlayDraw(P, palette("print"), bh3.id), nReal = P.soils.filter((x) => !x.tpl).length; return ov.querySelectorAll("path").length >= nReal && ov.textContent.includes(`${P.soils.length - nReal} titik data contoh tidak digambar`) })())
+  } finally { keep.forEach(([k, v]) => (v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v))) }
 }

@@ -9,61 +9,90 @@ import { pipeCapacity, h1, E_STEEL } from "./steel.js"
 import { pmCapacity, circlePoly, barsOnCircle, vcTwo, vcOne, asFlex, pickBars, phiMn, rhoTS } from "./rc.js"
 import { inside, planPoly, weights, resultant, pileGroup, pileReact, analyzeFooting, pedPoly } from "./footing.js"
 import { root, T, R as Rect, dim, palette } from "./draw.js"
-import { projLoad, soilDS, soilDSOf, soilCopy } from "../project.js"
+import { projLoad, projSave, soilDS, soilDSOf, soilCopy, modSoil, ptLabel, addSoil } from "../project.js"
 import { sv, el } from "./ui.js"
 import { soilEditor } from "../soil_ui.js"
 import { siteClass } from "./soil.js"
 
 // pSrc: "proj" = tiang rencana dari tab Tanah (acuan kapasitas) | "own" = diatur di modul; pLay: "auto" = jumlah tiang & ukuran cap dari kebutuhan
 // beban | "grid" = tata letak manual (s, ce) di telapak yang diisi; psD/pceD: jarak tiang & tepi dalam kelipatan D; tAuto: tebal cap/pelat dari geser & pons
-export const DEEP0 = { soilSrc: "project", soilOwn: null, fdType: "shallow", qaSrc: "soil", fSize: "auto", pSrc: "proj", pLay: "auto", psD: 3, pceD: 1, psMax: 0, tAuto: true,
+export const DEEP0 = { soilSrc: "project", soilPt: "", soilOwn: null, fdType: "shallow", qaSrc: "soil", fSize: "auto", pSrc: "proj", pLay: "auto", psD: 3, pceD: 1, psMax: 0, tAuto: true,
   pk: "pipe", pD: 406.4, pt: 12.7, popen: true, pFy: 310, pL: 18, pmeth: "api", psx: 1.25, pce: 0.5,
   pfc: 30, pn: 8, pdb: 19, pfsC: 2.5, pfsT: 3.0, pfsL: 2.5, pyAllow: 12, sAllow: 0 }
 const BAR = { 13: "D13", 16: "D16", 19: "D19", 22: "D22", 25: "D25", 29: "D29", 32: "D32" }
 export const isDeep = (s) => s.fdType === "deep"
 
 // ---------------------------------------------------------------- formulir bersama: sumber data tanah
-// "project" = data tab Tanah (proyek, sama untuk semua modul) | "own" = data tanah diisi di modul ini (mis. titik bor lain di lokasi
-// peralatan ini). Data modul dipakai untuk qa, kapasitas tiang, gesekan negatif, penurunan, dan kelas situs otomatis modul tersebut.
-const ownOn = (x) => x.soilSrc === "own"
-export const SOIL_SRC = () => ({ project: L("Tab Tanah (proyek)", "Soil tab (project)"), own: L("Isi di modul ini", "Enter in this module") })
+// "project" = bank data tanah tab Tanah: soilPt = id titik (BH-1…, S-1…), "" = titik acuan proyek ★ | "own" = data tanah diisi di modul ini.
+// Titik / data modul dipakai untuk qa, kapasitas tiang, gesekan negatif, penurunan, dan kelas situs otomatis modul tersebut.
+const ownOn = (x) => x.soilSrc === "own", bankOn = (x) => x.soilSrc !== "own" && x.soilSrc !== "manual"
+export const SOIL_SRC = () => ({ project: L("Bank data tanah (tab Tanah)", "Soil data bank (Soil tab)"), own: L("Isi di modul ini", "Enter in this module") })
 export function soilSection(s) {
-  return { id: "soil", icon: "🧱", t: L("Data tanah", "Soil data"), badge: ownOn(s) ? L("DATA MODUL", "MODULE DATA") : L("TAB TANAH", "SOIL TAB"), fields: soilFields() }
+  return { id: "soil", icon: "🧱", t: L("Data tanah", "Soil data"), badge: soilBadge(s), fields: soilFields() }
+}
+export function soilBadge(s) {
+  if (ownOn(s)) return L("DATA MODUL", "MODULE DATA")
+  if (s.soilSrc === "manual") return "MANUAL"
+  try { const ms = modSoil(s, projLoad()); return (ms.kind === "pt" ? ms.so.name : "★ " + ms.so.name).toUpperCase() } catch (e) { return L("TAB TANAH", "SOIL TAB") }
+}
+// pilihan titik: titik acuan ★ (mengikuti acuan proyek) + semua titik bank
+export function ptOpts(P) {
+  const o = { "": L(`★ Titik acuan proyek — ${P.soil.name}`, `★ Project reference point — ${P.soil.name}`) }
+  for (const so of P.soils) o[so.id] = ptLabel(so) + (so.id === P.soilRef ? " ★" : "")
+  return o
 }
 export function soilFields(o = {}) {
   return [
-    { k: "soilSrc", type: "seg", lab: L("Sumber data tanah", "Soil data source"), opts: { ...SOIL_SRC(), ...(o.extra || {}) }, wide: true, on: (st, v) => { if (v === "own" && !(st.soilOwn && st.soilOwn.layers)) st.soilOwn = soilCopy() } },
-    { type: "custom", show: (x) => x.soilSrc === "project", render: () => projSoilCard() },
+    { k: "soilSrc", type: "seg", lab: L("Sumber data tanah", "Soil data source"), opts: { ...SOIL_SRC(), ...(o.extra || {}) }, wide: true, on: (st, v) => { if (v === "own" && !(st.soilOwn && st.soilOwn.layers)) st.soilOwn = soilCopy(null, st.soilPt) } },
+    { k: "soilPt", type: "sel", lab: L("Titik bor / sondir yang dipakai", "Borehole / CPT point used"), opts: ptOpts(projLoad()), show: bankOn, wide: true,
+      help: L("Daftar titik dari tab Tanah. ★ = titik acuan proyek (ikut bila acuan diganti).", "Points from the Soil tab. ★ = project reference point (follows when the reference changes).") },
+    { type: "custom", show: bankOn, render: (st) => projSoilCard(st) },
     { type: "custom", show: ownOn, render: (st, oc) => ownSoilBox(st, oc) },
   ]
 }
-// ringkasan data tanah proyek (tab Tanah)
-function projSoilCard() {
+// buka titik di tab Tanah (titik yang diedit = titik ini)
+const openPt = (id) => { const P = projLoad(); if (P.soils.some((x) => x.id === id)) { P.soilEdit = id; projSave(P) } }
+// ringkasan titik bank yang dipakai modul (tab Tanah)
+function projSoilCard(st) {
   const box = el("div", "pj-pilecard")
   try {
-    const P = projLoad(), ds = soilDS(P), sc = siteClass(ds)
-    box.innerHTML = `<b>${L("Data tanah dari tab Tanah", "Soil data from the Soil tab")}</b><span>${ds.name || "–"} · ${ds.test === "cpt" ? "CPT" : "N-SPT"} · ${ds.layers.length} ${L("baris", "rows")} · ${nf(ds.depth, 1)} m · MAT ${nf(ds.gwt, 2)} m · ${L("kelas situs", "site class")} ${sc.cls}${ds.fill ? ` · ${L("timbunan", "fill")} ${nf(ds.fill.H, 1)} m` : ""}</span>`
-      + `<a href="#/tanah">${L("Ubah di tab Tanah →", "Edit in Soil tab →")}</a><small class="hint">${L("Pilih <i>Isi di modul ini</i> bila peralatan ini memakai titik bor / sondir sendiri.", "Choose <i>Enter in this module</i> when this equipment has its own borehole / CPT.")}</small>`
+    const P = projLoad(), ms = modSoil(st, P), so = ms.so, ds = ms.kind === "ref" ? soilDS(P) : soilDSOf(so, P), sc = siteClass(ds)
+    const loc = [so.x != null ? `X ${nf(so.x, 1)}` : "", so.y != null ? `Y ${nf(so.y, 1)}` : "", so.elev != null ? `${L("elev.", "elev.")} ${nf(so.elev, 2)} m` : ""].filter(Boolean).join(" · ")
+    box.innerHTML = `<b>${ms.kind === "pt" ? L(`Titik ${so.name} dari tab Tanah`, `Point ${so.name} from the Soil tab`) : L(`Titik acuan proyek ★ ${so.name}`, `Project reference point ★ ${so.name}`)}</b><span>${ds.test === "cpt" ? "CPT" : "N-SPT"} · ${ds.layers.length} ${L("baris", "rows")} · ${nf(ds.depth, 1)} m · MAT ${nf(ds.gwt, 2)} m · ${L("kelas situs", "site class")} ${sc.cls}${ds.fill ? ` · ${L("timbunan", "fill")} ${nf(ds.fill.H, 1)} m` : ""}${loc ? " · " + loc : ""}</span>`
+      + (ms.lost ? `<span class="pj-warn">${L("Titik yang dipilih sudah dihapus dari tab Tanah — sekarang memakai titik acuan.", "The selected point was deleted from the Soil tab — the reference point is used now.")}</span>` : "")
+      + (so.tpl ? `<span class="pj-warn">${L("⚠ Titik ini masih berisi data contoh (belum diisi hasil penyelidikan).", "⚠ This point still holds sample data (no investigation results entered yet).")}</span>` : "")
+      + `<a href="#/tanah">${L(`Ubah ${so.name} atau tambah titik di tab Tanah →`, `Edit ${so.name} or add points in the Soil tab →`)}</a><small class="hint">${L(`${P.soils.length} titik di bank data tanah proyek. Pilih <i>Isi di modul ini</i> bila data tanah hanya untuk modul ini.`, `${P.soils.length} point(s) in the project soil data bank. Choose <i>Enter in this module</i> for soil data used by this module only.`)}</small>`
+    box.querySelector("a").onclick = () => openPt(so.id)
   } catch (e) { box.textContent = e.message }
   return box
 }
-// editor data tanah modul (sama dengan tab Tanah) + salin ulang dari tab Tanah (ketuk dua kali)
+// editor data tanah modul (sama dengan tab Tanah) + salin ulang dari titik bank (ketuk dua kali) + pindahkan ke bank data tanah
 function ownSoilBox(st, oc) {
-  if (!(st.soilOwn && Array.isArray(st.soilOwn.layers))) st.soilOwn = soilCopy()
+  if (!(st.soilOwn && Array.isArray(st.soilOwn.layers))) st.soilOwn = soilCopy(null, st.soilPt)
   const box = el("div", "pj-ownsoil"), bar = el("div", "pj-row pj-soilbar"), info = el("span", "hint pj-soilinfo")
   const upd = () => {
     try { const ds = soilDSOf(st.soilOwn, projLoad()), sc = siteClass(ds); info.textContent = `${ds.layers.length} ${L("baris", "rows")} · ${nf(ds.depth, 1)} m · MAT ${nf(ds.gwt, 2)} m · ${L("kelas situs", "site class")} ${sc.cls} (N̄ ${nf(sc.Nbar, 1)})` } catch (e) { info.textContent = "" }
   }
   const oc2 = (x) => { upd(); oc(x) }
   upd()
-  const cp = el("button", "dz-add ghost", L("⟲ Salin ulang dari tab Tanah", "⟲ Copy again from Soil tab")); cp.type = "button"
+  const P0 = projLoad(), src = modSoil({ soilPt: st.soilPt }, P0).so
+  const lab0 = L(`⟲ Salin ulang dari ${src.name} (tab Tanah)`, `⟲ Copy again from ${src.name} (Soil tab)`)
+  const cp = el("button", "dz-add ghost", lab0); cp.type = "button"
   let armed = 0
   cp.onclick = () => {
-    if (!armed) { armed = setTimeout(() => { armed = 0; cp.classList.remove("warn"); cp.textContent = L("⟲ Salin ulang dari tab Tanah", "⟲ Copy again from Soil tab") }, 3500); cp.classList.add("warn"); cp.textContent = L("Ketuk lagi: timpa data modul", "Tap again: overwrite module data"); return }
-    clearTimeout(armed); armed = 0; st.soilOwn = soilCopy(); oc(true)
+    if (!armed) { armed = setTimeout(() => { armed = 0; cp.classList.remove("warn"); cp.textContent = lab0 }, 3500); cp.classList.add("warn"); cp.textContent = L("Ketuk lagi: timpa data modul", "Tap again: overwrite module data"); return }
+    clearTimeout(armed); armed = 0; st.soilOwn = soilCopy(null, st.soilPt); oc(true)
   }
-  bar.append(cp, info)
-  box.append(el("p", "dz-note", L("Data tanah khusus modul ini (tidak mengubah tab Tanah). Isian, alat bantu, dan korelasinya sama dengan tab Tanah. Kelas situs gempa modul ini dihitung dari data ini bila kelas situs di tab Gempa otomatis.", "Soil data for this module only (the Soil tab is unchanged). Inputs, tools and correlations are the same as the Soil tab. This module's seismic site class comes from this data when the Seismic tab site class is automatic.")), bar, soilEditor(st.soilOwn, oc2))
+  // data modul → titik baru di bank data tanah; modul lalu memakai titik itu
+  const mv = el("button", "dz-add ghost", L("⇪ Pindahkan ke bank data tanah", "⇪ Move to the soil data bank")); mv.type = "button"
+  mv.onclick = () => {
+    const P = projLoad(), so = addSoil(P, { from: st.soilOwn, name: st.soilOwn.name || "BH", tpl: false, keepLoc: true })
+    if (!so) { info.textContent = L("Bank data tanah penuh (maks. titik tercapai).", "The soil data bank is full (max. points reached)."); return }
+    if (!projSave(P)) { info.textContent = L("Penyimpanan iPad penuh — titik tidak tersimpan.", "iPad storage is full — the point was not saved."); return }
+    st.soilSrc = "project"; st.soilPt = so.id; oc(true)
+  }
+  bar.append(cp, mv, info)
+  box.append(el("p", "dz-note", L("Data tanah khusus modul ini (tidak mengubah tab Tanah). Isian, alat bantu, dan korelasinya sama dengan tab Tanah. Kelas situs gempa modul ini dihitung dari data ini bila kelas situs di tab Gempa otomatis. Agar bisa dipakai modul lain, pindahkan ke bank data tanah.", "Soil data for this module only (the Soil tab is unchanged). Inputs, tools and correlations are the same as the Soil tab. This module's seismic site class comes from this data when the Seismic tab site class is automatic. Move it to the soil data bank to use it in other modules.")), bar, soilEditor(st.soilOwn, oc2))
   return box
 }
 
@@ -113,11 +142,11 @@ export function fdSection(s, o = {}) {
 function projPileCard(st) {
   const box = document.createElement("div"); box.className = "pj-pilecard"
   try {
-    const P = projLoad(), own = st && st.soilSrc === "own" && st.soilOwn && st.soilOwn.layers, ds = own ? soilDSOf(st.soilOwn, P) : soilDS(P), p = P.pile
+    const P = projLoad(), ms = modSoil(st, P), ds = ms.kind === "ref" ? soilDS(P) : soilDSOf(ms.so, P), p = P.pile, own = ms.kind === "own"
     const I = effPile({ pSrc: "proj" }, { pile: p }), sp = singlePile(I, ds, p.z0)
     box.innerHTML = `<b>${L("Tiang rencana dari tab Tanah", "Design pile from Soil tab")}</b><span>${p.kind === "bored" ? L("Bor beton", "Bored") : L("Pipa baja", "Steel pipe")} Ø${nf(p.D, 0)}${p.kind === "pipe" ? " × " + nf(p.t, 1) : ""} mm · L ${nf(p.L, 1)} m · ${AXIAL_METHOD()[p.method].split(" (")[0]}</span>`
       + `<span class="pj-kv"><i>Qa ${L("tekan", "comp.")}</i> ${F_(sp.Qad)} <i>${L("tarik", "tension")}</i> ${F_(sp.Qat)} <i>${L("lateral", "lateral")}</i> ${F_(sp.Ha, 1)}</span><a href="#/tanah">${L("Ubah di tab Tanah →", "Edit in Soil tab →")}</a>`
-      + `<small class="hint">${L(`Nilai di atas pada kepala tiang z0 = ${nf(p.z0, 2)} m, ${own ? "memakai data tanah modul ini" : "data tanah tab Tanah"}. Modul ini menghitung ulang Qa pada dasar pondasinya sendiri — lihat langkah 1 di Alur perhitungan.`, `Values above at pile head z0 = ${nf(p.z0, 2)} m, ${own ? "using this module's soil data" : "Soil tab soil data"}. This module recomputes Qa at its own foundation base — see step 1 of the Calculation flow.`)}</small>`
+      + `<small class="hint">${L(`Nilai di atas pada kepala tiang z0 = ${nf(p.z0, 2)} m, ${own ? "memakai data tanah modul ini" : `titik ${ms.so.name} (tab Tanah)`}. Modul ini menghitung ulang Qa pada dasar pondasinya sendiri — lihat langkah 1 di Alur perhitungan.`, `Values above at pile head z0 = ${nf(p.z0, 2)} m, ${own ? "using this module's soil data" : `point ${ms.so.name} (Soil tab)`}. This module recomputes Qa at its own foundation base — see step 1 of the Calculation flow.`)}</small>`
   } catch (e) { box.textContent = e.message }
   return box
 }
