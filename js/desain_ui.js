@@ -7,7 +7,7 @@ import * as tangki from "./desain/m_tangki.js"
 import * as vessel from "./desain/m_vessel.js"
 import * as dinamis from "./desain/m_dinamis.js"
 import * as trafo from "./desain/m_trafo.js"
-import { projLoad, projSave, soilDS, soilDSOf, seisSite, stepper } from "./project.js"
+import { projLoad, projSave, soilDS, soilDSOf, seisSite, stepper, modSoil } from "./project.js"
 import { ico, MOD_ICO } from "./icons.js"
 import { QA_METHOD } from "./desain/soil.js"
 import { saveButton } from "./simpan.js"
@@ -23,22 +23,31 @@ function defaults() {
 }
 
 // konteks hitung bersama: angin dari data lokasi Desain, gempa & tanah & kriteria penurunan dari data proyek (tab Gempa / Tanah / Penurunan)
-// st: masukan modul — bila st.soilSrc = "own", data tanah modul itu (st.soilOwn) dipakai untuk qa, tiang, penurunan, dan kelas situs otomatis
+// st: masukan modul — sumber data tanah (modSoil): titik acuan proyek ★, titik lain dari bank data tanah (st.soilPt), atau data modul
+// (st.soilSrc = "own", st.soilOwn). Titik/data itu dipakai untuk qa, tiang, penurunan, dan kelas situs otomatis modul.
 export const ownSoil = (st) => !!(st && st.soilSrc === "own" && st.soilOwn && Array.isArray(st.soilOwn.layers) && st.soilOwn.layers.length)
 export function designCtx(S, P, cmb, st) {
   setCode(P.codes)
-  const own = ownSoil(st), soil = own ? soilDSOf(st.soilOwn, P) : soilDS(P)
-  const ss = seisSite(P, own ? soil : null)
+  const ms = modSoil(st, P), soil = ms.kind === "ref" ? soilDS(P) : soilDSOf(ms.so, P)
+  const ss = seisSite(P, ms.kind === "ref" ? null : soil)
   const sc = siteCtx({ ...S.site, Ss: ss.Ss, S1: ss.S1, cls: ss.cls, TL: ss.TL })
-  return { ...sc, ss, soil, soilOwn: own, bear: P.bear, settle: P.settle, pile: P.pile, cmbOpts: { SDS: sc.sp.SDS, wpFrac: cmb.wp, ortho: cmb.ortho, enabled: cmb.en, factors: cmb.fx } }
+  return { ...sc, ss, soil, soilOwn: ms.kind === "own", soilPt: ms, bear: P.bear, settle: P.settle, pile: P.pile, cmbOpts: { SDS: sc.sp.SDS, wpFrac: cmb.wp, ortho: cmb.ortho, enabled: cmb.en, factors: cmb.fx } }
+}
+// teks sumber data tanah modul (ringkasan masukan, penurunan, laporan)
+export function soilSrcTxt(ms) {
+  if (!ms || ms.kind === "own") return L("diisi di modul ini", "entered in this module")
+  const nm = ms.so.name || "–", tp = ms.so.tpl ? L(" — ⚠ data contoh, belum diisi", " — ⚠ sample data, not entered yet") : ""
+  if (ms.kind === "pt") return L(`titik ${nm} (bank data tanah, tab Tanah)${tp}`, `point ${nm} (soil data bank, Soil tab)${tp}`)
+  return (ms.lost ? L("titik yang dipilih sudah dihapus → ", "selected point was deleted → ") : "") + L(`titik acuan proyek ★ ${nm} (tab Tanah)${tp}`, `project reference point ★ ${nm} (Soil tab)${tp}`)
 }
 // ringkasan sumber data tanah di bagian "Ringkasan data masukan" (ikut lembar hitung, PDF & Excel)
 function withSoil(m, out, st, c) {
   if (!c.soil || (m.id === "tiang" && st.soilSrc === "manual")) return out
-  const ds = c.soil, f = ds.fill
+  const ds = c.soil, f = ds.fill, so = c.soilPt && c.soilPt.so
+  const loc = so && (so.x != null || so.y != null || so.elev != null) ? [[L("Lokasi titik", "Point location"), [so.x != null ? `X ${nf(so.x, 2)}` : "", so.y != null ? `Y ${nf(so.y, 2)}` : "", so.elev != null ? `${L("elev.", "elev.")} ${nf(so.elev, 2)} m` : ""].filter(Boolean).join(" · ")]] : []
   out.kv = [{ title: L("Data tanah", "Soil data"), rows: [
-    [L("Sumber data tanah", "Soil data source"), c.soilOwn ? L("diisi di modul ini", "entered in this module") : L("tab Tanah (proyek)", "Soil tab (project)")],
-    [L("Titik penyelidikan", "Investigation point"), `${ds.name || "–"} · ${ds.test === "cpt" ? "CPT" : "N-SPT"} · ${ds.layers.length} ${L("baris", "rows")} · ${nf(ds.depth, 1)} m`],
+    [L("Sumber data tanah", "Soil data source"), soilSrcTxt(c.soilPt)],
+    [L("Titik penyelidikan", "Investigation point"), `${ds.name || "–"} · ${ds.test === "cpt" ? "CPT" : "N-SPT"} · ${ds.layers.length} ${L("baris", "rows")} · ${nf(ds.depth, 1)} m`], ...loc,
     [L("Muka air tanah", "Groundwater"), ds.gwt, "m", 2],
     [L("Kelas situs (gempa)", "Site class (seismic)"), `${c.ss.cls}${c.ss.auto ? ` — ${L("otomatis dari data tanah ini", "automatic from this soil data")}, N̄ ${nf(c.ss.sc.Nbar, 1)}` : ` — ${L("manual (tab Gempa)", "manual (Seismic tab)")}`}`],
     ...(f ? [[L("Timbunan / penurunan MAT", "Fill / groundwater lowering"), `H ${nf(f.H, 2)} m · ΔMAT ${nf(f.dGwt, 2)} m · ${f.meth === "conv" ? L("konvensional", "conventional") : L("terpadu Fellenius", "Fellenius unified")}`]] : [])] }, ...(out.kv || [])]
@@ -152,7 +161,7 @@ function projectCard(S, onChange) {
   const link = (href, ic, b, t) => { const a = el("a", "pj-link"); a.href = href; { const w = el("span", "pj-link-ic"); w.append(ico(ic)); a.append(w) } const x = el("span"); x.append(el("b", null, b), el("small", null, t)); a.append(x, el("span", "pj-go", "→")); return a }
   const ds = soilDS(PJ), lk = el("div", "pj-links")
   lk.append(link("#/gempa", "seismic", L("Gempa — tab Gempa (SNI 1726:2019)", "Seismic — Seismic tab (SNI 1726:2019)"), `Ss ${nf(ss.Ss, 3)} · S1 ${nf(ss.S1, 3)} · ${L("kelas", "class")} ${ss.cls}${ss.auto ? " (" + L("otomatis", "auto") + ")" : ""} · SDS ${nf(sp.SDS, 3)} · SD1 ${nf(sp.SD1, 3)} · KDS ${ss.SDC}`),
-    link("#/tanah", "soil", L("Tanah — tab Tanah", "Soil — Soil tab"), `${PJ.soil.name} · ${PJ.soil.test === "cpt" ? "CPT" : "N-SPT"} · ${ds.layers.length} ${L("lapis", "layers")} · MAT ${nf(ds.gwt, 1)} m · qa: ${QA_METHOD()[PJ.bear.method]}`))
+    link("#/tanah", "soil", L("Tanah — tab Tanah (bank data tanah)", "Soil — Soil tab (soil data bank)"), `${PJ.soils.length > 1 ? `${PJ.soils.length} ${L("titik", "points")} · ★ ` : ""}${PJ.soil.name} · ${PJ.soil.test === "cpt" ? "CPT" : "N-SPT"} · ${ds.layers.length} ${L("lapis", "layers")} · MAT ${nf(ds.gwt, 1)} m · qa: ${QA_METHOD()[PJ.bear.method]}`))
   d.append(el("div", "dz-sub", L("Gempa & tanah (dari tab Gempa / Tanah — ubah di sana)", "Seismic & soil (from the Seismic / Soil tabs — edit there)")), lk)
   return d
 }
