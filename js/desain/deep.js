@@ -7,7 +7,7 @@ import { pileAxial, pileLayers, settleGroup, settleShallow, shallowQa, AXIAL_MET
 import { winkler, bromsGeneral, nhAuto, profile, pmGroup, convLab, topZone } from "./pile.js"
 import { pipeCapacity, h1, E_STEEL } from "./steel.js"
 import { pmCapacity, circlePoly, barsOnCircle, vcTwo, vcOne, asFlex, pickBars, phiMn, rhoTS } from "./rc.js"
-import { inside, planPoly, weights, resultant, pileGroup, pileReact, analyzeFooting } from "./footing.js"
+import { inside, planPoly, weights, resultant, pileGroup, pileReact, analyzeFooting, pedPoly } from "./footing.js"
 import { root, T, R as Rect, dim, palette } from "./draw.js"
 import { projLoad, soilDS, soilDSOf, soilCopy } from "../project.js"
 import { sv, el } from "./ui.js"
@@ -676,8 +676,9 @@ export function pilePlan(m, g, P, title) {
   T(s, 20, 30, title || L("Denah pile cap · reaksi tiang kombinasi ASD penentu", "Pile cap plan · pile reactions, governing ASD combination"), { c: P.ink, fs: 14, b: true })
   s.append(sv("polygon", { points: poly.map(([x, y]) => `${X(x).toFixed(1)},${Y(y).toFixed(1)}`).join(" "), fill: P.concL, stroke: P.ink, "stroke-width": 2.5 }))
   for (const p of m.peds || []) {
-    if (p.shape === "circle") s.append(sv("circle", { cx: X(p.x), cy: Y(p.y), r: p.bx * k / 2, fill: "none", stroke: P.ink, "stroke-width": 2, "stroke-dasharray": "6 4" }))
-    else s.append(sv("rect", { x: X(p.x - p.bx / 2), y: Y(p.y + (p.by ?? p.bx) / 2), width: p.bx * k, height: (p.by ?? p.bx) * k, fill: "none", stroke: P.ink, "stroke-width": 2, "stroke-dasharray": "6 4" }))
+    const pp = pedPoly(p)
+    if (!pp) s.append(sv("circle", { cx: X(p.x), cy: Y(p.y), r: p.bx * k / 2, fill: "none", stroke: P.ink, "stroke-width": 2, "stroke-dasharray": "6 4" }))
+    else s.append(sv("polygon", { points: pp.map(([x, y]) => `${X(x).toFixed(1)},${Y(y).toFixed(1)}`).join(" "), fill: "none", stroke: P.ink, "stroke-width": 2, "stroke-dasharray": "6 4" }))
   }
   const gv = g.wC ? g.wC.a : null, Qa = g.Qac
   const col = (f) => (f > 1 ? P.bad : f > 0.85 ? P.acc : P.ok)

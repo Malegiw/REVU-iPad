@@ -10,6 +10,7 @@ import * as trafo from "./desain/m_trafo.js"
 import { projLoad, projSave, soilDS, soilDSOf, seisSite, stepper } from "./project.js"
 import { ico, MOD_ICO } from "./icons.js"
 import { QA_METHOD } from "./desain/soil.js"
+import { saveButton } from "./simpan.js"
 
 export const MODS = [tiang, tangki, vessel, dinamis, trafo]
 const CMB0 = () => ({ en: {}, fx: {}, ortho: false, wp: 0.5 })
@@ -55,6 +56,8 @@ export function loadDesign() {
     if (!o) continue
     if (o.qaSrc === undefined && o.qa !== undefined && m.id !== "tiang") S.m[m.id].qaSrc = "manual"
     if (m.id === "tiang" && o.soilSrc === undefined && o.layers) S.m[m.id].soilSrc = "manual"
+    // sebelum tulangan pedestal otomatis (ρmin·Ag): pertahankan jumlah tulangan pedestal yang sudah diisi pengguna
+    if (m.id === "vessel" && o.pBar === undefined && o.nBars !== undefined) S.m[m.id].pBar = "manual"
     // sebelum alur desain otomatis: pertahankan ukuran telapak & tiang yang sudah diisi pengguna
     if (m.id !== "tiang" && o.fSize === undefined && (o.B !== undefined || o.D !== undefined)) S.m[m.id].fSize = "manual"
     if (m.id !== "tiang" && o.fdType === "deep" && o.pSrc === undefined) Object.assign(S.m[m.id], { pSrc: "own", pLay: "grid", tAuto: false })
@@ -83,6 +86,16 @@ export function dashboard(lng) {
     const st = out.settle && out.settle.s != null ? { s: out.settle.s, allow: out.settle.allow, kind: out.settle.kind } : null
     return { id: m.id, icon: m.icon, title: m.title(), sub: out.sub, nChk: out.checks.filter((c) => !c.info).length, nBad: bad.length, gov: g, ok: !bad.length, settle: st, nCmb: out.combos.length, fdType: out.fdType }
   }) }
+}
+
+// tombol Simpan (salinan bernama + file .json): judul pendek modul untuk nama awal & daftar simpanan
+const shortName = (m, st) => (m.id === "vessel" && st ? (st.preset === "gasboot" ? "Gas Boot" : st.preset === "iar" ? "IA Receiver" : "Separator") : m.title().split(" (")[0].replace("Pondasi ", "").replace(" Foundation", ""))
+const modTitle = (id, e) => { const m = MODS.find((x) => x.id === id); return m ? shortName(m, e && e.S && e.S.m ? e.S.m[id] : null) : L("Desain", "Design") }
+function saveBtn(S, mod) {
+  return saveButton({ mod: mod ? mod.id : "", modTitle,
+    defName: () => [PJ.info.name, mod ? shortName(mod, S.m[mod.id]) : L("Desain", "Design")].filter(Boolean).join(" – "),
+    snap: () => { saveState(S); projSave(PJ); return { P: PJ, S } },
+    onOpen: (e) => { const h = "#/desain" + (e.mod ? "/" + e.mod : ""); if (location.hash === h) dispatchEvent(new HashChangeEvent("hashchange")); else location.hash = h } })
 }
 
 let PJ = null
@@ -156,7 +169,7 @@ function hub(root, S) {
   ;[windCode(), aciCode(), "AISC 360-22", "SNI 1726:2019 · 8460:2017", "API 650 · RP 2GEO", "ACI 351.3R", "PIP", "Excel · PDF"].forEach((c) => chips.append(el("span", "dz-chip", c)))
   h.append(chips)
   hero.append(h)
-  const bar = el("div", "dz-hub-bar"); bar.append(unitsToggle(S, () => { root.textContent = ""; hub(root, S); reveal(root) }))
+  const bar = el("div", "dz-hub-bar"); bar.append(saveBtn(S, null), unitsToggle(S, () => { root.textContent = ""; hub(root, S); reveal(root) }))
   const grid = el("div", "dz-hub")
   MODS.forEach((m, i) => {
     const a = el("a", "dz-card dz-in"); a.href = "#/desain/" + m.id; a.style.setProperty("--i", i)
@@ -230,7 +243,8 @@ function page(root, S, mod) {
   ;[[L("Masukan", "Input"), formBox], [L("Kombinasi", "Combinations"), cmbWrap], [L("Hasil", "Results"), resBox], [L("Ekspor", "Export"), expBox]].forEach(([t, target]) => {
     const b = el("button", "dz-jb", t); b.type = "button"; b.onclick = () => target.scrollIntoView({ behavior: "smooth", block: "start" }); nav.append(b)
   })
-  tools.append(nav, unitsToggle(S, () => { drawForm(); compute(true) }))
+  const tr = el("div", "dz-tools-r"); tr.append(saveBtn(S, mod), unitsToggle(S, () => { drawForm(); compute(true) }))
+  tools.append(nav, tr)
   root.append(head, status, tools, projBox, formBox, cmbWrap, resBox, expBox, footer())
 
   let last = null, timer = 0, onlyBad = false, drawIx = 0

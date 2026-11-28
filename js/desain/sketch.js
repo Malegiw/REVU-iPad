@@ -234,6 +234,7 @@ export function skVesselFound(st) {
   if (vert) {
     const Rp = 70, oct = (r) => Array.from({ length: 8 }, (_, i) => { const a = Math.PI / 8 + i * Math.PI / 4; return `${(px + r * Math.cos(a)).toFixed(1)},${(py + r * Math.sin(a)).toFixed(1)}` }).join(" ")
     if (st.pedShape === "oct") s.append(sv("polygon", { points: oct(Rp / Math.cos(Math.PI / 8)), fill: P.concL, stroke: P.concD, "stroke-width": 1.5 }))
+    else if (st.pedShape === "hex") { const Rh = Rp * 2 / Math.sqrt(3); s.append(sv("polygon", { points: Array.from({ length: 6 }, (_, i) => `${(px + Rh * Math.cos(i * Math.PI / 3)).toFixed(1)},${(py + Rh * Math.sin(i * Math.PI / 3)).toFixed(1)}`).join(" "), fill: P.concL, stroke: P.concD, "stroke-width": 1.5 })) }
     else if (st.pedShape === "circle") s.append(sv("circle", { cx: px, cy: py, r: Rp, fill: P.concL, stroke: P.concD }))
     else R(s, px - Rp, py - Rp, 2 * Rp, 2 * Rp, P.concL, P.concD)
     const rb = Rp * Math.min(st.BCD / st.Dp, 0.92)

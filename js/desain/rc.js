@@ -86,6 +86,8 @@ export function phiShearFriction(Avf, fy, mu, fc, Ac) {
 export const rectPoly = (b, h) => [[-b / 2, -h / 2], [b / 2, -h / 2], [b / 2, h / 2], [-b / 2, h / 2]]
 export const circlePoly = (D, n = 48) => Array.from({ length: n }, (_, i) => [D / 2 * Math.cos(2 * Math.PI * i / n), D / 2 * Math.sin(2 * Math.PI * i / n)])
 export const octPoly = (F) => { const R = F / 2 / Math.cos(Math.PI / 8); return Array.from({ length: 8 }, (_, i) => [R * Math.cos(Math.PI / 8 + i * Math.PI / 4), R * Math.sin(Math.PI / 8 + i * Math.PI / 4)]) }
+// heksagon beraturan, F = lebar lintas sisi (arah y); sudut di ±x → lebar lintas sudut 2F/√3 (arah x). Luas = (√3/2)·F²
+export const hexPoly = (F) => { const R = F / Math.sqrt(3); return Array.from({ length: 6 }, (_, i) => [R * Math.cos(i * Math.PI / 3), R * Math.sin(i * Math.PI / 3)]) }
 export function polyArea(p) {
   let a = 0, cx = 0, cy = 0
   for (let i = 0; i < p.length; i++) {
@@ -102,6 +104,18 @@ function clipAbove(p, y0) {
     const a = p[i], b = p[(i + 1) % p.length], ia = a[1] >= y0, ib = b[1] >= y0
     if (ia) out.push(a)
     if (ia !== ib) { const t = (y0 - a[1]) / (b[1] - a[1]); out.push([a[0] + t * (b[0] - a[0]), y0]) }
+  }
+  return out
+}
+// n tulangan merata di keliling poligon (mis. heksagon yang diinset selimut), mulai dari sudut pertama → n kelipatan jumlah sisi mengisi setiap sudut
+export function barsAlong(poly, n, A) {
+  const seg = poly.map((p, i) => { const q = poly[(i + 1) % poly.length]; return { p, q, l: Math.hypot(q[0] - p[0], q[1] - p[1]) } })
+  const per = seg.reduce((a, g) => a + g.l, 0), out = []
+  for (let i = 0; i < n; i++) {
+    let s = per * i / n, k = 0
+    while (k < seg.length - 1 && s > seg[k].l + 1e-9) { s -= seg[k].l; k++ }
+    const g = seg[k], t = g.l ? Math.min(s / g.l, 1) : 0
+    out.push({ x: g.p[0] + t * (g.q[0] - g.p[0]), y: g.p[1] + t * (g.q[1] - g.p[1]), A })
   }
   return out
 }

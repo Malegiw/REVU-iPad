@@ -1,6 +1,7 @@
 // Gambar SVG modul Desain (layar: beranimasi lewat kelas CSS; ekspor: palet cetak, kelas dibuang). Semua warna eksplisit supaya gambar ikut ke PDF.
 import { L, nf, ndu, uName, toDisp } from "./core.js"
 import { sv } from "./ui.js"
+import { pedPoly } from "./footing.js"
 
 export function palette(mode) {
   const dark = mode !== "print" && document.documentElement.dataset.theme === "dark"
@@ -249,7 +250,7 @@ export function vesselDraw(I, out, P) {
   const footW = vert ? B : (I.fType === "comb" ? B : I.B)
   const foots = vert || I.fType === "comb" ? [0] : [-I.Ls / 2, I.Ls / 2]
   foots.forEach((fx) => { R(s, X(fx - footW / 2), Y(t), footW * k, t * k, P.conc, P.concD); R(s, X(fx - footW / 2), Y(t), footW * k, t * k, s.hatch, null) })
-  const peds = vert ? [{ x: 0, w: I.Dp }] : [{ x: -I.Ls / 2, w: I.bx }, { x: I.Ls / 2, w: I.bx }]
+  const peds = vert ? [{ x: 0, w: I.pedShape === "hex" ? I.Dp * 2 / Math.sqrt(3) : I.Dp }] : [{ x: -I.Ls / 2, w: I.bx }, { x: I.Ls / 2, w: I.bx }]
   peds.forEach((p) => { R(s, X(p.x - p.w / 2), Y(t + hp), p.w * k, hp * k, P.conc, P.concD); R(s, X(p.x - p.w / 2), Y(t + hp), p.w * k, hp * k, s.hatch, null) })
   const g = sv("g", { class: "dz-equip" })
   if (vert) {
@@ -310,8 +311,8 @@ export function footingPlan(r, m, P, title) {
   s.append(grp)
   s.append(sv("polygon", { points: r.geo.poly.map(([x, y]) => `${X(x).toFixed(1)},${Y(y).toFixed(1)}`).join(" "), fill: "none", stroke: P.ink, "stroke-width": 2.5 }))
   for (const p of m.peds) {
-    if (p.shape === "rect") s.append(sv("rect", { x: X(p.x - p.bx / 2), y: Y(p.y + p.by / 2), width: p.bx * k, height: p.by * k, fill: "none", stroke: P.ink, "stroke-width": 2, "stroke-dasharray": "6 4" }))
-    else if (p.shape === "oct") { const Rr = p.bx / 2 / Math.cos(Math.PI / 8); s.append(sv("polygon", { points: Array.from({ length: 8 }, (_, i) => { const a = Math.PI / 8 + i * Math.PI / 4; return `${X(p.x + Rr * Math.cos(a)).toFixed(1)},${Y(p.y + Rr * Math.sin(a)).toFixed(1)}` }).join(" "), fill: "none", stroke: P.ink, "stroke-width": 2, "stroke-dasharray": "6 4" })) }
+    const pp = pedPoly(p)
+    if (pp) s.append(sv("polygon", { points: pp.map(([x, y]) => `${X(x).toFixed(1)},${Y(y).toFixed(1)}`).join(" "), fill: "none", stroke: P.ink, "stroke-width": 2, "stroke-dasharray": "6 4" }))
     else s.append(sv("circle", { cx: X(p.x), cy: Y(p.y), r: p.bx * k / 2, fill: "none", stroke: P.ink, "stroke-width": 2, "stroke-dasharray": "6 4" }))
   }
   if (gv) { s.append(sv("circle", { cx: X(gv.pr.ex), cy: Y(gv.pr.ey), r: 7, fill: P.bad, stroke: "#fff", "stroke-width": 2, class: "dz-pulse" })); T(s, X(gv.pr.ex) + 12, Y(gv.pr.ey) - 10, `e = (${nf(gv.pr.ex, 2)}; ${nf(gv.pr.ey, 2)}) m`, { c: P.bad, fs: 12, b: true }) }

@@ -1,6 +1,7 @@
 // Lembar perhitungan langkah demi langkah (Besaran | Rumus | Substitusi | Hasil) untuk tiap modul Desain: ditampilkan di layar dan ikut ke PDF/Excel.
 import { L, nf, toDisp, uName, GAMMA_C, GAMMA_W, GAMMA_S, rad, seismicCoef, qz, kz, kdF, expoConst, CODE, windCode } from "./core.js"
 import { beta1, rhoTS, sqfc, lamS } from "./rc.js"
+import { PED_NAME, pedAgTxt } from "./footing.js"
 // baris geser satu arah sesuai edisi ACI (ρw = As/(b·d))
 const vcRow = (lab, fc, d, rho, phiVc, Vu, Wl) => (CODE.aci === "14"
   ? [lab, "φVc = 0,75·0,17·λ·√fc'·b·d", `0,75 × 0,17 × ${nf(sqfc(fc), 3)} × 1000 × ${nf(d, 0)} / 1000`, `${Wl(phiVc)} ≥ Vu ${Wl(Vu)}`]
@@ -64,9 +65,11 @@ export function footingSteps(md, r, rc, prc, label = "") {
   out.push(sec((r.piled ? L("Desain beton pile cap (LRFD, reaksi tiang §13.4.2.5)", "Pile cap concrete design (LRFD, pile reactions §13.4.2.5)") : L("Desain beton telapak (LRFD)", "Footing concrete design (LRFD)")) + sfx, rows))
   const pr = r.pedRes[0]
   if (pr && pr.worst && md.pedKind !== "plinth" && md.peds[0].h > 0) out.push(sec(L("Pedestal (LRFD)", "Pedestal (LRFD)") + sfx, [
-    [L("Luas & tulangan", "Area & steel"), "ρ = As/Ag", `${prc.n} D${prc.db} / ${nf(pr.Ag, 0)} mm²`, `${nf(pr.rho * 100, 3)} %`],
+    [L("Luas penampang", "Cross-section area"), pedAgTxt(md.peds[0]), `${PED_NAME()[pr.shape] || pr.shape}, ${md.peds[0].shape === "rect" ? `${nf(md.peds[0].bx * 1000, 0)} × ${nf(md.peds[0].by * 1000, 0)}` : `F ${nf(md.peds[0].bx * 1000, 0)}`} mm`, `${nf(pr.Ag, 0)} mm²`],
+    [L("Tulangan minimum", "Minimum steel"), "As,min = ρmin·Ag", `${nf(pr.rhoMin, 4)} × ${nf(pr.Ag, 0)}`, `${nf(pr.AsMin, 0)} mm² → ≥ ${pr.nMin} D${prc.db}${pr.nStep > pr.nMin ? ` (${L("kelipatan sudut", "corner multiple")}: ${pr.nStep})` : ""}`],
+    [L("Luas & tulangan", "Area & steel"), "ρ = As/Ag", `${prc.n} D${prc.db} = ${nf(pr.As, 0)} mm² / ${nf(pr.Ag, 0)} mm²`, `${nf(pr.rho * 100, 3)} % ${pr.As >= pr.AsMin - 1e-6 ? "≥" : "<"} ${nf(pr.rhoMin * 100, 2)} %`],
     [L("Gaya penentu", "Governing forces"), "Pu, Mux = Mx + Vy·hp, Muy = My + Vx·hp", pr.worst.combo, `Pu ${F(pr.worst.Pu)}`],
-    [L("Interaksi P–M (serat)", "P–M interaction (fibre)"), md.peds[0].shape === "rect" ? "(Mux/φMnx)^1,15 + (Muy/φMny)^1,15 ≤ 1" : "√(Mux² + Muy²)/φMn ≤ 1", L("regangan beton 0,003, blok Whitney β1 = ", "concrete strain 0.003, Whitney block β1 = ") + nf(beta1(prc.fc), 3), `UR ${nf(pr.worst.ur, 3)}`],
+    [L("Interaksi P–M (serat)", "P–M interaction (fibre)"), md.peds[0].shape === "rect" ? "(Mux/φMnx)^1,15 + (Muy/φMny)^1,15 ≤ 1" : md.peds[0].shape === "hex" ? L("√(Mux² + Muy²)/φMn(θ) ≤ 1, θ = arah momen resultan", "√(Mux² + Muy²)/φMn(θ) ≤ 1, θ = resultant moment direction") : "√(Mux² + Muy²)/φMn ≤ 1", L("regangan beton 0,003, blok Whitney β1 = ", "concrete strain 0.003, Whitney block β1 = ") + nf(beta1(prc.fc), 3), `UR ${nf(pr.worst.ur, 3)}`],
   ]))
   return out
 }

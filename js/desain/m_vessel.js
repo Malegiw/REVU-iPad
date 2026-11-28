@@ -1,8 +1,9 @@
 // Modul halaman: Pondasi vessel — Gas Boot, Separator (horizontal), Instrument Air Receiver.
 import { L, nf, toDisp, uName, expandCombos, seismicCoef } from "./core.js"
-import { PRESETS, vesselCases, analyzeVessel, vesselModels, pick } from "./vessel.js"
+import { PRESETS, vesselCases, analyzeVessel, vesselModels, pick, anchorNeed } from "./vessel.js"
+import { autoPedBars, pedExt, pedSq, PED_NAME, RHO_PED } from "./footing.js"
 import { ANCHOR, ANCHOR_D } from "./steel.js"
-import { pmCurve } from "./rc.js"
+import { pmCurve, ldh } from "./rc.js"
 import { loadsEditor, addUserLoads } from "./ui.js"
 import { footFrom } from "./settle.js"
 import { DEEP0, fdSection, qaFor, qaNote, isDeep, deepBundle, shallowSettle, effPile, autoCap, autoFoot, singlePile, flowDeep, flowShallow, flowStep, maxLoad, soilSection } from "./deep.js"
@@ -13,10 +14,10 @@ import { vesselSteps } from "./steps.js"
 export const id = "vessel"
 export const icon = "⚗️"
 export const title = () => L("Pondasi Gas Boot, Separator & IA Receiver", "Gas Boot, Separator & IA Receiver Foundation")
-export const blurb = () => L("Vessel vertikal (oktagon/persegi) dan horizontal dua saddle: angin & gempa otomatis, stabilitas, tulangan telapak, geser satu/dua arah, pedestal P–M, baut angkur.", "Vertical (octagon/square) and two-saddle horizontal vessels: automatic wind & seismic, stability, footing steel, one-/two-way shear, pedestal P–M, anchor bolts.")
+export const blurb = () => L("Vessel vertikal (oktagon/heksagon/persegi) dan horizontal dua saddle: angin & gempa otomatis, stabilitas, tulangan telapak, geser satu/dua arah, pedestal P–M, baut angkur.", "Vertical (octagon/hexagon/square) and two-saddle horizontal vessels: automatic wind & seismic, stability, footing steel, one-/two-way shear, pedestal P–M, anchor bolts.")
 export const codes = "PIP STE03350 / STE03360 · PIP STC01015 · SNI 1727:2020 · SNI 1726:2019 · SNI 2847:2019 (ACI 318M-14 Bab 17) · SNI 8460:2017"
 
-const base = { ...DEEP0, R: 2, Ie: 1.25, method: "cs", gs: 18, qa: 150, muB: 0.45, fsOT: 1.5, fsSL: 1.5, tempFac: 1, minContact: 0.5, fc: 30, fy: 420, cover: 75, db: 16, bg: "F1554_36", hef: 600, extra: [] }
+const base = { ...DEEP0, R: 2, Ie: 1.25, method: "cs", gs: 18, qa: 150, muB: 0.45, fsOT: 1.5, fsSL: 1.5, tempFac: 1, minContact: 0.5, fc: 30, fy: 420, cover: 75, db: 16, pBar: "auto", rhoP: 0.5, bg: "F1554_36", hef: 600, extra: [] }
 export function defaults() { return { preset: "gasboot", ...base, ...PRESETS.gasboot } }
 const BAR = { 13: "D13", 16: "D16", 19: "D19", 22: "D22", 25: "D25", 29: "D29", 32: "D32" }
 export function form(s) {
@@ -36,8 +37,9 @@ export function form(s) {
       { k: "mu", lab: L("μ saddle geser (termal)", "Sliding saddle μ (thermal)"), u: "", lo: 0.05, hi: 0.6, show: h, help: L("0,4 baja–baja; 0,1 pelat PTFE.", "0.4 steel–steel; 0.1 PTFE slide plate.") },
     ] },
     { id: "fd", sketch: skVesselFound, icon: "🏗️", t: L("Pedestal & telapak", "Pedestal & footing"), fields: [
-      { k: "pedShape", type: "seg", lab: L("Bentuk pedestal", "Pedestal shape"), opts: { oct: L("Oktagon", "Octagon"), rect: L("Persegi", "Square"), circle: L("Lingkaran", "Circle") }, show: v },
-      { k: "Dp", lab: L("Ukuran pedestal Dp (lintas sisi)", "Pedestal size Dp (across flats)"), u: "m", lo: 0.4, hi: 10, show: v },
+      { k: "pedShape", type: "seg", lab: L("Bentuk pedestal", "Pedestal shape"), opts: { oct: L("Oktagon", "Octagon"), hex: L("Heksagon", "Hexagon"), rect: L("Persegi", "Square"), circle: L("Lingkaran", "Circle") }, show: v },
+      { k: "Dp", lab: v(s) && s.pedShape === "circle" ? L("Diameter pedestal Dp", "Pedestal diameter Dp") : v(s) && s.pedShape === "rect" ? L("Sisi pedestal Dp", "Pedestal side Dp") : L("Ukuran pedestal Dp (lintas sisi)", "Pedestal size Dp (across flats)"), u: "m", lo: 0.4, hi: 10, show: v,
+        help: L("Heksagon: Dp lintas sisi (arah Y), lintas sudut 2Dp/√3 (arah X).", "Hexagon: Dp across flats (Y), across corners 2Dp/√3 (X).") },
       { k: "bx", lab: L("Pedestal saddle bx (searah sumbu)", "Saddle pedestal bx (along axis)"), u: "m", lo: 0.2, hi: 3, show: h }, { k: "by", lab: L("Pedestal saddle by (melintang)", "Saddle pedestal by (transverse)"), u: "m", lo: 0.3, hi: 6, show: h },
       { k: "hp", lab: L("Tinggi pedestal hp di atas telapak", "Pedestal height hp above footing"), u: "m", lo: 0.15, hi: 3 },
       { k: "fShape", type: "seg", lab: L("Bentuk telapak", "Footing shape"), opts: { oct: L("Oktagon", "Octagon"), rect: L("Persegi/panjang", "Rectangular") }, show: v },
@@ -46,7 +48,11 @@ export function form(s) {
       { k: "Lf", lab: L("Telapak arah Y, L", "Footing Y, L"), u: "m", lo: 0.8, hi: 30, show: (x) => h(x) || x.fShape === "rect" },
       { k: "t", lab: L("Tebal telapak t", "Footing thickness t"), u: "m", lo: 0.25, hi: 3 }, { k: "Df", lab: L("Kedalaman dasar Df dari tanah", "Base depth Df below grade"), u: "m", lo: 0.3, hi: 5 },
       { k: "fc", lab: "fc'", u: "MPa", lo: 17, hi: 60 }, { k: "fy", lab: "fy", u: "MPa", lo: 280, hi: 550 }, { k: "cover", lab: L("Selimut bawah", "Bottom cover"), u: "mm", lo: 50, hi: 100 },
-      { k: "db", type: "sel", lab: L("Tulangan telapak", "Footing bars"), opts: BAR }, { k: "nBars", lab: L("Jumlah tulangan pedestal", "Pedestal bar count"), u: "", lo: 4, hi: 80 }, { k: "dbP", type: "sel", lab: L("Diameter tulangan pedestal", "Pedestal bar size"), opts: BAR },
+      { k: "db", type: "sel", lab: L("Tulangan telapak", "Footing bars"), opts: BAR },
+      { k: "pBar", type: "seg", lab: L("Tulangan pedestal", "Pedestal bars"), opts: { auto: L("Otomatis (ρmin·Ag + P–M)", "Automatic (ρmin·Ag + P–M)"), manual: L("Manual", "Manual") }, wide: true,
+        help: L("Otomatis: jumlah tulangan = maks(ρmin·Ag/Ab, tulangan angkur, P–M ≤ 1), dibulatkan ke kelipatan sudut (oktagon 8, heksagon 6, persegi 4). Ag = luas penampang sesuai bentuk pedestal.", "Automatic: bar count = max(ρmin·Ag/Ab, anchor reinforcement, P–M ≤ 1), rounded to a multiple of the corners (octagon 8, hexagon 6, square 4). Ag = cross-section area of the actual pedestal shape.") },
+      { k: "nBars", lab: L("Jumlah tulangan pedestal", "Pedestal bar count"), u: "", lo: 4, hi: 200, show: (x) => x.pBar === "manual" }, { k: "dbP", type: "sel", lab: L("Diameter tulangan pedestal", "Pedestal bar size"), opts: BAR },
+      { k: "rhoP", lab: L("Rasio tulangan minimum pedestal ρmin", "Pedestal minimum steel ratio ρmin"), u: "%", lo: 0.25, hi: 4, help: L("0,5 % = 1 % × Ag/2 (SNI 2847 §10.6.1.1 dengan luas efektif tereduksi §10.3.1.2). As,min = ρmin·Ag.", "0.5 % = 1 % × Ag/2 (ACI 318 §10.6.1.1 with reduced effective area §10.3.1.2). As,min = ρmin·Ag.") },
     ] },
     soilSection(s),
     fdSection(s, { autoShallow: true }),
@@ -81,8 +87,21 @@ export function run(s, ctx) {
   addUserLoads(cases, s.extra, nP)
   const combos = expandCombos(cases, 5 * nP, ctx.cmbOpts)
   // ---- alur desain: kapasitas → beban → ukuran pondasi (otomatis) → tebal & tulangan
-  const rc = { fc: I.fc, fy: I.fy, cover: I.cover, db: I.db }, prc = { fc: I.fc, fy: I.fy, n: I.nBars, db: I.dbP, cover: 50, tie: 10 }
-  const mins = () => (I.kind === "v" ? [I.Dp + 0.6, I.Dp + 0.6] : I.fType === "comb" ? [I.Ls + I.bx + 0.6, I.by + 0.6] : [I.bx + 0.6, I.by + 0.6])
+  // tulangan pedestal: As ≥ ρmin·Ag (Ag sesuai bentuk) — otomatis: + tulangan angkur + P–M
+  I.rhoMin = (s.rhoP ?? RHO_PED * 100) / 100
+  const pedsAll = I.kind === "v" ? vesselModels(I)[0].peds : [-1, 1].map((x) => ({ x, y: 0, shape: "rect", bx: I.bx, by: I.by, h: I.hp }))
+  let pb = null
+  if (s.pBar !== "manual") {
+    pb = autoPedBars(pedsAll, combos, { fc: I.fc, fy: I.fy, db: I.dbP, cover: 50, tie: 10, rhoMin: I.rhoMin }, { nReq: 2 * Math.ceil(anchorNeed(I, combos) / (Math.PI * I.dbP * I.dbP / 4) - 1e-9) })
+    I.nBars = pb.n
+  }
+  const rc = { fc: I.fc, fy: I.fy, cover: I.cover, db: I.db }, prc = { fc: I.fc, fy: I.fy, n: I.nBars, db: I.dbP, cover: 50, tie: 10, rhoMin: I.rhoMin }
+  // ukuran minimum telapak/pile cap: pedestal + 300 mm tiap sisi, dan cukup untuk kait standar tulangan bawah (ldh + selimut 75 mm dari muka
+  // pedestal setara bujur sangkar yang dipakai analisis) — berlaku untuk semua bentuk pedestal; dibulatkan ke atas 0,05 m
+  const ex = I.kind === "v" ? pedExt(pedsAll[0]) : [I.bx, I.by], sq = I.kind === "v" ? pedSq(pedsAll[0]) : [I.bx, I.by]
+  const hk = ldh(I.db, I.fy, I.fc) / 1000 + 0.075, r05 = (v) => Math.ceil(v * 20 - 1e-6) / 20
+  const mm2 = (a, b, c, d) => [r05(Math.max(a + 0.6, c + 2 * hk)), r05(Math.max(b + 0.6, d + 2 * hk))]
+  const mins = () => (I.kind === "v" ? mm2(ex[0], ex[1], sq[0], sq[1]) : I.fType === "comb" ? mm2(I.Ls + I.bx, I.by, I.Ls + I.bx, I.by) : mm2(I.bx, I.by, I.bx, I.by))
   const cbOf = (m) => combos.map((c) => ({ ...c, vec: pick(c.vec, m.map) }))
   let auto = null, sizing = null
   if (deep && I.pLay !== "grid") {
@@ -93,7 +112,7 @@ export function run(s, ctx) {
     Object.assign(I, { B: a0.m.B, Lf: a0.m.L, t: a0.m.t, Df: a0.m.Df, fShape: "rect", psx: a0.smin, pce: a0.ce })
   } else if (!deep && I.fSize !== "manual") {
     const ms = vesselModels(I)
-    sizing = ms.map((m) => { const [minB, minL] = mins(); return autoFoot({ minTxt: L("ukuran minimum pedestal + 300 mm", "minimum pedestal + 300 mm"), m0: m, combos: cbOf(m), qaFn: (B, Lx, Df) => qaFor(s, ctx, B, Lx, Df).qa, mu: I.muB, crit: I.crit, rc, prc, minB, minL, tAuto: true }) })
+    sizing = ms.map((m) => { const [minB, minL] = mins(); return autoFoot({ minTxt: L("ukuran minimum pedestal + maks(300 mm; ldh + 75 mm)", "minimum pedestal + max(300 mm; ldh + 75 mm)"), m0: m, combos: cbOf(m), qaFn: (B, Lx, Df) => qaFor(s, ctx, B, Lx, Df).qa, mu: I.muB, crit: I.crit, rc, prc, minB, minL, tAuto: true }) })
     const big = sizing.reduce((a, b) => (b.B * b.L > a.B * a.L ? b : a))
     Object.assign(I, { B: big.B, Lf: big.L, t: big.t, Df: big.m.Df })
   }
@@ -108,21 +127,25 @@ export function run(s, ctx) {
   let DB = null, settle, stTable = null
   if (deep) { DB = deepBundle(I, ctx, out.res, I.crit, "vessel", nm, I.sAllow || 0); out.checks.push(...DB.checks); settle = DB.settle; out.deep = DB.draw }
   else { const sh = shallowSettle(ctx, footFrom(m0.shape, m0.B, m0.L, r0.geo.A, m0.Df, a1.R.P / r0.geo.A, "vessel", nm), I.sAllow || 0); settle = sh.settle; stTable = sh.table; out.checks.push(settle.check) }
-  const metrics = deep ? [...DB.metrics, { lab: L("Gaya angin", "Wind force"), val: toDisp("F", meta.wind.F), d: 1, unit: uF }, { lab: L("Tulangan cap X", "Cap bars X"), val: r0.reinf.x.bot.txt }] : [
+  const metrics = deep ? [...DB.metrics, { lab: L("Gaya angin", "Wind force"), val: toDisp("F", meta.wind.F), d: 1, unit: uF }, { lab: L("Tulangan cap X", "Cap bars X"), val: r0.reinf.x.bot.txt }, ...(r0.pedRes[0] ? [{ lab: L("Tulangan pedestal", "Pedestal bars"), val: `${I.nBars} D${I.dbP} · ρ ${nf(r0.pedRes[0].rho * 100, 2)}%` }] : [])] : [
     { lab: L("q maks (ASD)", "Max q (ASD)"), val: toDisp("Q", gq.pr.qmax), d: 1, unit: uQ },
     { lab: L("FS guling min", "Min FS overturning"), val: Math.min(...r0.asd.map((a) => a.fsOT)), d: 2 },
     { lab: L("Gaya angin", "Wind force"), val: toDisp("F", meta.wind.F), d: 1, unit: uF },
     { lab: "Cs · V " + L("gempa", "seismic"), val: `${nf(meta.cs, 3)} · ${nf(toDisp("F", meta.Vs), 1)} ${uF}` },
     { lab: L("Berat pondasi", "Foundation weight"), val: toDisp("F", out.res.reduce((a, x) => a + x.r.W.total, 0)), d: 0, unit: uF },
     { lab: L("Tulangan bawah X", "Bottom bars X"), val: r0.reinf.x.bot.txt },
+    ...(r0.pedRes[0] ? [{ lab: L("Tulangan pedestal", "Pedestal bars"), val: `${I.nBars} D${I.dbP} · ρ ${nf(r0.pedRes[0].rho * 100, 2)}%` }] : []),
   ]
+  const p0r = r0.pedRes[0]
   const kv = [
     { title: L("Peralatan", "Equipment"), rows: [[L("Jenis", "Type"), nm], ["D", I.D, "m", 2], ...(I.kind === "v" ? [["H", I.H, "m", 2], [L("Pusat massa", "CG"), I.hcg, "m", 2]] : [["L T/T", I.Ltt, "m", 2], ["Ls", I.Ls, "m", 2], ["hc", I.hc, "m", 2]]),
       ["We / Wo / Wt", `${nf(toDisp("F", I.We), 1)} / ${nf(toDisp("F", I.Wo), 1)} / ${nf(toDisp("F", I.Wt), 1)} ${uF}`], [L("Diameter angin efektif", "Effective wind diameter"), meta.De, "m", 2]] },
     { title: L("Angin & gempa", "Wind & seismic"), rows: [["V", ctx.wind.V, "m/s", 1], [L("Eksposur", "Exposure"), ctx.wind.exp], [L("Gaya angin", "Wind force"), toDisp("F", meta.wind.F), uF, 2], ...(I.kind === "h" ? [[L("Angin memanjang", "Longitudinal wind"), toDisp("F", meta.wind.Fl), uF, 2], [L("Gesek termal Ff", "Thermal friction Ff"), toDisp("F", meta.Ff), uF, 2]] : []),
       ["SDS / SD1", `${nf(ctx.sp.SDS, 3)} / ${nf(ctx.sp.SD1, 3)}`], ["R / Ie", `${I.R} / ${I.Ie}`], ["Cs", meta.cs, "", 4], [L("Geser dasar V", "Base shear V"), toDisp("F", meta.Vs), uF, 2]] },
     { title: L("Pondasi", "Foundation"), rows: [[L("Telapak", "Footing"), I.kind === "v" && I.fShape === "oct" ? `${L("oktagon", "octagon")} ${nf(I.B, 2)} m` : `${nf(I.B, 2)} × ${nf(I.Lf, 2)} m${I.kind === "h" && I.fType === "iso" ? " ×2" : ""}`], [L("Tebal / kedalaman", "Thickness / depth"), `${nf(I.t, 2)} / ${nf(I.Df, 2)} m`],
-      ["Pedestal", I.kind === "v" ? `${I.pedShape} ${nf(I.Dp, 2)} m × ${nf(I.hp, 2)} m` : `${nf(I.bx, 2)} × ${nf(I.by, 2)} × ${nf(I.hp, 2)} m`], [L("Tulangan pedestal", "Pedestal bars"), `${I.nBars} D${I.dbP}`], [L("Baut", "Bolts"), `${I.nb} × M${I.bd} ${ANCHOR[I.bg].nm}, hef ${I.hef} mm`],
+      ["Pedestal", I.kind === "v" ? `${PED_NAME()[I.pedShape] || I.pedShape} ${nf(I.Dp, 2)} m × ${nf(I.hp, 2)} m` : `${nf(I.bx, 2)} × ${nf(I.by, 2)} × ${nf(I.hp, 2)} m`],
+      [L("Tulangan pedestal", "Pedestal bars"), `${I.nBars} D${I.dbP} · ${pb ? L("otomatis", "automatic") + " (" + (pb.gov === "pm" ? L("P–M menentukan", "P–M governs") : pb.gov === "anchor" ? L("tulangan angkur menentukan", "anchor reinforcement governs") : `ρmin ${nf(I.rhoMin * 100, 2)}%·Ag ${L("menentukan", "governs")}`) + ")" : L("manual", "manual")}`],
+      ...(p0r ? [["Ag", `${nf(p0r.Ag / 1e6, 4)} m² (${PED_NAME()[p0r.shape] || p0r.shape})`], ["As / As,min", `${nf(p0r.As, 0)} / ${nf(p0r.AsMin, 0)} mm² · ρ ${nf(p0r.rho * 100, 2)}%`]] : []), [L("Baut", "Bolts"), `${I.nb} × M${I.bd} ${ANCHOR[I.bg].nm}, hef ${I.hef} mm`],
       ...(deep ? [] : [["qa", toDisp("Q", I.qa), uQ, 1], [L("Sumber qa", "qa source"), qaNote(qs)]]), ["fc' / fy", `${I.fc} / ${I.fy} MPa`]] },
     ...(deep ? [DB.kv] : []),
   ]
@@ -163,7 +186,7 @@ export function run(s, ctx) {
       rebar: `X ${r0.reinf.x.bot.txt} · Y ${r0.reinf.y.bot.txt}`, rebarSub: L("tulangan bawah pile cap", "pile cap bottom bars"), checks: out.checks, settle })
     : flowShallow({ q: qs, P: ml.P, M: ml.M, cP: ml.cP, loadSub, A: r0.geo.A * out.res.length, gov: sizing ? sizing[0].gov : "", size: I.kind === "v" && I.fShape === "oct" ? `${L("oktagon", "octagon")} ${nf(I.B, 2)} m × t ${nf(I.t, 2)} m` : `${nf(I.B, 2)} × ${nf(I.Lf, 2)} × ${nf(I.t, 2)} m${out.res.length > 1 ? " ×2" : ""}`, auto: !!sizing,
       rebar: `X ${r0.reinf.x.bot.txt} · Y ${r0.reinf.y.bot.txt}`, rebarSub: `d = ${nf(r0.d, 0)} mm`, checks: out.checks, settle })
-  return { file: "Pondasi_" + nm.replace(/\s+/g, ""), title: `${L("Desain Pondasi", "Foundation Design")} ${nm}`, sub: (deep ? `${L("Pondasi tiang", "Piled")} · ` : "") + (I.kind === "v" ? `Ø${nf(I.D, 2)} × ${nf(I.H, 2)} m · ${L("pedestal", "pedestal")} ${I.pedShape} · ${L("telapak", "footing")} ${I.fShape}` : `Ø${nf(I.D, 2)} × ${nf(I.Ltt, 2)} m T/T · Ls ${nf(I.Ls, 2)} m · ${I.fType === "comb" ? L("telapak gabungan", "combined footing") : L("telapak terpisah", "isolated footings")}`),
+  return { file: "Pondasi_" + nm.replace(/\s+/g, ""), title: `${L("Desain Pondasi", "Foundation Design")} ${nm}`, sub: (deep ? `${L("Pondasi tiang", "Piled")} · ` : "") + (I.kind === "v" ? `Ø${nf(I.D, 2)} × ${nf(I.H, 2)} m · ${L("pedestal", "pedestal")} ${PED_NAME()[I.pedShape] || I.pedShape} ${I.nBars} D${I.dbP} · ${L("telapak", "footing")} ${I.fShape}` : `Ø${nf(I.D, 2)} × ${nf(I.Ltt, 2)} m T/T · Ls ${nf(I.Ls, 2)} m · ${I.fType === "comb" ? L("telapak gabungan", "combined footing") : L("telapak terpisah", "isolated footings")}`),
     refs: codes, metrics, checks: out.checks, kv, tables, notes: [...notes, deep ? L("Pondasi dalam: telapak menjadi pile cap kaku; reaksi tiang Pi = P/n ± M·x/Σx²; kapasitas dari data tanah; cap didesain dengan reaksi tiang sebagai beban titik (§13.4.2.5).", "Deep foundation: the footing acts as a rigid pile cap; pile reactions Pi = P/n ± M·x/Σx²; capacity from the soil data; cap designed with pile reactions as point loads (§13.4.2.5).") : qaNote(qs)],
     drawings, cases, combos, out, settle, fdType: deep ? "deep" : "shallow", flow, steps: [flowStep(flow), ...(deep ? [] : qs && qs.r ? [{ h: L("Daya dukung izin dari data tanah", "Allowable bearing from soil data"), rows: qs.r.rows }] : []), ...vesselSteps(I, meta, out), ...(deep ? DB.steps : [])] }
 }

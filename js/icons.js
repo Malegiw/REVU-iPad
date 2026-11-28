@@ -37,6 +37,7 @@ const P = {
   stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/>',
   speaker: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
   book: '<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/><path d="M9 7.5h6M9 11h4"/>',
+  save: '<path d="M4 4.5A.5.5 0 0 1 4.5 4h11.8L20 7.7v11.8a.5.5 0 0 1-.5.5h-15a.5.5 0 0 1-.5-.5z"/><path d="M8 4v4.5h7V4"/><rect x="7.5" y="13" width="9" height="7" rx=".8"/>',
   download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M5 19h14"/>',
   upload: '<path d="M12 15V4M7.5 8.5 12 4l4.5 4.5"/><path d="M5 15v4h14v-4"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',

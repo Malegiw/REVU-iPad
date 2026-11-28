@@ -1,4 +1,4 @@
-// Pondasi vessel: vertikal (Gas Boot, Instrument Air Receiver) di atas pedestal oktagon/persegi + telapak, dan horizontal (Separator) di atas dua saddle
+// Pondasi vessel: vertikal (Gas Boot, Instrument Air Receiver) di atas pedestal oktagon/heksagon/persegi/lingkaran + telapak, dan horizontal (Separator) di atas dua saddle
 // (tetap & geser) dengan telapak gabungan atau terpisah. Angin SNI 1727:2020 Bab 29 (diintegrasikan per tinggi), gempa SNI 1726:2019 §15 (Cs),
 // gesek termal saddle geser (PIP STE03350/03360), baut angkur ACI 318M-14 Bab 17. Desain telapak & pedestal memakai mesin footing.js.
 import { L, chk, windOnBody, cfRound, seismicCoef, CODE } from "./core.js"
@@ -65,7 +65,7 @@ export function analyzeVessel(I, combos) {
   if (I.fdType === "deep" && !I.autoModels) models.forEach((m) => { m.piles = pileLayout(m.shape, m.B, m.L, I.psx, I.pce); m.pileD = I.pD / 1000 })
   const res = models.map((m) => {
     const cb = combos.map((c) => ({ ...c, vec: pick(c.vec, m.map) }))
-    const r = analyzeFooting(m, cb, { qa: I.qa, mu: I.muB }, I.crit, { fc: I.fc, fy: I.fy, cover: I.cover, db: I.db }, { fc: I.fc, fy: I.fy, n: I.nBars, db: I.dbP, cover: 50, tie: 10 })
+    const r = analyzeFooting(m, cb, { qa: I.qa, mu: I.muB }, I.crit, { fc: I.fc, fy: I.fy, cover: I.cover, db: I.db }, { fc: I.fc, fy: I.fy, n: I.nBars, db: I.dbP, cover: 50, tie: 10, rhoMin: I.rhoMin })
     return { m, r }
   })
   const checks = []
@@ -75,6 +75,9 @@ export function analyzeVessel(I, combos) {
   return { res, anc, checks }
 }
 
+// luas tulangan angkur perlu (mm²): tarik baut sisi tarik (n/2 baut) dipikul tulangan vertikal pedestal, φ = 0,75 (§17.4.2.9)
+const anchorAs = (I, w) => Math.max(w.Tu, 0) * (I.kind === "v" ? Math.max(1, Math.floor(I.nb / 2)) : I.nb / 2) * 1000 / (0.75 * I.fy)
+export function anchorNeed(I, combos) { const a = anchors(I, combos); return a.w ? anchorAs(I, a.w) : 0 }
 // nomor pasal Bab 17: ACI 318-14 (SNI 2847:2019) → ACI 318-19
 const A17 = (s14, s19) => (CODE.aci === "14" ? "SNI 2847 " + s14 : "ACI 318-19 " + s19)
 function anchors(I, combos) {
@@ -99,9 +102,7 @@ function anchors(I, combos) {
   out.push(chk(g, L("Geser baja baut (dengan grout, ×0,8)", "Bolt steel shear (with grout, ×0.8)"), A17("§17.5.1", "§17.7.1"), w.Vu, ac.phiVsa, "F", { note: w.c, d: 2 }))
   out.push(chk(g, L("Interaksi tarik–geser (ζ = 5/3)", "Tension–shear interaction (ζ = 5/3)"), A17("R17.6", "R17.8"), ac.inter, 1, "", { note: w.c, d: 3 }))
   // tulangan angkur (§17.4.2.9): tulangan pedestal di sisi tarik memikul gaya tarik angkur, φ = 0,75
-  const nt = I.kind === "v" ? Math.max(1, Math.floor(n / 2)) : n / 2
-  const Treq = Math.max(w.Tu, 0) * nt
-  const AsReq = Treq * 1000 / (0.75 * I.fy), AsTie = Math.floor(I.nBars / 2) * barA(I.dbP)
+  const AsReq = anchorAs(I, w), AsTie = Math.floor(I.nBars / 2) * barA(I.dbP)
   out.push(chk(g, L("Tulangan angkur (vertikal pedestal sisi tarik) memikul tarik baut", "Anchor reinforcement (tension-side pedestal bars) carries bolt tension"), A17("§17.4.2.9", "§17.5.2"), AsReq, AsTie, "mm²", { note: w.c, d: 0 }))
   const edge = I.kind === "v" ? (I.Dp - I.BCD) / 2 * 1000 : (I.by - I.sb) / 2 * 1000
   out.push(chk(g, L("Jarak tepi baut ke sisi pedestal ≥ max(4d, 100 mm)", "Bolt edge distance to pedestal face ≥ max(4d, 100 mm)"), "PIP STE05121 / " + A17("§17.7", "§17.9"), edge, Math.max(4 * d, 100), "mm", { mode: "ge", d: 0 }))
