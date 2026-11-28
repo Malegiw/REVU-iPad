@@ -20,6 +20,7 @@ import * as mTrafo from "../js/desain/m_trafo.js"
 import * as mTangki from "../js/desain/m_tangki.js"
 import * as mDinamis from "../js/desain/m_dinamis.js"
 import { hashText, sentences, stageTexts } from "../js/voice.js"
+import * as sim from "../js/simpan.js"
 
 export async function run({ check }) {
   const near = (name, got, want, rel = 1e-6, abs = 1e-9) => check(name, Math.abs(got - want) <= Math.max(abs, rel * Math.abs(want)) ? [] : [`${got} ≠ ${want} (toleransi ${rel})`])
@@ -191,6 +192,60 @@ export async function run({ check }) {
   const nOf = (o) => Number(String(o.flow[2].v).replace(/\D/g, ""))
   truthy("trafo dalam: jarak maks tiang lebih besar → tiang tidak bertambah", nOf(runM(mTrafo, { fdType: "deep", psMax: 5 })) <= nOf(runM(mTrafo, { fdType: "deep" })))
   truthy("tangki dalam: denah tiang radial", /radial/.test(runM(mTangki, { fdType: "deep" }).flow[2].sub))
+
+  // ---- pedestal: luas sesuai bentuk, tulangan minimum ρmin·Ag (0,5 %), heksagon
+  const F0 = 2.0, prc0 = { fc: 30, fy: 420, db: 19, cover: 50, tie: 10 }
+  near("pedestal oktagon: Ag = 2(√2−1)·F²", ft.pedSection({ shape: "oct", bx: F0 }, prc0, 8).Ag, 2 * (Math.SQRT2 - 1) * 4e6, 1e-9)
+  near("pedestal heksagon: Ag = (√3/2)·F²", ft.pedSection({ shape: "hex", bx: F0 }, prc0, 6).Ag, Math.sqrt(3) / 2 * 4e6, 1e-9)
+  near("pedestal heksagon: pedArea (m²) = (√3/2)·F²", ft.pedArea({ shape: "hex", bx: F0 }), Math.sqrt(3) / 2 * 4, 1e-12)
+  near("pedestal lingkaran: Ag poligon 32 sisi ≈ π/4·D² (0,7 %)", ft.pedSection({ shape: "circle", bx: F0 }, prc0, 8).Ag, Math.PI * 1e6, 7e-3)
+  near("pedestal persegi: Ag = bx·by", ft.pedSection({ shape: "rect", bx: 0.5, by: 1.6 }, prc0, 8).Ag, 0.8e6, 1e-12)
+  const hx = rc.hexPoly(1000)
+  near("heksagon: lintas sisi = F (arah y)", Math.max(...hx.map((q) => q[1])) - Math.min(...hx.map((q) => q[1])), 1000, 1e-12)
+  near("heksagon: lintas sudut = 2F/√3 (arah x)", Math.max(...hx.map((q) => q[0])) - Math.min(...hx.map((q) => q[0])), 2000 / Math.sqrt(3), 1e-12)
+  const hs = ft.pedSection({ shape: "hex", bx: F0 }, prc0, 36), rIn = (2000 - 2 * hs.cc) / Math.sqrt(3)
+  truthy("heksagon 36 tulangan: 6 di sudut heksagon dalam (inset selimut), sisanya di sisi", hs.bars.length === 36 && [0, 6, 12, 18, 24, 30].every((i) => Math.abs(Math.hypot(hs.bars[i].x, hs.bars[i].y) - rIn) < 1e-6) && hs.bars.every((b) => Math.hypot(b.x, b.y) <= rIn + 1e-6))
+  const amO = ft.pedAsMin({ shape: "oct", bx: F0 }, prc0), abO = core.barA(19)
+  near("As,min pedestal = 0,005·Ag (oktagon 2,0 m)", amO.AsMin, 0.005 * 2 * (Math.SQRT2 - 1) * 4e6, 1e-12)
+  truthy("jumlah minimum = ⌈As,min/Ab⌉ = 59 D19; otomatis kelipatan 8 = 64", amO.nRaw === Math.ceil(amO.AsMin / abO) && amO.nRaw === 59 && amO.n === 64)
+  truthy("heksagon: jumlah otomatis kelipatan 6 (≥ ⌈0,005·Ag/Ab⌉)", (() => { const a = ft.pedAsMin({ shape: "hex", bx: F0 }, prc0); return a.n % 6 === 0 && a.n >= a.nRaw && a.nRaw === Math.ceil(0.005 * Math.sqrt(3) / 2 * 4e6 / abO) })())
+  truthy("ρmin dapat diubah (1 % → As,min dua kali lipat)", Math.abs(ft.pedAsMin({ shape: "oct", bx: F0 }, { ...prc0, rhoMin: 0.01 }).AsMin - 2 * amO.AsMin) < 1e-6)
+  // P–M menentukan: pedestal kecil dengan momen besar → jumlah tulangan naik dari As,min sampai UR ≤ 1
+  const pk = { x: 0, y: 0, shape: "oct", bx: 0.9, by: 0.9, h: 0.5 }, cbP = [{ kind: "LRFD", id: "T", fD: 1.2, vec: [300, 0, 0, 900, 0] }]
+  const apb = ft.autoPedBars([pk], cbP, prc0), apm = ft.pedAsMin(pk, prc0)
+  truthy("autoPedBars: P–M menentukan → n > n(As,min), UR ≤ 1, dan n − 8 tidak cukup", apb.gov === "pm" && apb.n > apm.n && apb.ws[0].ur <= 1 && ft.pedWorst(pk, ft.pedSection(pk, prc0, apb.n - 8), [{ c: cbP[0], Pb: 300 + 1.2 * ft.pedArea(pk) * 0.5 * core.GAMMA_C, Mxb: 900, Myb: 0 }], prc0).ur > 1)
+  const vO = runM(mVessel, {}), cO = vO.checks.find((c) => /As ≥ 0[.,]50%·Ag/.test(c.item))
+  truthy("vessel otomatis: pemeriksaan As ≥ 0,5%·Ag ada & OK (Gas Boot oktagon)", cO && cO.ok && Math.abs(cO.cap - amO.AsMin) < 1e-6)
+  const vM = runM(mVessel, { pBar: "manual", nBars: 32 }), cM = vM.checks.find((c) => /As ≥ 0[.,]50%·Ag/.test(c.item))
+  truthy("vessel manual 32 D19 (ρ 0,27 %) → tidak OK, catatan perlu ≥ 59 D19", cM && !cM.ok && /59 D19/.test(cM.note))
+  for (const fd of ["shallow", "deep"]) {
+    const vh = runM(mVessel, { pedShape: "hex", fdType: fd }), bad = vh.checks.filter((c) => !c.ok && !c.info)
+    const ch = vh.checks.find((c) => /As ≥/.test(c.item))
+    truthy(`vessel heksagon ${fd === "deep" ? "dalam" : "dangkal"}: semua OK, Ag heksagon, tulangan kelipatan 6`, !bad.length && ch && Math.abs(ch.cap - 0.005 * Math.sqrt(3) / 2 * 4e6) < 1e-6 && /(\d+) D19/.test(ch.note) && Number(ch.note.match(/(\d+) D19/)[1]) % 6 === 0, bad.map((c) => c.item).join("; "))
+  }
+
+  // ---- simpan perhitungan (localStorage; kunci asli dipulihkan setelah uji)
+  const keep = Object.fromEntries(["ymd.saved.v1", "ymd.saved.cur", "ymd.saved.auto", "ymd.project.v1", "ymd.desain.v1"].map((k) => [k, localStorage.getItem(k)]))
+  try {
+    ;["ymd.saved.v1", "ymd.saved.cur", "ymd.saved.auto"].forEach((k) => localStorage.removeItem(k))
+    const snapA = { P: { info: { name: "Uji" }, soil: { layers: [1] } }, S: { m: { vessel: { Dp: 2 } } } }, snapB = { P: { info: { name: "Uji" } }, S: { m: { vessel: { Dp: 2.6 } } } }
+    const e1 = sim.saveNow("GB-01", "vessel", snapA)
+    snapA.S.m.vessel.Dp = 9
+    truthy("simpan: salinan mandiri (perubahan sesudahnya tidak ikut)", sim.saveList()[0].S.m.vessel.Dp === 2 && sim.curId() === e1.id)
+    sim.saveNow("gb-01", "vessel", snapB)
+    truthy("simpan: nama sama (abaikan huruf besar) menimpa entri, id tetap", sim.saveList().length === 1 && sim.saveList()[0].id === e1.id && sim.saveList()[0].S.m.vessel.Dp === 2.6)
+    const e2 = sim.saveNow("GB-02", "vessel", { P: { info: {} }, S: { m: { vessel: { Dp: 3 } } } })
+    sim.openSave(sim.saveList().find((x) => x.id === e1.id), { P: { info: { name: "Kini" } }, S: { m: { vessel: { Dp: 7 } } } })
+    truthy("buka: data kerja diganti, cadangan otomatis berisi data sebelumnya", JSON.parse(localStorage.getItem("ymd.desain.v1")).m.vessel.Dp === 2.6 && sim.autoBackup().S.m.vessel.Dp === 7 && sim.curId() === e1.id)
+    const txt = sim.fileOf(e2), imp = sim.importText(txt)
+    truthy("file .json: unduh → impor menghasilkan entri baru bernama (impor)", JSON.parse(txt).app === "YMD-CAL" && /GB-02 \((impor|imported)\)/.test(imp.name) && imp.S.m.vessel.Dp === 3 && sim.saveList().length === 3)
+    truthy("impor menolak file bukan simpanan", (() => { try { sim.importText('{"a":1}'); return false } catch (e) { return true } })())
+    sim.delSave(imp.id)
+    truthy("hapus: entri hilang dari daftar", sim.saveList().length === 2 && !sim.saveList().some((x) => x.id === imp.id))
+    truthy("nama file unduhan aman: YMD-CAL_<nama>_YYYYMMDD-HHMM.json", /^YMD-CAL_GB-02_\d{8}-\d{4}\.json$/.test(sim.fileName(e2)))
+  } finally {
+    for (const [k, v] of Object.entries(keep)) { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v) }
+  }
 
   // ---- narasi suara: nama berkas rekaman = FNV-1a 32-bit dari kalimat (sama di aplikasi & tools/tts_elevenlabs.mjs)
   truthy("FNV-1a: '' → 811c9dc5, 'a' → e40c292c, 'foobar' → bf9cf968", hashText("") === "811c9dc5" && hashText("a") === "e40c292c" && hashText("foobar") === "bf9cf968")

@@ -3,12 +3,13 @@
 // lentur, geser satu arah, geser pons dengan transfer momen, penyaluran, serta pedestal (interaksi P–M serat, geser). SNI 2847:2019 = ACI 318M-14.
 // Konvensi: x ke kanan, y ke atas (denah). Mx menambah tekanan ke arah +y, My ke arah +x. Gaya horizontal di puncak pedestal setinggi (t + h) dari dasar.
 import { GAMMA_C, L, chk, nf, CODE } from "./core.js"
-import { asFlex, pickBars, phiMn, rhoTS, vcOne, vcTwo, gammaV, Jc, ld, ldh, pmCapacity, rectPoly, octPoly, circlePoly, polyArea, barsOnCircle, barsRect, sqfc } from "./rc.js"
+import { asFlex, pickBars, phiMn, rhoTS, vcOne, vcTwo, gammaV, Jc, ld, ldh, pmCapacity, rectPoly, octPoly, hexPoly, circlePoly, polyArea, barsOnCircle, barsRect, barsAlong, sqfc } from "./rc.js"
 import { barA } from "./core.js"
 
 // ---------------------------------------------------------------- geometri denah (m)
 export function planPoly(shape, a, b) {
   if (shape === "oct") return octPoly(a)
+  if (shape === "hex") return hexPoly(a)
   if (shape === "circle") return circlePoly(a, 48)
   return rectPoly(a, b ?? a)
 }
@@ -117,7 +118,75 @@ export const qAt = (pr, x, y) => Math.max(0, pr.q0 + pr.gx * x + pr.gy * y)
 
 // ---------------------------------------------------------------- model pondasi
 // m: { shape, B, L (rect) | B = lebar lintas sisi (oct) | B = diameter (circle), t, Df, gs (berat isi tanah urug), peds: [{x, y, shape, bx, by, h}] }
-export function pedArea(p) { return p.shape === "oct" ? 0.82843 * p.bx * p.bx : p.shape === "circle" ? Math.PI / 4 * p.bx * p.bx : p.bx * p.by }
+// luas penampang pedestal sesuai bentuk (m²): oktagon 2(√2−1)·F², heksagon (√3/2)·F², lingkaran π/4·D², persegi bx·by (F = lebar lintas sisi)
+export function pedArea(p) { return p.shape === "oct" ? 2 * (Math.SQRT2 - 1) * p.bx * p.bx : p.shape === "hex" ? Math.sqrt(3) / 2 * p.bx * p.bx : p.shape === "circle" ? Math.PI / 4 * p.bx * p.bx : p.bx * p.by }
+// ukuran luar pedestal arah x, y (m): heksagon lintas sudut 2F/√3 searah x
+export const pedExt = (p) => (p.shape === "rect" ? [p.bx, p.by ?? p.bx] : p.shape === "hex" ? [p.bx * 2 / Math.sqrt(3), p.bx] : [p.bx, p.bx])
+// garis denah pedestal (m, koordinat telapak) untuk gambar; lingkaran → null
+export const pedPoly = (p) => (p.shape === "circle" ? null : planPoly(p.shape, p.bx, p.by ?? p.bx).map(([x, y]) => [p.x + x, p.y + y]))
+export const PED_NAME = () => ({ oct: L("oktagon", "octagon"), hex: L("heksagon", "hexagon"), rect: L("persegi", "square"), circle: L("lingkaran", "circle") })
+// rumus Ag per bentuk (teks laporan)
+export const pedAgTxt = (p) => (p.shape === "oct" ? "Ag = 2(√2−1)·F² = 0,8284·F²" : p.shape === "hex" ? "Ag = (√3/2)·F² = 0,8660·F²" : p.shape === "circle" ? "Ag = π·D²/4" : "Ag = bx·by")
+
+// ---------------------------------------------------------------- penampang & tulangan pedestal
+// Tulangan memanjang minimum pedestal: As ≥ ρmin·Ag, ρmin = 0,5 % (= 1 % × Ag/2, SNI 2847 §10.6.1.1 dengan luas efektif tereduksi §10.3.1.2)
+export const RHO_PED = 0.005
+export const pedStep = (shape) => (shape === "oct" ? 8 : shape === "hex" ? 6 : shape === "circle" ? 2 : 4)   // kelipatan jumlah tulangan (setiap sudut terisi)
+export const pedNmin = (shape) => (shape === "oct" ? 8 : shape === "hex" ? 6 : shape === "circle" ? 6 : 4)
+// penampang (mm, pusat 0,0) dan n tulangan: persegi di keliling, oktagon/lingkaran pada lingkaran, heksagon di keliling heksagon dalam (inset selimut)
+export function pedSection(p, prc, n = prc.n) {
+  const ab = barA(prc.db), cc = prc.cover + (prc.tie || 10) + prc.db / 2
+  let poly, bars
+  if (p.shape === "rect") { poly = rectPoly(p.bx * 1000, p.by * 1000); bars = barsRect(p.bx * 1000, p.by * 1000, n, cc, ab) }
+  else if (p.shape === "hex") { const F = p.bx * 1000; poly = hexPoly(F); bars = barsAlong(hexPoly(F - 2 * cc), n, ab) }
+  else { const D = p.bx * 1000; poly = p.shape === "oct" ? octPoly(D) : circlePoly(D, 32); bars = barsOnCircle(n, D - 2 * cc, ab, Math.PI / n) }
+  return { poly, bars, Ag: polyArea(poly).A, ab, cc }
+}
+// As,min = ρmin·Ag dan jumlah tulangan minimum (dibulatkan ke kelipatan sudut)
+export function pedAsMin(p, prc) {
+  const rmin = prc.rhoMin ?? RHO_PED, ab = barA(prc.db), Ag = polyArea(pedSection(p, prc, 4).poly).A, AsMin = rmin * Ag, k = pedStep(p.shape)
+  const nRaw = Math.max(pedNmin(p.shape), Math.ceil(AsMin / ab - 1e-9))
+  return { Ag, AsMin, rmin, ab, nRaw, n: Math.ceil(nRaw / k - 1e-9) * k }
+}
+// interaksi P–M terburuk untuk daftar gaya {Pb, Mxb, Myb, c}: persegi Bresler (α = 1,15); heksagon pada arah momen resultan; oktagon/lingkaran resultan
+export function pedWorst(p, sec, env, prc) {
+  let worst = null
+  for (const q of env) {
+    const Pu = q.Pb
+    let ur, w
+    if (p.shape === "rect") {
+      const cx = pmCapacity(sec.poly, sec.bars, prc.fc, prc.fy, Pu, 0), cy = pmCapacity(sec.poly, sec.bars, prc.fc, prc.fy, Pu, Math.PI / 2)
+      ur = !cx.ok || !cy.ok ? Infinity : Math.pow(Math.abs(q.Mxb) / Math.max(cx.phiMn, 1e-9), 1.15) + Math.pow(Math.abs(q.Myb) / Math.max(cy.phiMn, 1e-9), 1.15)
+      w = { phiMnx: cx.phiMn, phiMny: cy.phiMn }
+    } else {
+      const Mr = Math.hypot(q.Mxb, q.Myb), th = p.shape === "hex" && Mr > 1e-9 ? Math.atan2(Math.abs(q.Myb), Math.abs(q.Mxb)) : 0
+      const cp = pmCapacity(sec.poly, sec.bars, prc.fc, prc.fy, Pu, th)
+      ur = cp.ok ? Mr / Math.max(cp.phiMn, 1e-9) : Infinity
+      w = { Mr, phiMn: cp.phiMn, th }
+    }
+    if (!worst || ur > worst.ur) worst = { ur, Pu, Mx: q.Mxb, My: q.Myb, ...w, combo: q.c.id }
+  }
+  return worst
+}
+// Jumlah tulangan pedestal otomatis (satu konfigurasi untuk semua pedestal): n ≥ max(ρmin·Ag/ab, nReq lain) lalu ditambah per kelipatan sudut sampai P–M ≤ 1.
+// peds: pedestal sesuai urutan vektor beban (5 per pedestal); combos LRFD dengan vec & fD; o: { gc, nReq, nMax }
+export function autoPedBars(peds, combos, prc, o = {}) {
+  const gc = o.gc ?? GAMMA_C, lr = combos.filter((c) => c.kind === "LRFD")
+  const env = peds.map((p, i) => lr.map((c) => { const q = pedLoad(c.vec, i); return { c, Pb: q.P + c.fD * pedArea(p) * p.h * gc, Mxb: q.Mx + q.Vy * p.h, Myb: q.My + q.Vx * p.h } }))
+  const mins = peds.map((p) => pedAsMin(p, prc)), k = Math.max(...peds.map((p) => pedStep(p.shape)))
+  const up = (n) => Math.ceil(n / k - 1e-9) * k
+  let n = up(Math.max(...mins.map((x) => x.n), o.nReq || 0)), gov = "asmin"
+  if ((o.nReq || 0) > Math.max(...mins.map((x) => x.n))) gov = "anchor"
+  // batas atas: jarak bersih antar tulangan ≥ max(1,5·db, 40 mm) (SNI 2847 §25.2.3)
+  const nCap = Math.max(n, ...peds.map((p) => { const s = pedSection(p, prc, 4), c = s.cc; const per = p.shape === "rect" ? 2 * (p.bx * 1000 - 2 * c + p.by * 1000 - 2 * c) : p.shape === "hex" ? 6 * (p.bx * 1000 - 2 * c) / Math.sqrt(3) : Math.PI * (p.bx * 1000 - 2 * c); return Math.floor(per / (prc.db + Math.max(1.5 * prc.db, 40)) / k) * k }))
+  let ws = null
+  for (; ; n += k) {
+    ws = peds.map((p, i) => pedWorst(p, pedSection(p, prc, n), env[i], prc))
+    if (ws.every((w) => !w || w.ur <= 1) || n + k > Math.min(nCap, o.nMax ?? 400)) break
+    gov = "pm"
+  }
+  return { n, gov, mins, ws, nCap, ok: ws.every((w) => !w || w.ur <= 1) }
+}
 export const pedSq = (p) => (p.shape === "rect" ? [p.bx, p.by] : [Math.sqrt(pedArea(p)), Math.sqrt(pedArea(p))])   // §13.2.7: penampang setara bujur sangkar
 export function weights(m, geo) {
   const footing = geo.A * m.t * (m.gc ?? GAMMA_C)
@@ -277,26 +346,9 @@ export function analyzeFooting(m, combos, soil, crit, rc, prc) {
 
   // ---- pedestal
   const pedRes = m.peds.map((p, k) => {
-    const ab = barA(prc.db), cc = prc.cover + (prc.tie || 10) + prc.db / 2
-    let poly, bars
-    if (p.shape === "rect") { poly = rectPoly(p.bx * 1000, p.by * 1000); bars = barsRect(p.bx * 1000, p.by * 1000, prc.n, cc, ab) }
-    else { const D = p.bx * 1000; poly = p.shape === "oct" ? octPoly(D) : circlePoly(D, 32); bars = barsOnCircle(prc.n, D - 2 * cc, ab, Math.PI / prc.n) }
-    const Ag = polyArea(poly).A, rho = prc.n * ab / Ag
-    let worst = null
-    for (const q of pedEnv[k]) {
-      const Pu = q.Pb
-      let ur
-      if (p.shape === "rect") {
-        const cx = pmCapacity(poly, bars, prc.fc, prc.fy, Pu, 0), cy = pmCapacity(poly, bars, prc.fc, prc.fy, Pu, Math.PI / 2)
-        if (!cx.ok || !cy.ok) ur = Infinity
-        else ur = Math.pow(Math.abs(q.Mxb) / Math.max(cx.phiMn, 1e-9), 1.15) + Math.pow(Math.abs(q.Myb) / Math.max(cy.phiMn, 1e-9), 1.15)
-        if (!worst || ur > worst.ur) worst = { ur, Pu, Mx: q.Mxb, My: q.Myb, phiMnx: cx.phiMn, phiMny: cy.phiMn, combo: q.c.id }
-      } else {
-        const Mr = Math.hypot(q.Mxb, q.Myb), cp = pmCapacity(poly, bars, prc.fc, prc.fy, Pu, 0)
-        ur = cp.ok ? Mr / Math.max(cp.phiMn, 1e-9) : Infinity
-        if (!worst || ur > worst.ur) worst = { ur, Pu, Mx: q.Mxb, My: q.Myb, Mr, phiMn: cp.phiMn, combo: q.c.id }
-      }
-    }
+    const sec = pedSection(p, prc), { poly, bars, Ag, ab } = sec, As = prc.n * ab, rho = As / Ag
+    const mn = pedAsMin(p, prc)
+    const worst = pedWorst(p, sec, pedEnv[k], prc)
     let vw = null
     for (const q of pedEnv[k]) {
       const Vu = Math.hypot(q.Vx, q.Vy), bw = Math.min(...pedSq(p)) * 1000, dd = 0.8 * Math.max(...pedSq(p)) * 1000
@@ -305,7 +357,7 @@ export function analyzeFooting(m, combos, soil, crit, rc, prc) {
       const phiVc = 0.75 * vcP * bw * dd / 1000
       if (!vw || Vu / phiVc > vw.ur) vw = { Vu, phiVc, ur: Vu / phiVc, combo: q.c.id }
     }
-    return { poly, bars, Ag, rho, worst, vw }
+    return { poly, bars, Ag, As, rho, AsMin: mn.AsMin, rhoMin: mn.rmin, nMin: mn.nRaw, nStep: mn.n, shape: p.shape, worst, vw }
   })
 
   // ---- daftar pemeriksaan
@@ -339,7 +391,11 @@ export function analyzeFooting(m, combos, soil, crit, rc, prc) {
   pedRes.forEach((p, k) => {
     const nm = m.peds.length > 1 ? ` ${k + 1}` : ""
     if (p.worst) checks.push(chk(gP, L(`Interaksi P–M pedestal${nm} (${prc.n} D${prc.db})`, `P–M interaction, pedestal${nm} (${prc.n} D${prc.db})`), "SNI 2847 §22.4", p.worst.ur, 1, "", { note: p.worst.combo, d: 3 }))
-    if (m.pedKind !== "plinth") checks.push(chk(gP, L(`Rasio tulangan pedestal${nm} ≥ 0,005·Ag,eff (Ag,eff = Ag/2)`, `Pedestal${nm} reinforcement ≥ 0.005·Ag,eff (Ag,eff = Ag/2)`), "SNI 2847 §16.3.4.1, §10.3.1.2", p.rho * 100, 0.25, "%", { mode: "ge", d: 2 }))
+    if (m.pedKind !== "plinth") {
+      const rp = nf(p.rhoMin * 100, 2), sh = PED_NAME()[p.shape] || p.shape
+      checks.push(chk(gP, L(`Tulangan pedestal${nm} As ≥ ${rp}%·Ag (Ag ${sh} ${nf(p.Ag / 1e6, 3)} m²)`, `Pedestal${nm} steel As ≥ ${rp}%·Ag (Ag ${sh} ${nf(p.Ag / 1e6, 3)} m²)`), "SNI 2847 §10.6.1.1 + §10.3.1.2 (1% × Ag/2)", p.As, p.AsMin, "mm²",
+        { mode: "ge", d: 0, note: `${prc.n} D${prc.db} · ρ ${nf(p.rho * 100, 2)}% · ${L("perlu", "need")} ≥ ${p.nMin} D${prc.db}` }))
+    }
     if (p.vw) checks.push(chk(gP, L(`Geser pedestal${nm} (beton saja)`, `Pedestal${nm} shear (concrete only)`), CODE.aci === "14" ? "SNI 2847 §22.5.6" : "ACI 318-19 Tabel 22.5.5.1(a)", p.vw.Vu, p.vw.phiVc, "F", { note: p.vw.combo, d: 1 }))
   })
   const badL = lrfd.filter((r) => !r.valid)
